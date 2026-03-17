@@ -322,15 +322,21 @@ let lines = [
 ];
 
 let curves = [
-new Curve(10, 100, 120, 150, 220, 50, 330, 100, 30, 0),
+new Curve(10, 100, 120, 190, 220, 50, 330, 100, 30, -0.01),
+new Curve(730, 200, 1000, 300, 1200, 100, 1300, 200, 30, -0.045),
+new Curve(1300, 200, 1500, 200, 1500, 400, 1300, 400),
+new Curve(1300, 170, 1530, 170, 1530, 430, 1300, 430),
+new Curve(1300, 430, 1000, 550, 700, 470, 500, 450, 30, -0.01555),
+new Curve(330, 200, 100, 200, 100, 300, 500, 600, 30, 0),
+new Curve(500, 600, 700, 800, 900, 500, 1100, 650)
 ];
 
 let balls = [
-	new Ball(ballSize+17, ballSize, 0, 0, 0)
+	new Ball(ballSize+17, ballSize, 0, 0, 0.5)
 ];
 
 let rects = [
-	new Rect(100, 200, 200, 20)
+	new Rect(330, 100, 400, 100, -0.01)
 ];
 
 for(let i=0; i < 50; i++){
@@ -373,6 +379,11 @@ function draw(){
 	ctx.strokeStyle = 'black';
 
 	for (let rect of rects) {
+		if (typeof rect.fricVal === 'number' && rect.fricVal < 0) {
+			ctx.strokeStyle = 'red';
+		} else {
+			ctx.strokeStyle = 'black';
+		}
 		ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
 	}
 
