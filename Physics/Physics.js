@@ -330,7 +330,7 @@ let balls = [
 ];
 
 let rects = [
-
+	new Rect(100, 200, 200, 20)
 ];
 
 for(let i=0; i < 50; i++){
