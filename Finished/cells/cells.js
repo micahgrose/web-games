@@ -5,8 +5,7 @@ const randBtn = document.getElementById('randGen');
 const randIn = document.getElementById('randGenIn');
 const overlaySelect = document.getElementById('overlaySelect');
 let overlay = true;
-overlaySelect.addEventListener('change', () => {
-	overlay = !overlay;
+
 });
 const x1in = document.getElementById('x1in');
 const x2in = document.getElementById('x2in');
