@@ -307,7 +307,7 @@ function randomCurve() {
 	return new Curve(rx(), ry(), rx(), ry(), rx(), ry(), rx(), ry(), 30, 0);
 }
 
-let curves = [
+let curves = 
 new Curve(10, 100, 120, 150, 220, 50, 330, 100, 30, 0),
 randomCurve()
 ];
