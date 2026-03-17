@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>conveyor</title>
+		<style>
+			body{
+				overflow:hidden;
+				user-select: none;
+				font-family: Courier New, monospace;
+			}
+			#buyHold{
+				z-index:5;
+				width: 50%;
+				height: 10.5%;
+				margin-left:25%;
+				top:85%;
+				background-color:grey;
+				position:fixed;
+				background-image: url('Images/buyHoldBack.png');
+			}
+			#moneyHold{
+				position:fixed;
+				font-size:30px;
+				color:lawngreen;
+			}
+			#moneyHold p{
+				font-size:20px;
+				color:red;
+			}
+			#msgHold{
+				position:fixed;
+				width:100%;
+				text-align:center;
+				opacity: 1;
+				color:red;
+				z-index:10;
+			}
+			#msgHold h1{
+				opacity:0;
+			}
+			@keyframes msgAlert{
+				from{opacity: 1}
+				to{opacity: 0}
+			}
+			#conveyorBuy, #drillBuy, #collectorBuy, #smelterBuy{
+				float:left;
+				margin-left:10%;
+				width:50px;
+				height:100%;
+				font-size:10px;
+				color:white;
+			}
+			#conveyorBuy img, #drillBuy img, #collectorBuy img, #smelterBuy img{
+				width:50px;
+			}
+			#upHold button{
+				width:100%;
+				font-family: Courier New, monospace;
+				color:red;
+				background-color:burlywood;
+			}
+			#upHold{
+				width:15vw;
+				height:100vh;
+				position:fixed;
+				background-color:lightgrey;
+				z-index:100;
+				font-size:14px;
+				transition:all .4s;
+			}
+			.upHoldShown{
+				left:85vw;
+			}
+			.upHoldHidden{
+				left:101vw;
+			}
+			#upgradeHide{
+				position:fixed;
+				border:ridge black 2px;
+				z-index:101;
+				transition: all .4s;
+			}
+			.upHideShown{
+				background-color:red;
+				left:85vw;
+			}
+			.upHideHidden{
+				background-color:green;
+				left:98vw;
+			}
+			#gameHolder{
+				width:100%;
+				height:400vh;
+				background-image: url('Images/ground.png');
+				background-size:100px;
+				position:relative;
+			}
+			.conveyor{
+				z-index:2;
+			}
+			.shadow{
+				z-index:5;
+				opacity: .7;
+				filter: sepia(100%);
+			}
+			.resource{
+				z-index:3;
+			}
+			.conveyorShadow, .conveyor{
+				background-image: url('Images/conveyor.png');
+			}
+			.conveyor, .shadow, .resource, .vein, .drill, .collector, .smelter{
+				width: 50px;
+				height: 50px;
+				background-size: 50px;
+				position:absolute;
+			}
+			.copperVein{
+				background-image:url('Images/copperVein.png');
+			}
+			.ironVein{
+				background-image:url('Images/ironVein.png');
+			}
+			.drill, .drillShadow{
+				background-image:url('Images/drill.gif');
+			}
+			.collector, .collectorShadow{
+				background-image:url('Images/collector.png');
+				z-index:4;
+			}
+			.smelter, .smelterShadow{
+				background-image:url('Images/smelter.png');
+				z-index:400;
+			}
+			.removeShadow{
+				background-color:red;
+				z-index:100;
+			}
+		</style>
+	</head>
+	<body>
+		<div id='gameHolder'>
+			<div id='moneyHold'>
+				<h3 id='moneyTxt'>500$</h3>
+				<p><b>E to delete</b></p>
+			</div>
+
+			<div id='msgHold'></div>
+
+			<div id='buyHold'>
+				<div id='conveyorBuy' onclick='gridShadow("conveyor")'>
+					<p>(1)Conveyor: 50$</p>
+					<img src='Images/conveyor.png'/>
+				</div>
+
+				<div id='drillBuy' onclick='gridShadow("drill")'>
+					<p>(2)Drill: 200$</p>
+					<img src='Images/drill.gif'/>
+				</div>
+
+				<div id='collectorBuy' onclick='gridShadow("collector")'>
+					<p>(3)Collector: 100$</p>
+					<img src='Images/collector.png'/>
+				</div>
+
+				<div id='smelterBuy' onclick='gridShadow("smelter")'>
+					<p>(4)smelter: 1500$</p>
+					<img src='Images/smelter.png'/>
+				</div>
+			</div>
+
+			<button id='upgradeHide' class='upHideShown' onclick='hideUp()'><b>&rarr;</b></button>
+			<div id='upHold' class='upHoldShown'>
+				<br>
+				<p id='conveyorStat'>Conveyor: MK 1</p>
+				<p id='drillStat'>Drill: MK 1</p>
+				<p id='smelterStat'>Smelter: MK 1</p>
+				<button id='conveyorUp'>Upgrade conveyor: 5000$</button>
+				<button id='drillUp'>Upgrade drill: 15000$</button>
+				<button id='smelterUp'>Upgrade smelter: 50000$</button>
+			</div>
+		</div>
+
+		<script src='Conveyor.js'></script>
+</html>

@@ -1,0 +1,50 @@
+<DOCTYPE html>
+<html>
+	<head>
+		<title>AI Test</title>
+		<style>
+			#object{
+				width:10px;
+				height:10px;
+				background-color:black;
+				position:absolute;
+				top:240px;
+			}
+			#line{
+				height:500;
+				width:1px;
+				background-color:black;
+				position:absolute;
+				left:500px;
+			}
+		</style>
+	</head>
+	<body>
+		<p>left:blue</p>
+		<p>right:red</p>
+		<div id='object'></div>
+		<div id='line'></div>
+		<script src='percepton.js'></script>
+		<script>
+			const obj = document.getElementById('object');
+			const random = [Math.floor(Math.random()*500) + 240];
+			obj.style.left = random[0] + 'px';
+
+			const learningRate = 0.0001;
+			const desired = random < 500 ? 1 : 0; // 1 is blue 0 is red;
+
+			const neuro = new Perceptron(2, learningRate);
+
+			for(let i = 0; i < 1000; i++){
+				neuro.train(random, desired);
+			}
+
+			let guess = neuro.activate([random, ptron.bias]);
+			if(guess == 0){
+				obj.style.backgroundColor = 'red';
+			} else{
+				obj.style.backgroundColor = 'blue';
+			}
+		</script>
+	</body>
+</html>

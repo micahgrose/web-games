@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<link rel='stylesheet' type='text/css' href='CookieClicker2.0.css'>
+		<title>Cookie Clicker Factory</title>
+	</head>
+	<body ondragstart = 'return false'>
+
+		<!-- blue holder for clicking the cookie dough-->
+
+		<div id='holder'>
+			<div id='cookieDoughBack'>
+				<div id='cookieDoughCounterHolder'>
+					<h2 id='cookieDoughCounter'>0 Cookie Doughs</h2>
+					<p id='perSecCounter'>0 Cookie Doughs Per Second</p>
+				</div>
+				<div id='cookieDoughHolder'>
+					<div id='cookieDough'></div>
+					<img src='Images/light.png' id='glow'>
+				</div>
+			</div>
+
+			<!--conveyor space-->
+			<div id='conveyorGridHolder'>
+
+			</div>
+			
+
+
+			<!--spot to put buying buttons-->
+
+			<div id='buyHolder'>
+				<button onclick='' id='addCursor' class='buyBtn'><h3>Cursor</h3><p id='cursorCostText' class='unaffordable'>15 Cookie Doughs</p><p id='cursorPowerText'>0.1 Per Second</p></button>
+				<button onclick='' id='addGrandma' class='buyBtn'><h3>Grandma</h3><p id='grandmaCostText' class='unaffordable'>100 Cookie Doughs</p><p id='grandmaPowerText'>1 Per Second</p></button>
+				<button onclick='' id='addNursery' class='buyBtn'><h3>Nursery</h3><p id='nurseryCostText' class='unaffordable'>1000 Cookie Doughs</p><p id='nurseryPowerText'>12 Per Second</p></button>
+			</div>
+
+
+			<!--inventory i guess you could call it-->
+			<div id='objectHolder'>
+				<div id='conveyorBuyHolder'>100 $</div>
+			</div>
+		</div>
+
+		<script src='CookieClicker2.0.js'></script>
+	</body>
+</html>

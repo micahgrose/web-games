@@ -1,0 +1,155 @@
+body{
+	overflow:hidden;
+	user-select:none;
+}
+#holder{
+	background-color:#895129;
+	width:98vw;
+	height:46vw;
+	padding:1vw;
+}
+#cookieDoughBack{
+	display:grid;
+	float:left;
+	place-items:center;
+	text-align:center;
+	width:25vw;
+	height:46vw;
+	filter:brightness(115%);
+	background-image: url('Images/background.jpg');
+}
+#cookieDoughCounterHolder{
+	width:15vw;
+	height:5vw;
+	border:lightblue dashed 1px;
+}
+#cookieDoughCounter, #perSecCounter{
+	font-weight:1;
+	color:white;
+	font-family:Brush Script MT;
+}
+#cookieDoughHolder{
+	position:relative;
+	margin-bottom:15vw;
+	width:10vw;
+	height:10vw;
+}
+#cookieDough{
+	position:absolute;
+	z-index:2;
+	width:100%;
+	height:100%;
+	background-image: url('Images/cookieDough.png');
+	background-repeat: no-repeat;
+	background-size:10vw 10vw;
+	transition:all .2s;
+}
+#cookieDough:active{
+	width:11vw;
+	height:11vw;
+	background-size:11vw 11vw;
+	left:-.25vw;
+	top:-.25vw;
+}
+#glow{
+	position:absolute;
+	left: -4.75vw;
+	top:-4.75vw;
+	z-index:1;
+	filter:brightness(150%) blur(5px);
+	width:20vw;
+	height:20vw;
+	animation:glow 5s infinite;
+}
+@keyframes glow{
+	0%{width:20vw; height:20vw; left:-4.75vw; top:-4.75vw;}
+	50%{width:25vw; height:25vw; left:-7.5vw; top:-7.5vw;}
+	100%{width:20vw; height:20vw; left:-4.75vw; top:-4.75vw;}
+}
+#buyHolder{
+	z-index:2;
+	float:right;
+	width:14vw;
+}
+.buyBtn{
+	position:static;
+	background-image:url('Images/buyBack.jpg');
+	width:13vw;
+	height:3vw;
+	float:right;
+}
+#addCursor{
+	padding-top:0px;
+}
+.buyBtn > h3, .buyBtn > h3 + p, .buyBtn p + p{
+	font-family: cursive;
+	margin:0px;
+	float:inline-start;
+}
+.buyBtn > h3{
+	font-size:20px;
+}
+.buyBtn > h3 + p{
+	float:right;
+}
+.buyBtn p + p{
+	float:right;
+}
+.affordable{
+	color:green;
+}
+.unaffordable{
+	color:red;
+}
+#objectHolder{
+	z-index:3;
+	position:fixed;
+	background-color:grey;
+	opacity:.9;
+	width:20vw;
+	height:5vw;
+	margin-top:42vw;
+	margin-left:40vw;
+}
+#conveyorBuyHolder{
+	color:white;
+	width:4vw;
+	height:4vw;
+	margin-left:1vw;
+	margin-top:.5vw;
+	background-size:4vw;
+	background-reapeat: no-repeat;
+}
+#conveyorGridHolder{
+	position:relative;
+	z-index:0;
+	position:absolute;
+	left:26.5vw;
+	width:59vw;
+	height:45vw;
+	background-image: url('Images/tile.jpg');
+	background-size:50vw;
+}
+.conveyorShadow{
+	opacity:.7;
+	pointer-events:none;
+	background-image: url('Images/conveyorTrue.png');
+}
+.conveyor, #conveyorBuyHolder{
+	background-image: url('Images/conveyor.png');
+}
+.conveyor, .conveyorShadow{
+	position:absolute;
+	z-index:3;
+	width:50px;
+	height:50px;
+	background-size:50px;
+}
+.cookie{
+	width:50px;
+	height:50px;
+	background-size:50px;
+}
+.chocolateChip{
+	background-image: url('Images/chocolateChipCookie.png');
+}

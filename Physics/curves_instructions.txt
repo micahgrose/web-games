@@ -1,0 +1,172 @@
+Curves — Detailed Instructions
+
+Overview
+- This document explains common curve types used in graphics, physics, and animations, the parameters they use, and practical JavaScript examples you can drop into `Physics.js` or other files.
+- Key concept: most curves are parameterized by t where t ranges from 0 to 1. Evaluating the curve at different t values gives points along the curve.
+
+1) Linear Interpolation (Lerp)
+- Purpose: straight-line interpolation between two points.
+- Parameters: P0 (start), P1 (end), t (0..1).
+- Math: P(t) = P0 + (P1 - P0) * t
+- JS example:
+  function lerp(P0, P1, t) {
+    return { x: P0.x + (P1.x - P0.x) * t, y: P0.y + (P1.y - P0.y) * t };
+  }
+- Use: simple motion, mixing values.
+
+2) Quadratic Bezier
+- Purpose: simple curved path controlled by one control point.
+- Parameters: P0 (start), P1 (control), P2 (end), t(0..1).
+- Math: B(t) = (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
+- JS example:
+  function quadBezier(P0, P1, P2, t) {
+    const u = 1 - t;
+    const tt = t * t;
+    const uu = u * u;
+    return {
+      x: uu * P0.x + 2 * u * t * P1.x + tt * P2.x,
+      y: uu * P0.y + 2 * u * t * P1.y + tt * P2.y
+    };
+  }
+- Notes: control point P1 'pulls' the curve toward it.
+
+3) Cubic Bezier
+- Purpose: flexible curve with two control points, used in CSS transitions and vector graphics.
+- Parameters: P0, P1, P2, P3, t.
+- Math: B(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3
+- JS example:
+  function cubicBezier(P0,P1,P2,P3,t){
+    const u = 1 - t;
+    const tt = t*t, uu = u*u, ttt = tt*t, uuu = uu*u;
+    return {
+      x: uuu*P0.x + 3*uu*t*P1.x + 3*u*tt*P2.x + ttt*P3.x,
+      y: uuu*P0.y + 3*uu*t*P1.y + 3*u*tt*P2.y + ttt*P3.y
+    };
+  }
+- Control: P1 affects the start tangent, P2 affects the end tangent.
+
+4) Rational Bezier / NURBS (brief)
+- Purpose: represent conic sections and more complex shapes using weights.
+- Parameters: control points Pi, weight wi, knots (for NURBS), degree.
+- Practical note: use a library (e.g., verb.js) for heavy NURBS work.
+
+5) Catmull-Rom Splines (interpolating spline)
+- Purpose: smooth curve passing through a sequence of points.
+- Parameters: P0, P1, P2, P3 (four consecutive points), t, optional tension (commonly 0.5).
+- Math (one common form):
+  You compute a tangents based on neighboring points and interpolate using Hermite basis.
+- JS example (centripetal Catmull-Rom simplified):
+  function catmullRom(P0,P1,P2,P3,t){
+    const t2 = t*t, t3 = t2*t;
+    return {
+      x: 0.5*( (2*P1.x) + (-P0.x+P2.x)*t + (2*P0.x-5*P1.x+4*P2.x-P3.x)*t2 + (-P0.x+3*P1.x-3*P2.x+P3.x)*t3 ),
+      y: 0.5*( (2*P1.y) + (-P0.y+P2.y)*t + (2*P0.y-5*P1.y+4*P2.y-P3.y)*t2 + (-P0.y+3*P1.y-3*P2.y+P3.y)*t3 )
+    };
+  }
+- Use: camera paths, object tracks through given waypoints.
+
+6) Hermite Curves (including Cubic Hermite)
+- Purpose: define curve by endpoints and tangents (derivatives) at endpoints.
+- Parameters: P0, P1, T0 (tangent at P0), T1 (tangent at P1), t.
+- Math: use Hermite basis functions h00,h10,h01,h11 and combine positions and tangents.
+- Use: when you need explicit control of slope at ends.
+
+7) Parametric Circles / Arcs
+- Purpose: circles and arcs defined by center, radius, angle range.
+- Parameters: center C, radius r, startAngle, endAngle, t (0..1 maps to angle).
+- Math: angle = startAngle + (endAngle-startAngle)*t; P = C + r*(cos(angle), sin(angle))
+- JS example:
+  function arc(C, r, startA, endA, t){
+    const a = startA + (endA - startA) * t;
+    return { x: C.x + r * Math.cos(a), y: C.y + r * Math.sin(a) };
+  }
+
+8) Easing Curves (animation timing)
+- Purpose: non-linear t->progress functions for animations.
+- Common functions: linear(t)=t, easeInQuad(t)=t^2, easeOutQuad(t)=1-(1-t)^2, easeInOutCubic(t)
+- Cubic-bezier: defined by four scalar control points in 1D (CSS uses (x1,y1,x2,y2)).
+- JS example (easeInOutCubic):
+  function easeInOutCubic(t){
+    return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3)/2;
+  }
+
+9) Practical parameters explained
+- t: progression parameter (0..1). For time-based animation, map elapsed/timeToComplete to t and clamp 0..1.
+- Control points (Pi): vectors that shape the curve. For Beziers, interior control points do not lie on the curve necessarily.
+- Tangents: derivative vectors at endpoints; useful in Hermite and spline formulations.
+- Degree: polynomial degree; higher degree = more freedom but more computation.
+- Knots: for B-splines/NURBS, sequence defining parameterization intervals.
+- Weights: influence of control points in rational curves.
+- Tension/bias/continuity: spline-specific parameters altering how sharply the curve follows points.
+ - samples: integer number of subdivisions when sampling the curve for drawing or physics (commonly 16..256).
+ - fricVal: (placed after `samples`) numeric per-curve friction override that is added to the normal friction calculation. Default is `0` which preserves normal behavior. Negative values reduce friction and create a boost-like effect.
+
+10) Tips and best practices
+- For stable, smooth motion, subdivide t uniformly but consider arc-length reparameterization if constant speed is required.
+- For visuals, sample many t values and draw line segments between successive points.
+- Use quadratic for simple curves, cubic for most flexible single-segment curves, and splines for sequences of points.
+- For interactive editing, expose control points and allow dragging them; recompute samples on change.
+- Use libraries when available: two.js, paper.js, d3-shape, or custom small utilities for specific curves.
+
+11) Example: Draw a cubic Bezier path (pseudo-usage)
+- Points:
+  const P0={x:10,y:10}, P1={x:50,y:100}, P2={x:150,y:-40}, P3={x:200,y:80};
+ - Sample and draw (note `samples` then `fricVal`):
+   const samples = 64;            // number of subdivisions
+   const fricVal = 0;             // per-curve friction override (0 = normal). Negative => boost-like
+   let pts = [];
+   for(let i=0;i<=samples;i++){
+     const t = i/samples;
+     pts.push(cubicBezier(P0,P1,P2,P3,t));
+   }
+  // then render line segments between pts[i] -> pts[i+1]
+
+11a) Helper: sampling wrapper with `fricVal`
+- Use this wrapper to centralize how `fricVal` affects sampling or runtime behavior.
+  function sampleCurve(curveFn, params, samples = 64, fricVal = 0, options = {}) {
+    const pts = [];
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      // curveFn is expected to be a function/closure that accepts (...params, t)
+      const p = curveFn(...params, t);
+      // Example: apply a visual or physical modifier when fricVal is negative (boost-like)
+      if (fricVal < 0 && options.applyBoostToPoints) {
+        pts.push(options.applyBoostToPoints(p, i, t) || p);
+      } else {
+        pts.push(p);
+      }
+    }
+    return pts;
+  }
+
+11b) Example: Use `fricVal` to create a boost-like curve
+- A negative `fricVal` reduces friction along the curve and creates a boost-like effect.
+  // Create a curve with negative fricVal (boost)
+  const boostCurve = {
+    curveFn: cubicBezier,
+    params: [P0, P1, P2, P3],
+    samples: 128,
+    fricVal: -0.05
+  };
+
+  // Sample it using the helper (pass fricVal)
+  const sampled = sampleCurve(boostCurve.curveFn, boostCurve.params, boostCurve.samples, boostCurve.fricVal, {
+    applyBoostToPoints: (p, i, t) => p // placeholder: you could offset or color points differently
+  });
+
+  // For runtime physics, your engine should add `fricVal` into the friction calculation along curve collisions.
+
+12) Example: Constant-speed sampling (approximate)
+- Pre-sample curve at many t values, compute cumulative distances, then build a function that maps desired arc-length fraction s to the nearest t by lookup or binary search.
+
+13) Quick reference formulas
+- Lerp: P = P0 + (P1-P0)*t
+- Quad Bezier: (1-t)^2 P0 + 2(1-t)t P1 + t^2 P2
+- Cubic Bezier: (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3
+
+If you want, I can:
+- Insert selected examples directly into `Physics.js`.
+- Add visual demo HTML that draws and animates these curves.
+- Create short helper functions file (e.g., `curveUtils.js`).
+
+End of document.
