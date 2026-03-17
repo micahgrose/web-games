@@ -77,7 +77,7 @@ class Ball{
 		this.constraintCount = 0;
 		this.destroyed = false;
 	}
-	move(){
+	move(lines = []){
 		// if static, skip movement entirely
 		if (this.isStatic) return;
 		
@@ -372,7 +372,13 @@ function draw(){
 
 	ctx.strokeStyle = 'black';
 
-	balls.forEach(b => b.move());
+	for (let rect of rects) {
+		ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+	}
+
+	const rectLines = rects.flatMap(r => r.getLines());
+	const allLines = [...lines, ...rectLines];
+	balls.forEach(b => b.move(allLines));
 
 	// remove destroyed balls
 	balls = balls.filter(b => !b.destroyed);
