@@ -45,21 +45,25 @@ class Curve{
 }
 
 class Rect {
-	constructor(x, y, w, h, fricVal = 0) {
+	constructor(x, y, w, h, fricVal = 0, top = true, right = true, bottom = true, left = true) {
 		this.x = x;
 		this.y = y;
 		this.w = w;
 		this.h = h;
 		this.fricVal = fricVal;
+		this.top = top;
+		this.right = right;
+		this.bottom = bottom;
+		this.left = left;
 	}
 
 	getLines() {
-		return [
-			new Line(this.x,        this.y,        this.x + this.w, this.y,        this.fricVal), // top
-			new Line(this.x + this.w, this.y,      this.x + this.w, this.y + this.h, this.fricVal), // right
-			new Line(this.x,        this.y + this.h, this.x + this.w, this.y + this.h, this.fricVal), // bottom
-			new Line(this.x,        this.y,        this.x,          this.y + this.h, this.fricVal), // left
-		];
+		const result = [];
+		if (this.top)    result.push(new Line(this.x,          this.y,          this.x + this.w, this.y,          this.fricVal));
+		if (this.right)  result.push(new Line(this.x + this.w, this.y,          this.x + this.w, this.y + this.h, this.fricVal));
+		if (this.bottom) result.push(new Line(this.x,          this.y + this.h, this.x + this.w, this.y + this.h, this.fricVal));
+		if (this.left)   result.push(new Line(this.x,          this.y,          this.x,          this.y + this.h, this.fricVal));
+		return result;
 	}
 }
 
@@ -336,7 +340,7 @@ let balls = [
 ];
 
 let rects = [
-	new Rect(330, 100, 400, 100, -0.01)
+	new Rect(330, 100, 400, 100, -0.01, true, true, false, false)
 ];
 
 for(let i=0; i < 50; i++){
@@ -379,12 +383,13 @@ function draw(){
 	ctx.strokeStyle = 'black';
 
 	for (let rect of rects) {
-		if (typeof rect.fricVal === 'number' && rect.fricVal < 0) {
-			ctx.strokeStyle = 'red';
-		} else {
-			ctx.strokeStyle = 'black';
-		}
-		ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+		ctx.strokeStyle = (typeof rect.fricVal === 'number' && rect.fricVal < 0) ? 'red' : 'black';
+		ctx.beginPath();
+		if (rect.top)    { ctx.moveTo(rect.x,         rect.y);         ctx.lineTo(rect.x + rect.w, rect.y); }
+		if (rect.right)  { ctx.moveTo(rect.x + rect.w, rect.y);        ctx.lineTo(rect.x + rect.w, rect.y + rect.h); }
+		if (rect.bottom) { ctx.moveTo(rect.x,         rect.y + rect.h); ctx.lineTo(rect.x + rect.w, rect.y + rect.h); }
+		if (rect.left)   { ctx.moveTo(rect.x,         rect.y);         ctx.lineTo(rect.x,          rect.y + rect.h); }
+		ctx.stroke();
 	}
 
 	const rectLines = rects.flatMap(r => r.getLines());
