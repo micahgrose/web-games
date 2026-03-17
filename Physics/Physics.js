@@ -44,6 +44,25 @@ class Curve{
 	}
 }
 
+class Rect {
+	constructor(x, y, w, h, fricVal = 0) {
+		this.x = x;
+		this.y = y;
+		this.w = w;
+		this.h = h;
+		this.fricVal = fricVal;
+	}
+
+	getLines() {
+		return [
+			new Line(this.x,        this.y,        this.x + this.w, this.y,        this.fricVal), // top
+			new Line(this.x + this.w, this.y,      this.x + this.w, this.y + this.h, this.fricVal), // right
+			new Line(this.x,        this.y + this.h, this.x + this.w, this.y + this.h, this.fricVal), // bottom
+			new Line(this.x,        this.y,        this.x,          this.y + this.h, this.fricVal), // left
+		];
+	}
+}
+
 const ballSize = 5;
 
 class Ball{
@@ -301,19 +320,19 @@ class DestructorBall extends Ball {
 let lines = [
 	
 ];
-function randomCurve() {
-	let rx = () => Math.random() * c.width;
-	let ry = () => Math.random() * c.height;
-	return new Curve(rx(), ry(), rx(), ry(), rx(), ry(), rx(), ry(), 30, 0);
-}
 
 let curves = [
 new Curve(10, 100, 120, 150, 220, 50, 330, 100, 30, 0),
-randomCurve()
 ];
+
 let balls = [
 	new Ball(ballSize+17, ballSize, 0, 0, 0)
-]
+];
+
+let rects = [
+
+];
+
 for(let i=0; i < 50; i++){
 	
 }
