@@ -322,7 +322,11 @@ class DestructorBall extends Ball {
 }
 
 let lines = [
-	
+new Line(1200, 75, 1800, 75),
+new Line(1900, 0, 1900, 800),
+new Line(1800, 75, 1875, 150),
+new Line(1875, 150, 1875, 800),
+new Line(1900, 850, 0, 900)
 ];
 
 let curves = [
@@ -332,15 +336,25 @@ new Curve(1300, 200, 1500, 200, 1500, 400, 1300, 400),
 new Curve(1300, 170, 1530, 170, 1530, 430, 1300, 430),
 new Curve(1300, 430, 1000, 550, 700, 470, 500, 450, 30, -0.01555),
 new Curve(330, 200, 100, 200, 100, 300, 500, 600, 30, 0),
-new Curve(500, 600, 700, 800, 900, 500, 1100, 650)
+new Curve(500, 600, 800, 800, 1000, 400, 1500, 600),
+new Curve(1500, 570, 1550, 590, 1550, 590, 1500, 700),
+new Curve(1500, 700, 1300, 1000, 0, 700, 150, 200, 40, -0.0225),
+new Curve(150, 200, 200, 100, 350, 100, 350, 100),
+new Curve(700, 200, 750, 400, 1000, 425, 1200, 420, 30, -0.045),
+new Curve(1200, 150, 1075, 125, 1075, 0, 1200, 5)
 ];
 
 let balls = [
 	new Ball(ballSize+17, ballSize, 0, 0, 0.5)
 ];
 
+setInterval(() => {
+	balls.push(new Ball(ballSize+17, ballSize, 0, 0, 0.5));
+}, 7500);
+
 let rects = [
-	new Rect(330, 100, 400, 100, -0.01, true, true, false, false)
+	new Rect(330, 100, 400, 100, -0.01, true, true, false, false),
+	new Rect(330, 130, 370, 70, 0.15)
 ];
 
 for(let i=0; i < 50; i++){
