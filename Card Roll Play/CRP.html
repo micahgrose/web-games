@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Roll Play</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f4f4f4;
+            color: #222;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+        }
+
+        .app-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .panel {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            padding: 18px;
+            flex: 1;
+        }
+
+        .deck-panel {
+            max-width: 360px;
+        }
+
+        .panel h2 {
+            margin-top: 0;
+            margin-bottom: 14px;
+            font-size: 1.1rem;
+        }
+
+        #chatControls,
+        #deckControls {
+            margin-bottom: 14px;
+        }
+
+        #chatControls input {
+            width: calc(100% - 96px);
+            padding: 8px 10px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        #chatControls button,
+        #deckControls button {
+            padding: 10px 14px;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #chatControls button:hover,
+        #deckControls button:hover {
+            background: #125ad9;
+        }
+
+        #chatHistory {
+            min-height: 240px;
+            max-height: 460px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            padding: 12px;
+            background: #fafafa;
+        }
+
+        .chat-message {
+            margin-bottom: 10px;
+        }
+
+        .chat-message.user strong,
+        .chat-message.user span {
+            color: #1f70ff;
+        }
+
+        .chat-message.assistant strong,
+        .chat-message.assistant span {
+            color: #222;
+        }
+
+        #responseContainer {
+            margin-top: 14px;
+            min-height: 40px;
+        }
+
+        .card-area {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            margin-top: 16px;
+        }
+
+        .card-slot {
+            width: 150px;
+            min-height: 220px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            background: #fafafa;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.02);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+        }
+
+        .card-slot h3 {
+            margin: 0 0 10px 0;
+            font-size: 0.95rem;
+        }
+
+        .card-back,
+        .card-front {
+            width: 100%;
+            height: 160px;
+            border-radius: 12px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        .card-back {
+            background: #c32026;
+            color: #fff;
+            border: 8px solid #fff;
+            border-radius: 12px;
+            box-sizing: border-box;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+        }
+
+        .card-back .back-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80px;
+            height: 80px;
+        }
+
+        .card-back .back-icon-line {
+            position: absolute;
+            background: #fff;
+            border-radius: 6px;
+            opacity: 0.9;
+        }
+
+        .card-back .back-icon-line.horizontal {
+            width: 56px;
+            height: 10px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .card-back .back-icon-line.vertical {
+            width: 10px;
+            height: 56px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .card-back .back-icon-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.35);
+        }
+
+        .card-front {
+            background: #ffffff;
+            border: 1px solid #ccc;
+            color: #222;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        .card-face-corner {
+            position: absolute;
+            font-size: 1rem;
+            line-height: 1.1;
+            white-space: nowrap;
+        }
+
+        .card-face-corner.top-left {
+            top: 12px;
+            left: 12px;
+            text-align: left;
+        }
+
+        .card-face-corner.bottom-right {
+            bottom: 12px;
+            right: 12px;
+            text-align: right;
+            transform: rotate(180deg);
+        }
+
+        .card-face-center {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            gap: 0;
+            width: 100%;
+            height: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        .card-pip {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+
+        .card-face-center .symbol {
+            font-size: 3rem;
+            line-height: 1;
+        }
+
+        .face-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 8px;
+        }
+
+        .face-card-title,
+        .face-card-subtitle {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            opacity: 0.8;
+        }
+
+        .face-card-portrait {
+            width: 86px;
+            height: 86px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3rem;
+            background: rgba(0,0,0,0.05);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+        }
+
+        .face-card.red .face-card-portrait {
+            background: rgba(195,32,38,0.12);
+        }
+
+        .face-card.black .face-card-portrait {
+            background: rgba(16,24,32,0.08);
+        }
+        .card-front.red {
+            color: #c32026;
+        }
+
+        .card-front.black {
+            color: #101820;
+        }
+    </style>
+</head>
+<body>
+    <h1>Card Roll Play</h1>
+    <div class="app-container">
+        <section class="panel chat-panel">
+            <h2>AI Chat</h2>
+            <div id="chatControls">
+                <input type="text" id="messageInput" placeholder="Enter your message..." />
+                <button id="submitBtn">Submit</button>
+            </div>
+            <div id="chatHistory"></div>
+            <div id="responseContainer"></div>
+        </section>
+
+        <section class="panel deck-panel">
+            <h2>Deck Controls</h2>
+            <div id="deckControls">
+                <button id="shuffleBtn">Shuffle</button>
+                <button id="drawBtn">Draw</button>
+            </div>
+            <div class="card-area">
+                <div class="card-slot">
+                    <h3>Deck</h3>
+                    <div id="deckVisual" class="card-back">
+                        <div class="back-icon">
+                            <div class="back-icon-line horizontal"></div>
+                            <div class="back-icon-line vertical"></div>
+                            <div class="back-icon-center"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-slot">
+                    <h3>Drawn Card</h3>
+                    <div id="drawnCardVisual" class="card-front"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="CRP.js"></script>
+</body>
+</html>
