@@ -1,3 +1,4 @@
+// const GROQ_API_KEY = 'REDACTED_API_KEY';
 const GROQ_API_KEY = 'REPLACE_WITH_GROQ_API_KEY';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -5,6 +6,7 @@ const suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
 const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 let deck = createDeck();
 let lastDrawnCard = null;
+let lastDrawnCardValue = null;
 
 function createDeck() {
     return suits.flatMap(suit => ranks.map(rank => ({ rank, suit })));
@@ -37,11 +39,22 @@ function getSuitColor(suit) {
 
 function getRankCount(rank) {
     switch (rank) {
-        case 'A': return 1;
+        case 'A': return 14;
         case 'J': return 11;
         case 'Q': return 12;
         case 'K': return 13;
         default: return Number(rank) || 0;
+    }
+}
+
+function getCardValue(card) {
+    if (!card) return 0;
+    switch (card.rank) {
+        case 'A': return 14;
+        case 'J': return 11;
+        case 'Q': return 12;
+        case 'K': return 13;
+        default: return Number(card.rank) || 0;
     }
 }
 
@@ -109,13 +122,14 @@ function drawTopCard() {
     }
 
     lastDrawnCard = deck.shift();
+    lastDrawnCardValue = getCardValue(lastDrawnCard);
     return lastDrawnCard;
 }
 
 const conversationHistory = [
     {
         role: 'system',
-        content: 'You are a helpful assistant for Card Roll Play. Remember previous user prompts and use that context to answer new questions.'
+        content: "The user will tell you what they want to be and do in this role play game. After they submit a prompt to you, you decide how much their idea succeeds or fails based on a value they give you as well. 2 is the lowest value and means the prompt fails the most. 14 is the highest value and means the prompt succeeds the most. You will use context and the user's character's current situation to decide what exactly happens. The more complex the prompt, the larger value needed to succeed. Keep your responses concise and focused on the outcome of the user's prompt. Always exclude unimportant details."
     }
 ];
 
@@ -164,8 +178,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('messageInput');
     const chatHistory = document.getElementById('chatHistory');
     const responseContainer = document.getElementById('responseContainer');
-    const shuffleBtn = document.getElementById('shuffleBtn');
-    const drawBtn = document.getElementById('drawBtn');
     const deckVisual = document.getElementById('deckVisual');
     const drawnCardVisual = document.getElementById('drawnCardVisual');
 
@@ -192,11 +204,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         addChatMessage('User', userMessage);
+        drawTopCard();
+        updateDeckDisplay();
+
+        const formattedPrompt = `${userMessage}. Value: ${lastDrawnCardValue}.`;
         responseContainer.innerHTML = '<p><em>Loading...</em></p>';
         submitBtn.disabled = true;
 
         try {
-            const response = await callGroqAPI(userMessage);
+            const response = await callGroqAPI(formattedPrompt);
             addChatMessage('Assistant', response);
             responseContainer.innerHTML = '';
             messageInput.value = '';
@@ -207,15 +223,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    shuffleBtn.addEventListener('click', function() {
-        shuffleDeck();
-        updateDeckDisplay();
-    });
-
-    drawBtn.addEventListener('click', function() {
-        drawTopCard();
-        updateDeckDisplay();
-    });
 
     // Allow submitting by pressing Enter
     messageInput.addEventListener('keypress', function(event) {
@@ -224,5 +231,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    shuffleDeck();
+    shuffleDeck();
+    shuffleDeck();
     updateDeckDisplay();
 });
