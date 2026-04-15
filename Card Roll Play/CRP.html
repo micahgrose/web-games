@@ -11,6 +11,7 @@
             min-height: 100vh;
             background: #f4f4f4;
             color: #222;
+            transition: background-color 0.5s;
         }
 
         h1 {
@@ -34,6 +35,74 @@
             flex: 1;
             display: flex;
             flex-direction: column;
+        }
+
+        .menu {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .menu h2 {
+            font-size: 2rem;
+        }
+
+        .menu label {
+            font-size: 1.2rem;
+        }
+
+        .menu input, .menu button {
+            padding: 10px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        .menu button {
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .menu button:hover {
+            background: #125ad9;
+        }
+
+        .player-setup {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .player-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .player-input input {
+            width: 200px;
+        }
+
+        .player-color {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 1px solid #ccc;
+        }
+
+        .game {
+            display: none;
+        }
+
+        .turn-indicator {
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
         }
 
         .panel h2 {
@@ -323,12 +392,25 @@
 <body>
     <h1>Card Roll Play</h1>
     <div class="app-container">
-        <section class="panel chat-panel">
-            <h2>AI Chat</h2>
+        <section class="panel menu" id="menuPanel">
+            <div class="menu">
+                <h2>Multiplayer Setup</h2>
+                <label for="numPlayers">Number of Players (2-10):</label>
+                <input type="number" id="numPlayers" min="2" max="10" value="2" />
+                <button id="startSetupBtn">Start Setup</button>
+            </div>
+            <div class="player-setup" id="playerSetup" style="display: none;">
+                <h3>Enter Player Names</h3>
+                <div id="playerInputs"></div>
+                <button id="startGameBtn">Start Game</button>
+            </div>
+        </section>
+        <section class="panel game" id="gamePanel">
+            <div class="turn-indicator" id="turnIndicator"></div>
             <div class="chat-main">
                 <div class="chat-content">
                     <div id="chatControls">
-                        <input type="text" id="messageInput" placeholder="Enter your message..." />
+                        <input type="text" id="messageInput" placeholder="Enter your action..." />
                         <button id="submitBtn">Submit</button>
                     </div>
                     <div id="chatHistory"></div>
