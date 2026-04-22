@@ -685,18 +685,23 @@ io.on('connection', (socket) => {
 
         const player = room.players.find(p => p.id === socket.id);
 
+        // Log disconnect to conversation history before removing
+        if (room.started && player && !player.eliminated) {
+            room.conversationHistory.push({ role: 'system', content: `${player.name} has disconnected and is eliminated.` });
+        }
+
+        // Remove from players array so their name/slot is freed and voting works correctly
+        room.players = room.players.filter(p => p.id !== socket.id);
+
+        if (room.players.length === 0) {
+            rooms.delete(roomId);
+            broadcastPublicRooms();
+            return;
+        }
+
+        if (room.hostId === socket.id) room.hostId = room.players[0].id;
+
         if (room.started) {
-            // Mark eliminated rather than removing — preserves array indices and conversation history
-            if (player && !player.eliminated) {
-                player.eliminated = true;
-                room.conversationHistory.push({ role: 'system', content: `${player.name} has disconnected and is eliminated.` });
-            }
-
-            if (room.hostId === socket.id) {
-                const newHost = room.players.find(p => p.id !== socket.id && !p.eliminated);
-                if (newHost) room.hostId = newHost.id;
-            }
-
             const alive = countAlive(room.players);
             if (alive <= 1) {
                 const winner = room.players.find(p => !p.eliminated);
@@ -706,33 +711,18 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            if (room.players[room.currentPlayerIndex]?.id === socket.id) {
+            // Fix out-of-bounds index after removal, then skip eliminated players
+            if (room.currentPlayerIndex >= room.players.length) room.currentPlayerIndex = 0;
+            if (room.players[room.currentPlayerIndex]?.eliminated) {
                 room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
             }
-
-            io.to(roomId).emit('player-left', {
-                players: room.players,
-                currentPlayerIndex: room.currentPlayerIndex,
-                currentPlayerId: room.players[room.currentPlayerIndex]?.id
-            });
-        } else {
-            // Pre-game lobby: remove player entirely
-            room.players = room.players.filter(p => p.id !== socket.id);
-
-            if (room.players.length === 0) {
-                rooms.delete(roomId);
-                broadcastPublicRooms();
-                return;
-            }
-
-            if (room.hostId === socket.id) room.hostId = room.players[0].id;
-
-            io.to(roomId).emit('player-left', {
-                players: room.players,
-                currentPlayerIndex: room.currentPlayerIndex,
-                currentPlayerId: room.players[room.currentPlayerIndex]?.id
-            });
         }
+
+        io.to(roomId).emit('player-left', {
+            players: room.players,
+            currentPlayerIndex: room.currentPlayerIndex,
+            currentPlayerId: room.players[room.currentPlayerIndex]?.id
+        });
 
         if (room.isPublic) broadcastPublicRooms();
     });
