@@ -558,6 +558,8 @@ function resetToLanding(errorMsg) {
     isCounterTarget   = false;
     counterAttackerName = null;
     counterBanner.classList.remove('active');
+    chatQueue.length            = 0;
+    chatAnimating               = false;
     chatHistory.innerHTML       = '';
     responseContainer.innerHTML = '';
     gameOverBanner.style.display = 'none';
