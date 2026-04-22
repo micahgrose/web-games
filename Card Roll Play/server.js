@@ -79,14 +79,79 @@ function broadcastPublicRooms() {
 function scheduleNewGameVote(room) {
     if (room.newGameVoteTimer) clearTimeout(room.newGameVoteTimer);
     room.newGameVoteTimer = setTimeout(() => {
-        if (!rooms.has(room.id) || room.newGameVotes) return;
-        room.newGameVotes = {};
-        room.newGameOrder = [];
-        room.players.forEach(p => { room.newGameVotes[p.id] = null; });
-        room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
-        room.newGameTimer = setTimeout(() => resolveNewGameVotes(room), 30000);
-        io.to(room.id).emit('new-game-vote', { timeoutMs: 30000 });
+        if (!rooms.has(room.id) || room.newGamePhase) return;
+        room.newGameVoteTimer = null;
+        startPlayerVote(room);
     }, 5000);
+}
+
+function startPlayerVote(room) {
+    room.newGamePhase = 'players';
+    room.newGameVotes = {};
+    room.newGameOrder = [];
+    room.players.forEach(p => { room.newGameVotes[p.id] = null; });
+    room.newGameVoteTimer = setTimeout(() => resolvePlayerVote(room), 30000);
+    io.to(room.id).emit('new-game-vote', { phase: 'players', timeoutMs: 30000 });
+}
+
+function startSpectatorVote(room, acceptedPlayerIds, slotsRemaining) {
+    room.newGamePhase = 'spectators';
+    room.spectatorVoteSlots = slotsRemaining;
+    room.spectatorVoteAccepted = [];
+    room.pendingAcceptedPlayerIds = acceptedPlayerIds;
+    room.newGameVotes = {};
+    room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
+    room.newGameVoteTimer = setTimeout(() => resolveSpectatorVote(room), 15000);
+    io.to(room.id).emit('new-game-vote', { phase: 'spectators', slotsAvailable: slotsRemaining, timeoutMs: 15000 });
+}
+
+function resolvePlayerVote(room) {
+    if (room.newGamePhase !== 'players') return;
+    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
+
+    const acceptedPlayerIds = (room.newGameOrder || []).slice();
+    const slotsRemaining = room.maxPlayers - acceptedPlayerIds.length;
+
+    room.newGameVotes = null;
+    room.newGameOrder = null;
+
+    if (slotsRemaining > 0 && room.spectators.length > 0) {
+        startSpectatorVote(room, acceptedPlayerIds, slotsRemaining);
+        return;
+    }
+
+    room.newGamePhase = null;
+
+    if (acceptedPlayerIds.length < 2) {
+        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
+        return;
+    }
+
+    room.hostId = acceptedPlayerIds[0];
+    startNewGame(room, acceptedPlayerIds);
+}
+
+function resolveSpectatorVote(room) {
+    if (room.newGamePhase !== 'spectators') return;
+    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
+
+    const acceptedPlayerIds = room.pendingAcceptedPlayerIds || [];
+    const acceptedSpectatorIds = room.spectatorVoteAccepted || [];
+    const allAccepted = [...acceptedPlayerIds, ...acceptedSpectatorIds];
+
+    room.newGamePhase = null;
+    room.spectatorVoteSlots = null;
+    room.spectatorVoteAccepted = null;
+    room.pendingAcceptedPlayerIds = null;
+    room.newGameVotes = null;
+
+    if (allAccepted.length < 2) {
+        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
+        return;
+    }
+
+    room.hostId = allAccepted[0];
+    startNewGame(room, allAccepted);
 }
 
 function startNewGame(room, acceptedIds) {
@@ -116,6 +181,7 @@ function startNewGame(room, acceptedIds) {
     room.lastDrawnCard = null;
     room.started = true;
     room.newGameVotes = null;
+    room.newGamePhase = null;
     room.playerSetupDone = new Set();
     room.pendingAction = null;
     room.conversationHistory = [
@@ -145,35 +211,6 @@ function startNewGame(room, acceptedIds) {
     broadcastPublicRooms();
 }
 
-function resolveNewGameVotes(room) {
-    if (!room.newGameVotes) return;
-    if (room.newGameTimer) { clearTimeout(room.newGameTimer); room.newGameTimer = null; }
-
-    const order = room.newGameOrder || [];
-    const votes = room.newGameVotes;
-
-    // Players who accepted, in the order they accepted
-    const acceptedPlayerIds = order.filter(id =>
-        room.players.some(p => p.id === id) && votes[id] === true
-    );
-    // Spectators who accepted, in the order they accepted
-    const acceptedSpectatorIds = order.filter(id =>
-        room.spectators.some(s => s.id === id) && votes[id] === true
-    );
-    // Players fill slots first, spectators fill remaining, capped at maxPlayers
-    const allAccepted = [...acceptedPlayerIds, ...acceptedSpectatorIds].slice(0, room.maxPlayers);
-
-    room.newGameVotes = null;
-    room.newGameOrder = null;
-
-    if (allAccepted.length < 2) {
-        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
-        return;
-    }
-
-    room.hostId = allAccepted[0];
-    startNewGame(room, allAccepted);
-}
 
 async function detectEliminationsAI(players, gmResponse) {
     const aliveNames = players.filter(p => !p.eliminated).map(p => p.name);
@@ -656,19 +693,14 @@ io.on('connection', (socket) => {
 
     socket.on('new-game-request', () => {
         const room = rooms.get(socket.data.roomId);
-        if (!room || !room.started || room.newGameVotes) return;
+        if (!room || !room.started || room.newGamePhase) return;
 
         if (room.newGameVoteTimer) {
             clearTimeout(room.newGameVoteTimer);
             room.newGameVoteTimer = null;
         }
 
-        room.newGameVotes = {};
-        room.newGameOrder = [];
-        room.players.forEach(p => { room.newGameVotes[p.id] = null; });
-        room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
-        room.newGameTimer = setTimeout(() => resolveNewGameVotes(room), 30000);
-        io.to(room.id).emit('new-game-vote', { timeoutMs: 30000 });
+        startPlayerVote(room);
     });
 
     socket.on('new-game-response', ({ accept }) => {
@@ -678,15 +710,33 @@ io.on('connection', (socket) => {
 
         room.newGameVotes[socket.id] = accept;
 
-        if (accept && !room.newGameOrder.includes(socket.id)) {
-            room.newGameOrder.push(socket.id);
-        }
-
-        const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
-        if (allVoted) {
-            clearTimeout(room.newGameTimer);
-            room.newGameTimer = null;
-            resolveNewGameVotes(room);
+        if (room.newGamePhase === 'players') {
+            if (accept && !room.newGameOrder.includes(socket.id)) {
+                room.newGameOrder.push(socket.id);
+            }
+            const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
+            if (allVoted) {
+                clearTimeout(room.newGameVoteTimer);
+                room.newGameVoteTimer = null;
+                resolvePlayerVote(room);
+            }
+        } else if (room.newGamePhase === 'spectators') {
+            if (accept && room.spectatorVoteAccepted.length < room.spectatorVoteSlots &&
+                !room.spectatorVoteAccepted.includes(socket.id)) {
+                room.spectatorVoteAccepted.push(socket.id);
+                if (room.spectatorVoteAccepted.length >= room.spectatorVoteSlots) {
+                    clearTimeout(room.newGameVoteTimer);
+                    room.newGameVoteTimer = null;
+                    resolveSpectatorVote(room);
+                    return;
+                }
+            }
+            const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
+            if (allVoted) {
+                clearTimeout(room.newGameVoteTimer);
+                room.newGameVoteTimer = null;
+                resolveSpectatorVote(room);
+            }
         }
     });
 

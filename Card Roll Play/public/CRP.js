@@ -837,12 +837,27 @@ socket.on('game-over', ({ winnerName, players: pl, spectatorCount }) => {
     }
 });
 
-socket.on('new-game-vote', ({ timeoutMs }) => {
+socket.on('new-game-vote', ({ phase, timeoutMs, slotsAvailable }) => {
+    // Phase 'players': only non-spectators vote; spectators see a waiting message
+    if (phase === 'players' && isSpectator) {
+        addChatMessage('System', 'Players are deciding on a new game…', '#888');
+        return;
+    }
+    // Phase 'spectators': only spectators vote; players see an info message
+    if (phase === 'spectators' && !isSpectator) {
+        const s = slotsAvailable === 1 ? '1 slot is' : `${slotsAvailable} slots are`;
+        addChatMessage('System', `${s} open — spectators are being invited to fill them.`, '#6c5ce7');
+        return;
+    }
+
     newGameBtn.style.display = 'none';
     voteTitle.textContent    = 'Play again?';
-    voteSubtitle.textContent = isSpectator
-        ? 'A new game is starting. Do you want to join as a player?'
-        : 'Do you want to join the next game?';
+    if (phase === 'spectators') {
+        const s = slotsAvailable === 1 ? '1 slot is' : `${slotsAvailable} slots are`;
+        voteSubtitle.textContent = `${s} open — first spectator to accept gets in!`;
+    } else {
+        voteSubtitle.textContent = 'Do you want to join the next game?';
+    }
     voteBtnRow.style.display = 'flex';
     voteOverlay.classList.add('active');
     startVoteCountdown(Math.round(timeoutMs / 1000));
@@ -880,6 +895,8 @@ socket.on('new-game-started', ({ players: pl, hostId, acceptedIds, promotedIds, 
     gameOverBanner.style.display = 'none';
     newGameBtn.style.display     = 'none';
     newGameBtn.disabled          = false;
+    chatQueue.length             = 0;
+    chatAnimating                = false;
     chatHistory.innerHTML        = '';
     responseContainer.innerHTML  = '';
     gameOverSpectatorNote.textContent = '';
