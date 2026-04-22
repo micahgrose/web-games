@@ -133,7 +133,7 @@ function resolveNewGameVotes(room) {
     if (!room.newGameVotes) return;
     if (room.newGameTimer) { clearTimeout(room.newGameTimer); room.newGameTimer = null; }
 
-    const accepted = room.players.filter(p => room.newGameVotes[p.id] !== false);
+    const accepted = room.players.filter(p => !p.eliminated && room.newGameVotes[p.id] !== false);
     room.newGameVotes = null;
 
     const totalAvailable = Math.min(accepted.length + room.spectators.length, room.maxPlayers);
@@ -316,7 +316,7 @@ io.on('connection', (socket) => {
         const room = rooms.get(roomId.toUpperCase());
         if (!room) { socket.emit('join-error', { message: 'Room not found.' }); return; }
 
-        if (room.players.some(p => p.name.toLowerCase() === playerName.trim().toLowerCase())) {
+        if (room.players.some(p => !p.eliminated && p.name.toLowerCase() === playerName.trim().toLowerCase())) {
             socket.emit('join-error', { message: 'A player with that name already exists in this room.' });
             return;
         }
@@ -621,12 +621,12 @@ io.on('connection', (socket) => {
         const room = rooms.get(socket.data.roomId);
         if (!room || room.hostId !== socket.id) return;
 
-        const others = room.players.filter(p => p.id !== socket.id);
+        const others = room.players.filter(p => p.id !== socket.id && !p.eliminated);
         if (others.length === 0 && room.spectators.length === 0) { startNewGame(room, [socket.id]); return; }
         if (others.length === 0) { startNewGame(room, [socket.id]); return; }
 
         room.newGameVotes = {};
-        room.players.forEach(p => { room.newGameVotes[p.id] = null; });
+        room.players.filter(p => !p.eliminated).forEach(p => { room.newGameVotes[p.id] = null; });
         room.newGameVotes[socket.id] = true;
 
         room.newGameTimer = setTimeout(() => resolveNewGameVotes(room), 30000);

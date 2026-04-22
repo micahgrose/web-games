@@ -543,6 +543,8 @@ function updateDeckDisplay(deckSize, drawnCard) {
 }
 
 function resetToLanding(errorMsg) {
+    const knownName = quickNameInput.value.trim() || createNameInput.value.trim() || joinNameInput.value.trim();
+    if (knownName) quickNameInput.value = knownName;
     landingWrapper.style.display = 'flex';
     waitingPanel.style.display   = 'none';
     gamePanel.style.display      = 'none';
