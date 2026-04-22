@@ -76,17 +76,32 @@ function broadcastPublicRooms() {
     io.emit('public-rooms-updated', getPublicRoomsData());
 }
 
-function startNewGame(room, acceptedIds) {
-    const acceptedSet = new Set(acceptedIds);
-    const acceptedPlayers = room.players.filter(p => acceptedSet.has(p.id));
+function scheduleNewGameVote(room) {
+    if (room.newGameVoteTimer) clearTimeout(room.newGameVoteTimer);
+    room.newGameVoteTimer = setTimeout(() => {
+        if (!rooms.has(room.id) || room.newGameVotes) return;
+        room.newGameVotes = {};
+        room.newGameOrder = [];
+        room.players.forEach(p => { room.newGameVotes[p.id] = null; });
+        room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
+        room.newGameTimer = setTimeout(() => resolveNewGameVotes(room), 30000);
+        io.to(room.id).emit('new-game-vote', { timeoutMs: 30000 });
+    }, 5000);
+}
 
-    // Promote waiting spectators to fill remaining slots
-    const slotsRemaining = room.maxPlayers - acceptedPlayers.length;
-    const promoted = room.spectators.slice(0, Math.max(0, slotsRemaining));
-    const promotedIds = promoted.map(s => s.id);
+function startNewGame(room, acceptedIds) {
+    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
+
+    const allPeople = [...room.players, ...room.spectators];
+    const orderedNew = acceptedIds.map(id => allPeople.find(p => p.id === id)).filter(Boolean);
+
+    const promotedIds = orderedNew
+        .filter(p => room.spectators.some(s => s.id === p.id))
+        .map(p => p.id);
+
     room.spectators = room.spectators.filter(s => !promotedIds.includes(s.id));
 
-    room.players = [...acceptedPlayers, ...promoted].map((p, i) => ({
+    room.players = orderedNew.map((p, i) => ({
         id: p.id, name: p.name, color: playerColors[i], eliminated: false
     }));
 
@@ -116,6 +131,7 @@ function startNewGame(room, acceptedIds) {
 
     io.to(room.id).emit('new-game-started', {
         players: room.players,
+        hostId: room.hostId,
         acceptedIds: room.players.map(p => p.id),
         promotedIds,
         currentPlayerIndex: 0,
@@ -133,16 +149,30 @@ function resolveNewGameVotes(room) {
     if (!room.newGameVotes) return;
     if (room.newGameTimer) { clearTimeout(room.newGameTimer); room.newGameTimer = null; }
 
-    const accepted = room.players.filter(p => !p.eliminated && room.newGameVotes[p.id] !== false);
-    room.newGameVotes = null;
+    const order = room.newGameOrder || [];
+    const votes = room.newGameVotes;
 
-    const totalAvailable = Math.min(accepted.length + room.spectators.length, room.maxPlayers);
-    if (totalAvailable < 2) {
-        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players for a new game.' });
+    // Players who accepted, in the order they accepted
+    const acceptedPlayerIds = order.filter(id =>
+        room.players.some(p => p.id === id) && votes[id] === true
+    );
+    // Spectators who accepted, in the order they accepted
+    const acceptedSpectatorIds = order.filter(id =>
+        room.spectators.some(s => s.id === id) && votes[id] === true
+    );
+    // Players fill slots first, spectators fill remaining, capped at maxPlayers
+    const allAccepted = [...acceptedPlayerIds, ...acceptedSpectatorIds].slice(0, room.maxPlayers);
+
+    room.newGameVotes = null;
+    room.newGameOrder = null;
+
+    if (allAccepted.length < 2) {
+        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
         return;
     }
 
-    startNewGame(room, accepted.map(p => p.id));
+    room.hostId = allAccepted[0];
+    startNewGame(room, allAccepted);
 }
 
 async function detectEliminationsAI(players, gmResponse) {
@@ -233,6 +263,7 @@ async function resolveCounterPhase(room) {
             const winner = room.players.find(pl => !pl.eliminated);
             io.to(room.id).emit('gm-response', { response, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: p.attackerId, eliminatedIds: newlyEliminated.map(pl => pl.id), players: room.players });
             io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+            scheduleNewGameVote(room);
             broadcastPublicRooms();
         } else {
             io.to(room.id).emit('gm-response', {
@@ -525,6 +556,7 @@ io.on('connection', (socket) => {
                     const winner = room.players.find(p => !p.eliminated);
                     io.to(room.id).emit('gm-response', { response, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: currentPlayer.id, eliminatedIds: newlyEliminated.map(p => p.id), players: room.players });
                     io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+                    scheduleNewGameVote(room);
                     broadcastPublicRooms();
                 } else {
                     io.to(room.id).emit('gm-response', {
@@ -593,6 +625,7 @@ io.on('connection', (socket) => {
                     rooms.delete(room.id);
                 } else {
                     socket.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+                    scheduleNewGameVote(room);
                 }
                 broadcastPublicRooms();
             } else {
@@ -623,27 +656,31 @@ io.on('connection', (socket) => {
 
     socket.on('new-game-request', () => {
         const room = rooms.get(socket.data.roomId);
-        if (!room || room.hostId !== socket.id) return;
+        if (!room || !room.started || room.newGameVotes) return;
 
-        const others = room.players.filter(p => p.id !== socket.id && !p.eliminated);
-        if (others.length === 0 && room.spectators.length === 0) { startNewGame(room, [socket.id]); return; }
-        if (others.length === 0) { startNewGame(room, [socket.id]); return; }
+        if (room.newGameVoteTimer) {
+            clearTimeout(room.newGameVoteTimer);
+            room.newGameVoteTimer = null;
+        }
 
         room.newGameVotes = {};
-        room.players.filter(p => !p.eliminated).forEach(p => { room.newGameVotes[p.id] = null; });
-        room.newGameVotes[socket.id] = true;
-
+        room.newGameOrder = [];
+        room.players.forEach(p => { room.newGameVotes[p.id] = null; });
+        room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
         room.newGameTimer = setTimeout(() => resolveNewGameVotes(room), 30000);
-
-        const hostName = room.players.find(p => p.id === socket.id)?.name;
-        io.to(room.id).emit('new-game-vote', { hostName, timeoutMs: 30000, spectatorCount: room.spectators.length });
+        io.to(room.id).emit('new-game-vote', { timeoutMs: 30000 });
     });
 
     socket.on('new-game-response', ({ accept }) => {
         const room = rooms.get(socket.data.roomId);
         if (!room || !room.newGameVotes) return;
+        if (!(socket.id in room.newGameVotes)) return;
 
         room.newGameVotes[socket.id] = accept;
+
+        if (accept && !room.newGameOrder.includes(socket.id)) {
+            room.newGameOrder.push(socket.id);
+        }
 
         const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
         if (allVoted) {
@@ -711,6 +748,7 @@ io.on('connection', (socket) => {
                 const winner = room.players.find(p => !p.eliminated);
                 io.to(roomId).emit('player-left', { players: room.players, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: room.players[room.currentPlayerIndex]?.id });
                 io.to(roomId).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+                scheduleNewGameVote(room);
                 broadcastPublicRooms();
                 return;
             }

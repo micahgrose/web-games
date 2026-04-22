@@ -837,22 +837,18 @@ socket.on('game-over', ({ winnerName, players: pl, spectatorCount }) => {
     }
 });
 
-socket.on('new-game-vote', ({ hostName, timeoutMs, spectatorCount }) => {
-    if (isHost) return;
-    if (isSpectator) {
-        // Spectators don't vote — they're automatically included
-        addChatMessage('System', `${hostName} wants a new game. You'll be included automatically!`, '#6c5ce7');
-        return;
-    }
+socket.on('new-game-vote', ({ timeoutMs }) => {
+    newGameBtn.style.display = 'none';
     voteTitle.textContent    = 'Play again?';
-    const specNote = spectatorCount > 0 ? ` (${spectatorCount} spectator${spectatorCount > 1 ? 's' : ''} waiting to join)` : '';
-    voteSubtitle.textContent = `${hostName} wants to start a new game${specNote}.`;
+    voteSubtitle.textContent = isSpectator
+        ? 'A new game is starting. Do you want to join as a player?'
+        : 'Do you want to join the next game?';
     voteBtnRow.style.display = 'flex';
     voteOverlay.classList.add('active');
     startVoteCountdown(Math.round(timeoutMs / 1000));
 });
 
-socket.on('new-game-started', ({ players: pl, acceptedIds, promotedIds, currentPlayerIndex: idx, deckSize, spectatorCount }) => {
+socket.on('new-game-started', ({ players: pl, hostId, acceptedIds, promotedIds, currentPlayerIndex: idx, deckSize, spectatorCount }) => {
     stopVoteCountdown();
     voteOverlay.classList.remove('active');
     escapeOverlay.classList.remove('active');
@@ -873,6 +869,7 @@ socket.on('new-game-started', ({ players: pl, acceptedIds, promotedIds, currentP
 
     players            = pl;
     currentPlayerIndex = idx;
+    isHost             = (myPlayerId === hostId);
     gameOver           = false;
     gmThinking         = false;
     inCounterPhase     = false;
