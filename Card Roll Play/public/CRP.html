@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Roll Play</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            background: #f4f4f4;
+            color: #222;
+            transition: background-color 0.5s;
+        }
+
+        h1 { margin: 20px; font-size: 1.8rem; }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: calc(100vh - 76px);
+            padding: 0 20px 40px;
+        }
+
+        .panel {
+            background: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Landing wrapper ── */
+        #landingWrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 520px;
+            margin: 20px auto 0;
+            width: 100%;
+        }
+
+        /* ── Public rooms panel ── */
+        #publicRoomsPanel h2 { margin: 0 0 12px; font-size: 1.3rem; }
+
+        .quick-name-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .quick-name-row input {
+            flex: 1;
+            padding: 9px 12px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        .rooms-tabs {
+            display: flex;
+            border-bottom: 2px solid #eee;
+            margin-bottom: 12px;
+        }
+
+        .tab-btn {
+            padding: 8px 18px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            color: #888;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tab-btn.active { color: #1f70ff; border-bottom-color: #1f70ff; font-weight: bold; }
+
+        .tab-count {
+            display: inline-block;
+            background: #eee;
+            border-radius: 10px;
+            font-size: 0.72rem;
+            padding: 1px 7px;
+            color: #666;
+            font-weight: normal;
+        }
+
+        .tab-btn.active .tab-count { background: #dce9ff; color: #1f70ff; }
+
+        .rooms-list { display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+
+        .room-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+
+        .room-row-info { flex: 1; }
+
+        .room-row-code {
+            font-weight: bold;
+            font-size: 1rem;
+            font-family: monospace;
+            letter-spacing: 0.12em;
+            color: #1f70ff;
+        }
+
+        .room-row-meta { font-size: 0.82rem; color: #888; margin-top: 2px; }
+
+        .room-status-badge {
+            font-size: 0.72rem;
+            padding: 2px 9px;
+            border-radius: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        .room-status-badge.open   { background: #d4edda; color: #1a7a3a; }
+        .room-status-badge.in-play { background: #d0e4ff; color: #1a4fa0; }
+        .room-status-badge.full   { background: #f0f0f0; color: #888; }
+
+        .room-action-btn {
+            padding: 7px 16px;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.88rem;
+            white-space: nowrap;
+        }
+
+        .room-action-btn.watch { background: #6c5ce7; }
+        .room-action-btn:hover { opacity: 0.88; }
+        .room-action-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        .no-rooms-msg {
+            text-align: center;
+            color: #bbb;
+            font-size: 0.9rem;
+            padding: 18px 0;
+        }
+
+        /* ── Lobby panel ── */
+        #lobbyPanel { gap: 16px; }
+        #lobbyPanel h2 { margin: 0 0 4px; font-size: 1.1rem; color: #444; text-align: center; }
+
+        .lobby-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .lobby-section h3 { margin: 0 0 4px; font-size: 0.95rem; color: #555; }
+
+        .lobby-section input, .lobby-section select {
+            padding: 9px 12px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .lobby-section button {
+            padding: 10px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .lobby-section button:hover { background: #125ad9; }
+        .lobby-section button:disabled { background: #aaa; cursor: not-allowed; }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95rem;
+        }
+
+        .toggle-row input[type="checkbox"] { width: auto; margin: 0; cursor: pointer; }
+
+        .max-players-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+
+        .max-players-row label { white-space: nowrap; color: #555; }
+        .max-players-row select { width: auto; flex: 1; }
+
+        .lobby-divider {
+            text-align: center;
+            color: #aaa;
+            font-size: 0.85rem;
+            position: relative;
+        }
+
+        .lobby-divider::before, .lobby-divider::after {
+            content: '';
+            display: inline-block;
+            width: 28%;
+            height: 1px;
+            background: #ddd;
+            vertical-align: middle;
+            margin: 0 8px;
+        }
+
+        .error-msg {
+            color: #c32026;
+            font-size: 0.9rem;
+            min-height: 1.2em;
+            text-align: center;
+        }
+
+        /* ── Waiting room ── */
+        #waitingPanel {
+            max-width: 520px;
+            margin: 20px auto 0;
+            gap: 16px;
+        }
+
+        #waitingPanel h2 { margin: 0 0 4px; font-size: 1.4rem; }
+
+        .room-code-box {
+            background: #f0f4ff;
+            border: 2px dashed #1f70ff;
+            border-radius: 8px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .room-code-box span {
+            display: block;
+            font-size: 2.2rem;
+            font-weight: bold;
+            letter-spacing: 0.18em;
+            color: #1f70ff;
+        }
+
+        .room-code-box p { margin: 6px 0 0; font-size: 0.85rem; color: #666; }
+
+        .public-badge {
+            display: inline-block;
+            background: #d4edda;
+            color: #1a7a3a;
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 3px 10px;
+            border-radius: 10px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        #waitingPlayerList {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        #waitingPlayerList li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+
+        .player-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+
+        #waitingSpectatorNote {
+            font-size: 0.85rem;
+            color: #888;
+            text-align: center;
+            min-height: 1.2em;
+        }
+
+        #startGameBtn {
+            padding: 12px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #startGameBtn:hover { background: #125ad9; }
+        #startGameBtn:disabled { background: #aaa; cursor: not-allowed; }
+
+        #waitingStatus { color: #666; font-size: 0.9rem; min-height: 1.2em; }
+
+        /* ── Game panel ── */
+        #gamePanel { display: none; }
+
+        .turn-indicator {
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .panel h2 { margin-top: 0; margin-bottom: 14px; font-size: 1.1rem; }
+
+        #chatControls { margin-bottom: 14px; }
+
+        #chatControls input {
+            width: calc(100% - 96px);
+            padding: 8px 10px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+        }
+
+        #chatControls button {
+            padding: 10px 14px;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #chatControls button:hover  { background: #125ad9; }
+        #chatControls button:disabled { background: #aaa; cursor: not-allowed; }
+
+        #chatHistory {
+            border: 1px solid #eee;
+            padding: 16px;
+            background: #fafafa;
+            min-height: 60px;
+            overflow-y: auto;
+            max-height: 420px;
+        }
+
+        .chat-message { margin-bottom: 10px; }
+
+        #responseContainer { margin-top: 14px; min-height: 40px; }
+
+        .chat-main { display: flex; gap: 24px; align-items: flex-start; }
+
+        .chat-content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+        .card-area {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            align-items: center;
+            margin-top: 20px;
+            width: 160px;
+            flex-shrink: 0;
+        }
+
+        .card-slot {
+            width: 100%;
+            min-height: 260px;
+            border: 1px solid #ddd;
+            border-radius: 16px;
+            background: #fafafa;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            padding: 18px;
+        }
+
+        .card-back, .card-front {
+            width: 100%;
+            height: 240px;
+            border-radius: 18px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            overflow: hidden;
+        }
+
+        .card-slot h3 { margin: 0 0 10px 0; font-size: 0.95rem; }
+
+        .card-back {
+            background: #c32026;
+            color: #fff;
+            border: 8px solid #fff;
+            border-radius: 12px;
+            box-sizing: border-box;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+        }
+
+        .card-back .back-icon { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 80px; height: 80px; }
+
+        .card-back .back-icon-line { position: absolute; background: #fff; border-radius: 6px; opacity: 0.9; }
+        .card-back .back-icon-line.horizontal { width: 56px; height: 10px; left: 50%; top: 50%; transform: translate(-50%,-50%); }
+        .card-back .back-icon-line.vertical   { width: 10px; height: 56px; left: 50%; top: 50%; transform: translate(-50%,-50%); }
+
+        .card-back .back-icon-center {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            width: 18px; height: 18px; border-radius: 50%; background: #fff;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.35);
+        }
+
+        .card-front { background: #ffffff; border: 1px solid #ccc; color: #222; padding: 10px; box-sizing: border-box; }
+
+        .card-face-corner { position: absolute; font-size: 1rem; line-height: 1.1; white-space: nowrap; }
+        .card-face-corner.top-left    { top: 12px; left: 12px; text-align: left; }
+        .card-face-corner.bottom-right { bottom: 12px; right: 12px; text-align: right; transform: rotate(180deg); }
+
+        .card-face-center {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(5, 1fr);
+            gap: 0;
+            width: 100%; height: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        .card-pip { display: flex; justify-content: center; align-items: center; font-size: 1.25rem; line-height: 1; }
+
+        .face-card { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; padding: 12px 8px; }
+
+        .face-card-title, .face-card-subtitle { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.8; }
+
+        .face-card-portrait {
+            width: 86px; height: 86px; border-radius: 50%;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 3rem;
+            background: rgba(0,0,0,0.05);
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+        }
+
+        .face-card.red  .face-card-portrait { background: rgba(195,32,38,0.12); }
+        .face-card.black .face-card-portrait { background: rgba(16,24,32,0.08); }
+        .card-front.red   { color: #c32026; }
+        .card-front.black { color: #101820; }
+
+        /* ── Counter phase banner ── */
+        #counterBanner {
+            display: none;
+            background: #fff3cd;
+            border: 1.5px solid #f0c040;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            font-size: 0.92rem;
+            color: #5a4000;
+            line-height: 1.4;
+        }
+
+        #counterBanner.active { display: block; }
+        #counterBanner strong { color: #c32026; }
+
+        /* ── Typing indicator ── */
+        #typingIndicator {
+            display: none;
+            padding: 4px 0 2px;
+            min-height: 22px;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9rem;
+        }
+
+        .typing-dots {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+            margin-left: 4px;
+        }
+
+        .typing-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background: currentColor;
+            border-radius: 50%;
+            opacity: 0.3;
+            animation: typing-bounce 1.2s infinite;
+        }
+
+        .typing-dot:nth-child(2) { animation-delay: 0.18s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.36s; }
+
+        @keyframes typing-bounce {
+            0%, 60%, 100% { opacity: 0.2; transform: translateY(0); }
+            30% { opacity: 1; transform: translateY(-4px); }
+        }
+
+        /* ── GM cursor blink ── */
+        .gm-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: #222;
+            margin-left: 1px;
+            vertical-align: text-bottom;
+            animation: cursor-blink 0.7s steps(1) infinite;
+        }
+
+        @keyframes cursor-blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        #notYourTurnMsg {
+            text-align: center;
+            color: #888;
+            font-style: italic;
+            font-size: 0.95rem;
+            min-height: 1.4em;
+            margin-top: 6px;
+        }
+
+        #spectatorBar {
+            text-align: center;
+            font-size: 0.82rem;
+            color: #6c5ce7;
+            margin-top: 4px;
+            min-height: 1.2em;
+        }
+
+        #playersRoster { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+        .roster-player {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: 20px;
+            border: 2px solid transparent;
+            font-size: 0.85rem;
+            font-weight: bold;
+            transition: opacity 0.3s;
+        }
+
+        .roster-player.eliminated { opacity: 0.35; text-decoration: line-through; }
+        .roster-player .roster-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+        #gameOverBanner {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            font-size: 1.6rem;
+            font-weight: bold;
+            background: #fff8e1;
+            border: 2px solid #f0c040;
+            border-radius: 10px;
+            margin-bottom: 14px;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+        }
+
+        #gameOverSpectatorNote { font-size: 0.95rem; color: #555; font-weight: normal; }
+
+        #newGameBtn {
+            display: none;
+            padding: 10px 28px;
+            font-size: 1rem;
+            border: none;
+            border-radius: 6px;
+            background: #1f70ff;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #newGameBtn:hover { background: #125ad9; }
+
+        /* ── Modals ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active { display: flex; }
+
+        .modal-box {
+            background: #fff;
+            border-radius: 12px;
+            padding: 28px 32px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+            text-align: center;
+            min-width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .modal-box h3 { margin: 0; font-size: 1.2rem; }
+        .modal-box p  { margin: 0; color: #555; font-size: 0.95rem; }
+
+        .modal-btn-row { display: flex; gap: 10px; justify-content: center; }
+
+        .modal-btn { padding: 9px 22px; font-size: 1rem; border: none; border-radius: 6px; cursor: pointer; }
+        .modal-btn.danger  { background: #c32026; color: #fff; }
+        .modal-btn.primary { background: #1f70ff; color: #fff; }
+        .modal-btn.neutral { background: #eee; color: #333; }
+        .modal-btn:hover   { opacity: 0.88; }
+
+        #voteCountdown { font-size: 1.5rem; font-weight: bold; color: #1f70ff; }
+
+        /* ── Card draw animation ── */
+        #animOverlay { display: none; position: fixed; inset: 0; z-index: 1000; pointer-events: none; }
+
+        .anim-deck {
+            position: fixed;
+            background: #c32026;
+            border: 8px solid #fff;
+            border-radius: 12px;
+            box-sizing: border-box;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: left 0.5s cubic-bezier(.4,0,.2,1), top 0.5s cubic-bezier(.4,0,.2,1);
+        }
+
+        .anim-card-outer {
+            position: fixed;
+            perspective: 900px;
+            transition: left 0.5s cubic-bezier(.4,0,.2,1), top 0.5s cubic-bezier(.4,0,.2,1);
+        }
+
+        .anim-card-inner {
+            width: 100%; height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.65s ease;
+        }
+
+        .anim-face-back, .anim-face-front {
+            position: absolute;
+            width: 100%; height: 100%;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        .anim-face-back {
+            background: #c32026;
+            border: 8px solid #fff;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+        }
+
+        .anim-face-front {
+            background: #fff;
+            border: 1px solid #ccc;
+            transform: rotateY(180deg);
+            padding: 10px;
+            box-sizing: border-box;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+        }
+    </style>
+</head>
+<body>
+    <h1>Card Roll Play</h1>
+    <div class="app-container">
+
+        <!-- Landing: Public rooms + Create/Join -->
+        <div id="landingWrapper">
+
+            <!-- Public Games Browser -->
+            <section class="panel" id="publicRoomsPanel">
+                <h2>Public Games</h2>
+                <div class="quick-name-row">
+                    <input type="text" id="quickNameInput" placeholder="Your name to join or watch" maxlength="24" />
+                </div>
+                <div class="rooms-tabs">
+                    <button class="tab-btn active" id="tabOpen">
+                        Open <span class="tab-count" id="openCount">0</span>
+                    </button>
+                    <button class="tab-btn" id="tabInPlay">
+                        In Play <span class="tab-count" id="inplayCount">0</span>
+                    </button>
+                </div>
+                <div id="openRoomsList" class="rooms-list">
+                    <p class="no-rooms-msg">No open public games yet.</p>
+                </div>
+                <div id="inplayRoomsList" class="rooms-list" style="display:none;">
+                    <p class="no-rooms-msg">No games currently in play.</p>
+                </div>
+            </section>
+
+            <!-- Create / Join with code -->
+            <section class="panel" id="lobbyPanel">
+                <h2>— or —</h2>
+
+                <div class="lobby-section">
+                    <h3>Create a new room</h3>
+                    <input type="text" id="createNameInput" placeholder="Your name" maxlength="24" />
+                    <div class="toggle-row">
+                        <input type="checkbox" id="publicToggle" />
+                        <label for="publicToggle">Public game (visible in the lobby)</label>
+                    </div>
+                    <div class="max-players-row" id="maxPlayersRow" style="display:none;">
+                        <label for="maxPlayersSelect">Max players:</label>
+                        <select id="maxPlayersSelect">
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8">8</option>
+                            <option value="9">9</option>
+                            <option value="10" selected>10</option>
+                        </select>
+                    </div>
+                    <button id="createRoomBtn" disabled>Create Room</button>
+                </div>
+
+                <div class="lobby-divider">or join with a code</div>
+
+                <div class="lobby-section">
+                    <h3>Join a private room</h3>
+                    <input type="text" id="joinNameInput" placeholder="Your name" maxlength="24" />
+                    <input type="text" id="joinCodeInput" placeholder="Room code (e.g. AB12C)" maxlength="5" style="text-transform:uppercase;" />
+                    <button id="joinRoomBtn" disabled>Join Room</button>
+                </div>
+
+                <div class="error-msg" id="lobbyError"></div>
+            </section>
+
+        </div>
+
+        <!-- Waiting room -->
+        <section class="panel" id="waitingPanel" style="display:none;">
+            <h2>Waiting for players… <span id="publicWaitingBadge" class="public-badge" style="display:none;">PUBLIC</span></h2>
+            <div class="room-code-box">
+                <span id="displayRoomCode"></span>
+                <p id="roomShareMsg">Share this code with your friends</p>
+            </div>
+            <ul id="waitingPlayerList"></ul>
+            <div id="waitingStatus">Waiting for more players…</div>
+            <div id="waitingSpectatorNote"></div>
+            <button id="startGameBtn" disabled>Start Game</button>
+        </section>
+
+        <!-- Game -->
+        <section class="panel game" id="gamePanel">
+            <div id="gameOverBanner">
+                <span id="gameOverText"></span>
+                <div id="gameOverSpectatorNote"></div>
+                <button id="newGameBtn">New Game</button>
+            </div>
+            <div class="turn-indicator" id="turnIndicator"></div>
+            <div id="spectatorBar"></div>
+            <div class="chat-main">
+                <div class="chat-content">
+                    <div id="counterBanner"></div>
+                    <div id="chatHistory"></div>
+                    <div id="typingIndicator">
+                        <strong id="typingName"></strong>
+                        <span class="typing-dots">
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                            <span class="typing-dot"></span>
+                        </span>
+                    </div>
+                    <div id="responseContainer"></div>
+                    <div id="chatControls">
+                        <input type="text" id="messageInput" placeholder="Enter your action…" />
+                        <button id="submitBtn">Submit</button>
+                    </div>
+                    <div id="notYourTurnMsg"></div>
+                    <div id="playersRoster"></div>
+                </div>
+                <div class="card-area">
+                    <div class="card-slot">
+                        <h3>Deck</h3>
+                        <div id="deckVisual" class="card-back">
+                            <div class="back-icon">
+                                <div class="back-icon-line horizontal"></div>
+                                <div class="back-icon-line vertical"></div>
+                                <div class="back-icon-center"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-slot">
+                        <h3>Drawn Card</h3>
+                        <div id="drawnCardVisual" class="card-front"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Escape / leave overlay -->
+    <div class="modal-overlay" id="escapeOverlay">
+        <div class="modal-box">
+            <h3 id="escapeTitle">Leave Game?</h3>
+            <p id="escapeSubtitle">You will be eliminated and removed from the game.</p>
+            <div class="modal-btn-row">
+                <button class="modal-btn danger" id="confirmLeaveBtn">Leave</button>
+                <button class="modal-btn neutral" id="cancelLeaveBtn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New game vote overlay -->
+    <div class="modal-overlay" id="voteOverlay">
+        <div class="modal-box">
+            <h3 id="voteTitle">New Game?</h3>
+            <p id="voteSubtitle"></p>
+            <div id="voteCountdown">30</div>
+            <div class="modal-btn-row" id="voteBtnRow">
+                <button class="modal-btn primary" id="voteAcceptBtn">Accept</button>
+                <button class="modal-btn neutral" id="voteDeclineBtn">Decline</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="animOverlay"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="CRP.js"></script>
+</body>
+</html>
