@@ -589,7 +589,11 @@ io.on('connection', (socket) => {
             if (alive <= 1) {
                 const winner = room.players.find(p => !p.eliminated);
                 io.to(room.id).emit('player-left-voluntarily', { playerName, players: room.players, currentPlayerIndex: room.currentPlayerIndex });
-                io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+                if (alive === 0) {
+                    rooms.delete(room.id);
+                } else {
+                    io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
+                }
                 broadcastPublicRooms();
             } else {
                 if (wasCurrent) room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
