@@ -1,9 +1,6 @@
-/*
+function getMean(nums)
 const iterations = 10000000;
 let nums = [];
-for (let i = 0; i < iterations; i++) {
-  nums.push(Math.random()*100);
-}
 let mean = 0;
 let mad = 0;
 let deviationTotal = 0;
@@ -27,7 +24,6 @@ if (iterations % 2 === 0) {
 console.log(`Mean: ${mean}`);
 console.log(`Median: ${median}`);
 console.log(`Mean Absolute Deviation: ${mad}`);
-*/
 
 const iterations = 46656;
 let sixOfKinds = 0;
@@ -36,15 +32,14 @@ let dice = [];
 for(let i = 0; i < iterations; i++) {
     for(let j = 0; j < 6; j++) {
         dice.push(Math.floor(Math.random()*6)+1);
-        dice.sort((a, b) => a - b);
-        if(dice.toString() == [1, 2, 3, 4, 5, 6].toString()) {
-            inOrders++;
-        } else if(dice[0] == dice[1] && dice[1] == dice[2] && dice[2] == dice[3] && dice[3] == dice[4] && dice[4] == dice[5]) {
-            sixOfKinds++;
-        }
-        dice = [];
     }
-
+    dice.sort((a, b) => a - b);
+    if(dice.toString() == [1, 2, 3, 4, 5, 6].toString()) {
+       inOrders++;
+    } else if(dice[0] == dice[1] && dice[1] == dice[2] && dice[2] == dice[3] && dice[3] == dice[4] && dice[4] == dice[5]) {
+        sixOfKinds++;
+    }
+    dice = [];
 }
 console.log(`In Orders: ${inOrders}`);
 console.log(`Six of Kinds: ${sixOfKinds}`);
