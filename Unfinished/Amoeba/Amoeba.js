@@ -44,6 +44,7 @@ class Cell {
 		this.color = randColor();
 		this.velX  = 0;
 		this.velY  = 0;
+		this.phase = Math.random() * Math.PI * 2;
 	}
 }
 
@@ -59,6 +60,7 @@ class Bot {
 		this.name  = randName();
 		this.velX  = 0;
 		this.velY  = 0;
+		this.phase = Math.random() * Math.PI * 2;
 	}
 }
 
@@ -228,27 +230,41 @@ function eatBots() {
 	}
 }
 
-// Draws a wobbly amoeba shape. Stretches in the direction of movement.
-function drawAmoeba(x, y, radius, color, velX, velY) {
-	const N          = 12;
-	const wobbleAmt  = radius * 0.18;
-	const speed      = Math.hypot(velX, velY);
-	const stretchAmt = Math.min(speed / 3, 1) * radius * 0.28;
-	const moveAngle  = speed > 0.01 ? Math.atan2(velY, velX) : 0;
+// Draws an amoeba with pseudopod protrusions and organic wobble.
+function drawAmoeba(x, y, radius, color, velX, velY, phase) {
+	const N         = 24;
+	const speed     = Math.hypot(velX, velY);
+	const moveAngle = speed > 0.01 ? Math.atan2(velY, velX) : 0;
+	const t         = time * 0.012;
 
 	let pts = [];
 	for (let i = 0; i < N; i++) {
-		let angle  = (i / N) * Math.PI * 2;
-		let wobble = Math.sin(angle * 3 + time * 0.07) * wobbleAmt;
-		let align  = Math.cos(angle - moveAngle);
-		let r      = radius + wobble + align * stretchAmt;
-		pts.push({ x: x + Math.cos(angle) * r, y: y + Math.sin(angle) * r });
+		let a = (i / N) * Math.PI * 2;
+		let r = radius;
+
+		// Layered organic wobble
+		r += Math.sin(a * 2 + t       + phase)        * radius * 0.10;
+		r += Math.sin(a * 3 + t * 1.3 + phase * 0.7)  * radius * 0.08;
+		r += Math.sin(a * 5 + t * 0.7 + phase * 1.5)  * radius * 0.05;
+
+		// Pseudopod spikes — high power = sharp protrusion
+		r += Math.pow(Math.max(0, Math.sin(a * 2 + t * 0.6  + phase)),        5) * radius * 0.65;
+		r += Math.pow(Math.max(0, Math.sin(a * 2 + t * 0.45 + phase + 2.1)),  5) * radius * 0.55;
+		r += Math.pow(Math.max(0, Math.sin(a * 2 + t * 0.35 + phase + 4.3)),  5) * radius * 0.45;
+
+		// Stretch forward in movement direction
+		if (speed > 0.1) {
+			let align = Math.cos(a - moveAngle);
+			r += Math.max(0, align) * Math.min(speed / 3, 1) * radius * 0.3;
+		}
+
+		pts.push({ x: x + Math.cos(a) * r, y: y + Math.sin(a) * r });
 	}
 
 	ctx.fillStyle = color;
 	ctx.beginPath();
-	let start = { x: (pts[N - 1].x + pts[0].x) / 2, y: (pts[N - 1].y + pts[0].y) / 2 };
-	ctx.moveTo(start.x, start.y);
+	let s = { x: (pts[N - 1].x + pts[0].x) / 2, y: (pts[N - 1].y + pts[0].y) / 2 };
+	ctx.moveTo(s.x, s.y);
 	for (let i = 0; i < N; i++) {
 		let p    = pts[i];
 		let next = pts[(i + 1) % N];
@@ -300,12 +316,12 @@ function draw() {
 
 	// Bots
 	for (let b of bots) {
-		drawAmoeba(b.x, b.y, b.size, b.color, b.velX, b.velY);
+		drawAmoeba(b.x, b.y, b.size, b.color, b.velX, b.velY, b.phase);
 		drawLabel(b.x, b.y, b.size, b.name);
 	}
 
 	// Player
-	drawAmoeba(cell.x, cell.y, cell.size, cell.color, cell.velX, cell.velY);
+	drawAmoeba(cell.x, cell.y, cell.size, cell.color, cell.velX, cell.velY, cell.phase);
 	drawLabel(cell.x, cell.y, cell.size, '(you)');
 
 	ctx.restore();
