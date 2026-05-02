@@ -1,0 +1,10 @@
+Alright, got a few thigns for you.
+1: ensure that as a destructor ball eats that it pushes it'self up of the line it's on so that it is interacting with it correctly.
+2: when the mouse is over settings for balls or lines, ball placement should not be allowed, and the draggable values should only drag when the mouse is clicking on them.
+3: allow ball editing with selction, including restituion, and mass. the size should change according to it's mass and should also change how it interacts with balls and liens respectivly.
+4: When the balls reach a valley of a curve with little speed, and it is sure they won't be able to progress very much, in real life, they would eventually come to a complete stop. The balls are not. They keep wiggling. I think that is what is causing the shooting out of the balls.
+5: Make the hotkey for balls be 1 and then shift all the hotkeys up one respective hotkey.
+6: Make a hotkey for creating rects and a way to edit which sides are there.
+7: when placing curves, lines, rects, or painting, make the nodes of the line/curve/rect/paintings being created snap to any current lines/curves/rect nodes.
+8: make any text a bit lighter in color and larger. Put the hotkey controls in an area that appears when a controls button is pressed
+9: most important: clean up the physics logic to be more based on position, velocity (vector), mass, radius, and restituion coeff. If it already is based of that, find at least 1 or 2 ways to improve the physcis logic.

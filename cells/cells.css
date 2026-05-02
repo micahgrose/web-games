@@ -386,9 +386,10 @@ button:disabled {
 
 /* ── messages ── */
 .message {
+	font-size:20px;
 	position:absolute;
 	top: 95vh;
-	left:45vw;
+	left:43vw;
 	color: red;
 	font-family: 'Courier New', monospace;
 	letter-spacing: 0.05em;
