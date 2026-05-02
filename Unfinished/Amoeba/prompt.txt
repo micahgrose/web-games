@@ -1,0 +1,8 @@
+Alright. lets do this.
+1: randomize colors for bots and players.
+2: Make a nametag type thing for each amoeba. Randomized for bots. For the player it should say (you)
+3: give the bots a more amoeaba-like movements. Real amoeba wouldnt just go from one random point to another. They would seek out food and and smaller amoeba.
+4: as an amoeba gets bigger, it slows down.
+5: no bounds to screen, make there be an arena to explore.
+6: as the player gets bigger, ther veiw of the arena should exapnd.
+7: add a kind of amoeba-like crawl animation to bots and players that responds to the direction that they are going.

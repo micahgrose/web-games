@@ -1,5 +1,5 @@
-let mouseX = 0;
-let mouseY = 0;
+let mouseX = window.innerWidth / 2;
+let mouseY = window.innerHeight / 2;
 
 document.addEventListener('mousemove', e => {
 	mouseX = e.clientX;
@@ -11,56 +11,89 @@ const ctx = c.getContext('2d');
 c.width = window.innerWidth;
 c.height = window.innerHeight;
 
+const WORLD_W = 4000;
+const WORLD_H = 4000;
+const BASE_SIZE = 10;
+const MAX_FOOD = 500;
+const MAX_BOTS = 10;
+
+const BOT_NAMES = [
+	'Globulus','Blobsworth','Oozebert','Slimon','Gloopus',
+	'Muckling','Vacuole','Cytoplasm','Nucleon','Flagellum',
+	'Amoebius','Rhizopod','Plasmodex','Goobert','Dribbles'
+];
+
 function calcSpeed(size) {
-	return Math.pow(10 / size, 0.15) * 2;
+	return Math.pow(BASE_SIZE / size, 0.45) * 3;
+}
+
+function randColor() {
+	return `hsl(${Math.floor(Math.random() * 360)}, 70%, 55%)`;
+}
+
+function randName() {
+	return BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
 }
 
 class Cell {
 	constructor() {
-		this.size = 10;
-		this.speed = 2;
-		this.x = window.innerWidth / 2;
-		this.y = window.innerHeight / 2;
+		this.size  = BASE_SIZE;
+		this.speed = calcSpeed(BASE_SIZE);
+		this.x     = WORLD_W / 2;
+		this.y     = WORLD_H / 2;
+		this.color = randColor();
+		this.velX  = 0;
+		this.velY  = 0;
 	}
 }
 
 class Bot {
 	constructor() {
-		this.size = 10;
-		this.speed = 2;
-		this.x = Math.random() * window.innerWidth;
-		this.y = Math.random() * window.innerHeight;
-		this.goalX = Math.random() * window.innerWidth;
-		this.goalY = Math.random() * window.innerHeight;
+		this.size  = BASE_SIZE;
+		this.speed = calcSpeed(BASE_SIZE);
+		this.x     = Math.random() * WORLD_W;
+		this.y     = Math.random() * WORLD_H;
+		this.goalX = Math.random() * WORLD_W;
+		this.goalY = Math.random() * WORLD_H;
+		this.color = randColor();
+		this.name  = randName();
+		this.velX  = 0;
+		this.velY  = 0;
 	}
 }
 
 class Food {
 	constructor() {
-		this.x = Math.random() * window.innerWidth;
-		this.y = Math.random() * window.innerHeight;
-		this.size = Math.random() * 3 + 1;
-		this.color = `rgb(${Math.floor(Math.random() * 101) + 155},${Math.floor(Math.random() * 101) + 155},${Math.floor(Math.random() * 101) + 155})`;
+		this.x     = Math.random() * WORLD_W;
+		this.y     = Math.random() * WORLD_H;
+		this.size  = Math.random() * 3 + 1;
+		this.color = `rgb(${Math.floor(Math.random()*101)+155},${Math.floor(Math.random()*101)+155},${Math.floor(Math.random()*101)+155})`;
 	}
 }
 
 const food = [];
-const bots = [new Bot()];
+const bots = [];
 const cell = new Cell();
 
-let frames = 0;
+for (let i = 0; i < 5; i++) bots.push(new Bot());
+for (let i = 0; i < 200; i++) food.push(new Food());
+
+let frames    = 0;
 let botFrames = 0;
+let time      = 0;
+let camScale  = 1;
 
 function loop() {
+	time++;
 	frames++;
 	botFrames++;
 
-	if (frames >= 25 && food.length < 500) {
+	if (frames >= 25 && food.length < MAX_FOOD) {
 		frames = 0;
 		food.push(new Food());
 	}
 
-	if (botFrames >= 10000 && bots.length < 10) {
+	if (botFrames >= 100 && bots.length < MAX_BOTS) {
 		bots.push(new Bot());
 		botFrames = 0;
 	}
@@ -70,30 +103,64 @@ function loop() {
 	eatFood();
 	eatBots();
 
+	camScale = Math.max(0.15, Math.min(1, Math.pow(BASE_SIZE / cell.size, 0.5)));
+
 	draw();
 	requestAnimationFrame(loop);
 }
 
 function moveCell() {
-	let dx = mouseX - cell.x;
-	let dy = mouseY - cell.y;
+	let dx   = mouseX - c.width / 2;
+	let dy   = mouseY - c.height / 2;
 	let dist = Math.hypot(dx, dy);
-	if (dist < cell.speed) return;
-	cell.x += (dx / dist) * cell.speed;
-	cell.y += (dy / dist) * cell.speed;
+	if (dist < 1) { cell.velX = 0; cell.velY = 0; return; }
+	cell.velX = (dx / dist) * cell.speed;
+	cell.velY = (dy / dist) * cell.speed;
+	cell.x = Math.max(0, Math.min(WORLD_W, cell.x + cell.velX));
+	cell.y = Math.max(0, Math.min(WORLD_H, cell.y + cell.velY));
+}
+
+function updateBotGoal(b) {
+	let bestScore = -Infinity;
+	let bestX = b.goalX;
+	let bestY = b.goalY;
+
+	for (let f of food) {
+		let score = f.size / (Math.hypot(f.x - b.x, f.y - b.y) + 1);
+		if (score > bestScore) { bestScore = score; bestX = f.x; bestY = f.y; }
+	}
+
+	for (let other of bots) {
+		if (other === b || b.size < other.size * 1.1) continue;
+		let score = other.size / (Math.hypot(other.x - b.x, other.y - b.y) + 1) * 3;
+		if (score > bestScore) { bestScore = score; bestX = other.x; bestY = other.y; }
+	}
+
+	if (b.size >= cell.size * 1.1) {
+		let score = cell.size / (Math.hypot(cell.x - b.x, cell.y - b.y) + 1) * 3;
+		if (score > bestScore) { bestX = cell.x; bestY = cell.y; }
+	}
+
+	b.goalX = bestX;
+	b.goalY = bestY;
 }
 
 function moveBots() {
 	for (let b of bots) {
-		let dx = b.goalX - b.x;
-		let dy = b.goalY - b.y;
+		updateBotGoal(b);
+		let dx   = b.goalX - b.x;
+		let dy   = b.goalY - b.y;
 		let dist = Math.hypot(dx, dy);
 		if (dist > b.speed) {
-			b.x += (dx / dist) * b.speed;
-			b.y += (dy / dist) * b.speed;
+			b.velX = (dx / dist) * b.speed;
+			b.velY = (dy / dist) * b.speed;
+			b.x += b.velX;
+			b.y += b.velY;
 		} else {
-			b.goalX = Math.random() * window.innerWidth;
-			b.goalY = Math.random() * window.innerHeight;
+			b.velX = 0;
+			b.velY = 0;
+			b.goalX = Math.random() * WORLD_W;
+			b.goalY = Math.random() * WORLD_H;
 		}
 	}
 }
@@ -120,9 +187,8 @@ function eatFood() {
 }
 
 function eatBots() {
-	// Cell vs bot
 	for (let i = bots.length - 1; i >= 0; i--) {
-		let b = bots[i];
+		let b    = bots[i];
 		let dist = Math.hypot(b.x - cell.x, b.y - cell.y);
 		if (cell.size >= b.size * 1.1 && dist < cell.size) {
 			cell.size += b.size * 0.5;
@@ -132,19 +198,20 @@ function eatBots() {
 		}
 		if (b.size >= cell.size * 1.1 && dist < b.size) {
 			alert('You were eaten! Restarting...');
-			cell.size = 10;
-			cell.speed = 2;
-			cell.x = window.innerWidth / 2;
-			cell.y = window.innerHeight / 2;
+			cell.size  = BASE_SIZE;
+			cell.speed = calcSpeed(BASE_SIZE);
+			cell.x     = WORLD_W / 2;
+			cell.y     = WORLD_H / 2;
+			cell.velX  = 0;
+			cell.velY  = 0;
 			return;
 		}
 	}
 
-	// Bot vs bot — j = i-1 avoids duplicate pairs and the i===j check
 	for (let i = bots.length - 1; i >= 0; i--) {
 		for (let j = i - 1; j >= 0; j--) {
-			let a = bots[i];
-			let b = bots[j];
+			let a    = bots[i];
+			let b    = bots[j];
 			let dist = Math.hypot(a.x - b.x, a.y - b.y);
 			if (a.size >= b.size * 1.1 && dist < a.size) {
 				a.size += b.size * 0.5;
@@ -161,27 +228,87 @@ function eatBots() {
 	}
 }
 
+// Draws a wobbly amoeba shape. Stretches in the direction of movement.
+function drawAmoeba(x, y, radius, color, velX, velY) {
+	const N          = 12;
+	const wobbleAmt  = radius * 0.18;
+	const speed      = Math.hypot(velX, velY);
+	const stretchAmt = Math.min(speed / 3, 1) * radius * 0.28;
+	const moveAngle  = speed > 0.01 ? Math.atan2(velY, velX) : 0;
+
+	let pts = [];
+	for (let i = 0; i < N; i++) {
+		let angle  = (i / N) * Math.PI * 2;
+		let wobble = Math.sin(angle * 3 + time * 0.07) * wobbleAmt;
+		let align  = Math.cos(angle - moveAngle);
+		let r      = radius + wobble + align * stretchAmt;
+		pts.push({ x: x + Math.cos(angle) * r, y: y + Math.sin(angle) * r });
+	}
+
+	ctx.fillStyle = color;
+	ctx.beginPath();
+	let start = { x: (pts[N - 1].x + pts[0].x) / 2, y: (pts[N - 1].y + pts[0].y) / 2 };
+	ctx.moveTo(start.x, start.y);
+	for (let i = 0; i < N; i++) {
+		let p    = pts[i];
+		let next = pts[(i + 1) % N];
+		ctx.quadraticCurveTo(p.x, p.y, (p.x + next.x) / 2, (p.y + next.y) / 2);
+	}
+	ctx.closePath();
+	ctx.fill();
+}
+
+function drawLabel(x, y, radius, text) {
+	let fontSize = Math.max(8, Math.min(radius * 0.65, 20));
+	ctx.fillStyle    = 'white';
+	ctx.font         = `bold ${fontSize}px sans-serif`;
+	ctx.textAlign    = 'center';
+	ctx.textBaseline = 'middle';
+	ctx.fillText(text, x, y);
+}
+
 function draw() {
 	ctx.clearRect(0, 0, c.width, c.height);
 
-	ctx.fillStyle = 'green';
-	ctx.beginPath();
-	ctx.arc(cell.x, cell.y, cell.size, 0, 2 * Math.PI);
-	ctx.fill();
+	ctx.save();
+	ctx.translate(c.width / 2, c.height / 2);
+	ctx.scale(camScale, camScale);
+	ctx.translate(-cell.x, -cell.y);
 
-	ctx.fillStyle = 'blue';
-	for (let b of bots) {
-		ctx.beginPath();
-		ctx.arc(b.x, b.y, b.size, 0, 2 * Math.PI);
-		ctx.fill();
+	// Grid
+	ctx.strokeStyle = '#111';
+	ctx.lineWidth   = 1;
+	for (let x = 0; x <= WORLD_W; x += 100) {
+		ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD_H); ctx.stroke();
+	}
+	for (let y = 0; y <= WORLD_H; y += 100) {
+		ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_W, y); ctx.stroke();
 	}
 
+	// Arena border
+	ctx.strokeStyle = '#c0394b';
+	ctx.lineWidth   = 8;
+	ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
+
+	// Food
 	for (let f of food) {
 		ctx.fillStyle = f.color;
 		ctx.beginPath();
 		ctx.arc(f.x, f.y, f.size, 0, 2 * Math.PI);
 		ctx.fill();
 	}
+
+	// Bots
+	for (let b of bots) {
+		drawAmoeba(b.x, b.y, b.size, b.color, b.velX, b.velY);
+		drawLabel(b.x, b.y, b.size, b.name);
+	}
+
+	// Player
+	drawAmoeba(cell.x, cell.y, cell.size, cell.color, cell.velX, cell.velY);
+	drawLabel(cell.x, cell.y, cell.size, '(you)');
+
+	ctx.restore();
 }
 
 requestAnimationFrame(loop);
