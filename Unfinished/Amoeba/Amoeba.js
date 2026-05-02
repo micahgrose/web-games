@@ -105,7 +105,8 @@ function loop() {
 	eatFood();
 	eatBots();
 
-	camScale = Math.max(0.15, Math.min(1, Math.pow(BASE_SIZE / cell.size, 0.5)));
+	const targetScale = Math.max(0.15, Math.min(1, Math.pow(BASE_SIZE / cell.size, 0.5)));
+	camScale += (targetScale - camScale) * 0.05;
 
 	draw();
 	requestAnimationFrame(loop);
