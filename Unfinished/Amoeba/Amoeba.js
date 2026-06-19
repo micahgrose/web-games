@@ -11,16 +11,22 @@ const ctx = c.getContext('2d');
 c.width = window.innerWidth;
 c.height = window.innerHeight;
 
-const WORLD_W = 4000;
-const WORLD_H = 4000;
+const WORLD_W = 5000;
+const WORLD_H = 5000;
 const BASE_SIZE = 10;
-const MAX_FOOD = 500;
+const MAX_FOOD = 2500;
 const MAX_BOTS = 10;
 
 const BOT_NAMES = [
 	'Globulus','Blobsworth','Oozebert','Slimon','Gloopus',
 	'Muckling','Vacuole','Cytoplasm','Nucleon','Flagellum',
-	'Amoebius','Rhizopod','Plasmodex','Goobert','Dribbles'
+	'Amoebius','Rhizopod','Plasmodex','Goobert','Dribbles',
+	'Gelatrix','Sploobus','Mirello','Gunkle','Slorbin',
+	'Viscora','Blorple','Oozington','Glumple','Squishard',
+	'Dribblen','Mucor','Slatherby','Globulex','Glimbus',
+	'Snotrix','Puddlox','Glarbo','Slimeon','Blobrick','Oozle'
+	,'Gorpheus','Sludgik','Plorp','Drizzleth','Gloobus','Squorp'
+	,'Mirex','Blobbington','Gunkus'
 ];
 
 function calcSpeed(size) {
