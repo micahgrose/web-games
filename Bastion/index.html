@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bastion</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e13">
+<meta name="description" content="A turn-based tactics defense. Every threat is telegraphed. Move, push, and redirect to hold the line.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20x='4'%20y='4'%20width='16'%20height='16'%20rx='3'%20fill='%231a2230'%20stroke='%2336d6c0'%20stroke-width='2'/%3E%3Crect%20x='9'%20y='9'%20width='6'%20height='6'%20rx='1.5'%20fill='%2336d6c0'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b0e13;
+    --panel:#11161f;
+    --panel2:#161d28;
+    --ink:#e9f0f7;
+    --muted:#7e8aa0;
+    --line:#222b3a;
+    --teal:#36d6c0;
+    --amber:#ffb454;
+    --red:#ff5d6c;
+    --violet:#b46cff;
+    --gold:#ffd166;
+    --good:#7ee0a8;
+    --font:"Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:var(--font); overflow:hidden; overscroll-behavior:none;
+    user-select:none; -webkit-user-select:none; touch-action:none; }
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column;
+    background:radial-gradient(130% 90% at 50% -10%, #18202e 0%, var(--bg) 60%); }
+
+  /* ---------- top HUD ---------- */
+  header{ flex:0 0 auto; display:flex; align-items:center; gap:12px;
+    padding:10px 14px 8px; max-width:680px; width:100%; margin:0 auto; }
+  .brand{ display:flex; flex-direction:column; line-height:1; }
+  .brand b{ font-size:16px; letter-spacing:.32em; text-transform:uppercase; color:var(--teal); font-weight:800; }
+  .brand small{ font-size:9px; letter-spacing:.26em; text-transform:uppercase; color:var(--muted); margin-top:4px; }
+  .stats{ margin-left:auto; display:flex; gap:14px; align-items:center; }
+  .stat{ text-align:right; line-height:1.05; }
+  .stat .l{ font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
+  .stat .v{ font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .stat.best .v{ font-size:14px; color:var(--gold); }
+  .grid-pips{ display:flex; gap:4px; justify-content:flex-end; margin-top:3px; }
+  .pip{ width:11px; height:11px; border-radius:3px; background:#2a3342;
+    box-shadow:inset 0 0 0 1px #38465c; transition:all .25s ease; }
+  .pip.on{ background:linear-gradient(180deg,#7fe9da,#2bb5a3); box-shadow:0 0 8px rgba(54,214,192,.6); }
+
+  /* ---------- board ---------- */
+  #boardWrap{ flex:1 1 auto; display:flex; align-items:center; justify-content:center; padding:6px 10px; min-height:0; }
+  #board{ display:block; border-radius:14px; touch-action:none;
+    box-shadow:0 18px 50px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.03); }
+
+  /* ---------- bottom control bar ---------- */
+  footer{ flex:0 0 auto; width:100%; max-width:680px; margin:0 auto; padding:6px 12px 14px; }
+  .hint{ min-height:20px; text-align:center; color:var(--muted); font-size:13px;
+    letter-spacing:.02em; margin-bottom:8px; }
+  .hint b{ color:var(--ink); font-weight:600; }
+  .hint .k{ color:var(--teal); font-weight:700; }
+  .controls{ display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+  .btn{ border:1px solid var(--line); background:var(--panel2); color:var(--ink);
+    font-family:inherit; font-weight:600; font-size:14px; letter-spacing:.02em;
+    padding:11px 16px; border-radius:11px; cursor:pointer; min-width:96px;
+    transition:transform .1s ease, background .15s ease, border-color .15s ease, opacity .15s; }
+  .btn:hover{ background:#1d2533; }
+  .btn:active{ transform:translateY(1px); }
+  .btn[disabled]{ opacity:.32; pointer-events:none; }
+  .btn.primary{ border-color:rgba(54,214,192,.55);
+    background:linear-gradient(180deg, rgba(54,214,192,.2), rgba(54,214,192,.07)); }
+  .btn.primary:hover{ background:linear-gradient(180deg, rgba(54,214,192,.3), rgba(54,214,192,.12)); }
+  .btn.fire{ border-color:rgba(255,93,108,.6);
+    background:linear-gradient(180deg, rgba(255,93,108,.22), rgba(255,93,108,.08)); }
+  .btn.fire:hover{ background:linear-gradient(180deg, rgba(255,93,108,.32), rgba(255,93,108,.14)); }
+  .btn.hide{ display:none; }
+
+  /* ---------- overlays ---------- */
+  .screen{ position:fixed; inset:0; z-index:20; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:26px; gap:14px;
+    background:radial-gradient(120% 90% at 50% 35%, rgba(16,22,32,.66), rgba(7,9,13,.94));
+    backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+    transition:opacity .35s ease; }
+  .screen.hidden{ opacity:0; pointer-events:none; }
+  .big-title{ font-size:clamp(44px,15vw,104px); font-weight:800; letter-spacing:.16em; margin:0; line-height:1;
+    color:var(--teal); text-shadow:0 0 30px rgba(54,214,192,.4), 0 0 70px rgba(54,214,192,.16); }
+  .lead{ color:var(--muted); max-width:34ch; font-size:clamp(14px,3.5vw,17px); line-height:1.5; margin:0; }
+  .legend{ display:grid; grid-template-columns:auto 1fr; gap:6px 12px; text-align:left;
+    background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 18px;
+    max-width:380px; width:100%; font-size:13px; color:#c4cdda; }
+  .legend .ic{ font-weight:800; }
+  .legend .ic.teal{ color:var(--teal);} .legend .ic.amber{ color:var(--amber);}
+  .legend .ic.red{ color:var(--red);} .legend .ic.gold{ color:var(--gold);}
+  .start-btn{ margin-top:6px; border:1px solid rgba(54,214,192,.55); color:var(--ink);
+    background:linear-gradient(180deg, rgba(54,214,192,.22), rgba(54,214,192,.07));
+    font-family:inherit; font-weight:700; font-size:18px; letter-spacing:.08em;
+    padding:14px 36px; border-radius:999px; cursor:pointer;
+    transition:transform .12s ease, box-shadow .2s ease; }
+  .start-btn:hover{ transform:translateY(-1px); box-shadow:0 8px 30px rgba(54,214,192,.28); }
+  .start-btn:active{ transform:translateY(0) scale(.98); }
+  .go-big{ font-size:clamp(30px,9vw,64px); font-weight:800; margin:0; line-height:1; }
+  .go-sub{ color:var(--muted); font-size:13px; letter-spacing:.16em; text-transform:uppercase; margin:0; }
+  .go-stat{ font-size:clamp(40px,13vw,80px); font-weight:800; color:var(--teal); margin:0; line-height:1;
+    font-variant-numeric:tabular-nums; }
+  .newbest{ color:var(--gold); font-weight:700; letter-spacing:.12em; text-transform:uppercase; font-size:13px;
+    animation:pop .5s ease; }
+  @keyframes pop{ 0%{transform:scale(.5);opacity:0} 60%{transform:scale(1.12)} 100%{transform:scale(1);opacity:1} }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand"><b>Bastion</b><small>Hold the Line</small></div>
+    <div class="stats">
+      <div class="stat"><div class="l">Turn</div><div class="v" id="uiTurn">1</div></div>
+      <div class="stat"><div class="l">Score</div><div class="v" id="uiScore">0</div></div>
+      <div class="stat best"><div class="l">Grid</div><div class="grid-pips" id="uiPips"></div></div>
+    </div>
+  </header>
+
+  <div id="boardWrap"><canvas id="board"></canvas></div>
+
+  <footer>
+    <div class="hint" id="hint"></div>
+    <div class="controls" id="controls">
+      <button class="btn" id="btnUndo">Undo Move</button>
+      <button class="btn fire" id="btnFire">Fire</button>
+      <button class="btn" id="btnDone">Hold Fire</button>
+      <button class="btn" id="btnReset">Reset Turn</button>
+      <button class="btn primary" id="btnEnd">End Turn</button>
+    </div>
+  </footer>
+</div>
+
+<!-- start screen -->
+<div class="screen" id="startScreen">
+  <h1 class="big-title">BASTION</h1>
+  <p class="lead">Outnumbered, but never surprised. Every enemy shows its next strike before it lands. Move your two machines, fire to <b>push</b> — knock attackers off their mark, into each other, or off the board. Protect the glowing cores.</p>
+  <div class="legend">
+    <div class="ic teal">◧</div><div>Striker — fires a bolt in one direction, shoving what it hits.</div>
+    <div class="ic amber">◈</div><div>Mortar — lands on any tile, blasting all four neighbors outward.</div>
+    <div class="ic red">⚠</div><div>Red marks show exactly where enemies will hit next turn.</div>
+    <div class="ic gold">▣</div><div>Lose a core and the Grid drops. At zero Grid, the line falls.</div>
+  </div>
+  <button class="start-btn" id="btnStart">Deploy</button>
+</div>
+
+<!-- game over screen -->
+<div class="screen hidden" id="overScreen">
+  <p class="go-sub">The line has fallen</p>
+  <p class="go-stat" id="overScore">0</p>
+  <p class="go-big" id="overTurns">Held 0 turns</p>
+  <p class="newbest hidden" id="overNew">New Best</p>
+  <p class="lead" id="overBest"></p>
+  <button class="start-btn" id="btnAgain">Redeploy</button>
+</div>
+
+<script>
+"use strict";
+(function(){
+//===================================================================
+// CONFIG
+//===================================================================
+const W = 8, H = 8;
+const START_GRID = 5;
+const MORTAR_RANGE = 5;          // Manhattan range of the mortar mech
+const SCORE_KILL = 10;
+const SCORE_TURN = 5;
+const BEST_KEY = "bastion.best.v1";
+
+const TYPE = {
+  crawler: { name:"Crawler", hp:1, move:2, melee:true,  pushable:true,  dmg:1, color:"#ff5d6c", dark:"#7a2530" },
+  spitter: { name:"Spitter", hp:1, move:1, melee:false, pushable:true,  dmg:1, color:"#b46cff", dark:"#4d2f73" },
+  brute:   { name:"Brute",   hp:3, move:1, melee:true,  pushable:false, dmg:2, color:"#ff8b3d", dark:"#7a3f18" },
+};
+const DIRS = [ {x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1} ];
+
+//===================================================================
+// STATE
+//===================================================================
+let terrain;        // 2D: 'open'|'building'|'mountain'|'rubble'
+let units;          // array of unit objects
+let emergence;      // array {x,y,type}
+let grid;           // power
+let turn;           // current turn number
+let score;
+let nextId = 1;
+let phase;          // 'player' | 'enemy' | 'over' | 'menu'
+let busy = false;   // input locked during animations
+let snapshot = null;// for Reset Turn
+
+// selection / UI state machine
+let sel = { mech:null, stage:"idle", target:null, preview:null };
+// stage: idle | move | aim | preview
+
+const effects = [];  // transient visual effects
+
+//===================================================================
+// DOM
+//===================================================================
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const elTurn = document.getElementById("uiTurn");
+const elScore = document.getElementById("uiScore");
+const elPips = document.getElementById("uiPips");
+const elHint = document.getElementById("hint");
+const btnUndo = document.getElementById("btnUndo");
+const btnFire = document.getElementById("btnFire");
+const btnDone = document.getElementById("btnDone");
+const btnReset = document.getElementById("btnReset");
+const btnEnd = document.getElementById("btnEnd");
+const startScreen = document.getElementById("startScreen");
+const overScreen = document.getElementById("overScreen");
+
+let boardPx = 480, tilePx = 60, dpr = 1;
+
+//===================================================================
+// HELPERS
+//===================================================================
+const inB = (x,y)=> x>=0 && x<W && y>=0 && y<H;
+const key = (x,y)=> x+","+y;
+const manh = (a,b,c,d)=> Math.abs(a-c)+Math.abs(b-d);
+function unitAt(x,y){ for(const u of units){ if(u.alive && u.x===x && u.y===y) return u; } return null; }
+function mechs(){ return units.filter(u=>u.alive && u.side==="mech"); }
+function enemies(){ return units.filter(u=>u.alive && u.side==="enemy"); }
+function isSolid(x,y){ // blocks movement & pushes (terrain only)
+  const t = terrain[y][x]; return t==="mountain" || t==="building";
+}
+function passable(x,y){ // for mech/enemy pathing onto a tile (must be empty too)
+  return inB(x,y) && !isSolid(x,y) && !unitAt(x,y);
+}
+const wait = ms => new Promise(r=> setTimeout(r, ms));
+function rnd(n){ return Math.floor(Math.random()*n); }
+function pick(arr){ return arr[rnd(arr.length)]; }
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=rnd(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+
+//===================================================================
+// SETUP
+//===================================================================
+function newGame(){
+  terrain = [];
+  for(let y=0;y<H;y++){ terrain.push(new Array(W).fill("open")); }
+  units = []; emergence = []; effects.length = 0;
+  grid = START_GRID; turn = 1; score = 0; nextId = 1;
+  sel = { mech:null, stage:"idle", target:null, preview:null };
+
+  // --- buildings: cluster of cores in the middle band ---
+  const buildSpots = [];
+  const cy = 4;
+  const candidates = shuffle([
+    {x:2,y:cy},{x:3,y:cy},{x:4,y:cy},{x:5,y:cy},
+    {x:3,y:cy-1},{x:4,y:cy-1},{x:3,y:cy+1},{x:4,y:cy+1},{x:5,y:cy+1},{x:2,y:cy+1}
+  ]);
+  for(let i=0;i<5 && i<candidates.length;i++){ const s=candidates[i]; terrain[s.y][s.x]="building"; buildSpots.push(s); }
+
+  // --- a couple of mountains for cover (not on buildings) ---
+  let placed=0, guard=0;
+  while(placed<2 && guard++<60){
+    const x=rnd(W), y=2+rnd(4);
+    if(terrain[y][x]==="open" && !buildSpots.some(b=>b.x===x&&b.y===y)){ terrain[y][x]="mountain"; placed++; }
+  }
+
+  // --- mechs near the bottom ---
+  addMech("striker", 2, 7, "cannon");
+  addMech("mortar", 5, 7, "artillery");
+
+  // --- initial enemies along the top ---
+  const topSpots = shuffle([{x:1,y:0},{x:3,y:0},{x:5,y:0},{x:6,y:0},{x:2,y:1},{x:4,y:1},{x:6,y:1}]);
+  let n=0;
+  for(const s of topSpots){
+    if(n>=3) break;
+    if(passable(s.x,s.y)){ spawnEnemy(s.x,s.y,"crawler"); n++; }
+  }
+  // seed their first telegraph + first emergence
+  queueAllEnemyAttacks();
+  planEmergence();
+
+  phase = "player";
+  takeSnapshot();
+  updateHUD();
+  setHint();
+}
+
+function addMech(name,x,y,weapon){
+  units.push({ id:nextId++, side:"mech", name, type:weapon, weapon, x,y, px:x,py:y,
+    hp:3, maxhp:3, moved:false, acted:false, sx:x, sy:y, alive:true });
+}
+function spawnEnemy(x,y,t){
+  const d = TYPE[t];
+  units.push({ id:nextId++, side:"enemy", etype:t, x,y, px:x,py:y,
+    hp:d.hp, maxhp:d.hp, move:d.move, melee:d.melee, pushable:d.pushable,
+    dmg:d.dmg, color:d.color, dark:d.dark, queued:null, alive:true, spawnT:0 });
+}
+
+//===================================================================
+// SNAPSHOT (Reset Turn)
+//===================================================================
+function takeSnapshot(){
+  snapshot = JSON.stringify({
+    terrain, grid, turn, score,
+    emergence,
+    units: units.map(u=>({...u}))
+  });
+}
+function restoreSnapshot(){
+  if(!snapshot) return;
+  const s = JSON.parse(snapshot);
+  terrain = s.terrain; grid = s.grid; turn = s.turn; score = s.score;
+  emergence = s.emergence;
+  units = s.units.map(u=>({...u}));
+  // reset render positions
+  for(const u of units){ u.px=u.x; u.py=u.y; }
+  effects.length = 0;
+  sel = { mech:null, stage:"idle", target:null, preview:null };
+  updateHUD(); setHint();
+}
+
+//===================================================================
+// MECH WEAPON TARGETING
+//===================================================================
+function reachable(mech){
+  // BFS over passable tiles up to mech.move (mechs move = 3)
+  const range = 3;
+  const dist = {}; dist[key(mech.x,mech.y)] = 0;
+  const q = [{x:mech.x,y:mech.y}];
+  const out = [{x:mech.x,y:mech.y}];
+  while(q.length){
+    const c = q.shift(); const d = dist[key(c.x,c.y)];
+    if(d>=range) continue;
+    for(const dr of DIRS){
+      const nx=c.x+dr.x, ny=c.y+dr.y, k=key(nx,ny);
+      if(dist[k]!==undefined) continue;
+      if(!passable(nx,ny)) continue;
+      dist[k]=d+1; q.push({x:nx,y:ny}); out.push({x:nx,y:ny});
+    }
+  }
+  return out;
+}
+// cannon: first solid/unit tile in each direction
+function cannonTargets(mech){
+  const out = [];
+  for(const dr of DIRS){
+    let x=mech.x+dr.x, y=mech.y+dr.y;
+    while(inB(x,y)){
+      if(unitAt(x,y) || isSolid(x,y)){ out.push({x,y,dir:dr}); break; }
+      x+=dr.x; y+=dr.y;
+    }
+  }
+  return out;
+}
+function mortarTargets(mech){
+  const out=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const d = manh(mech.x,mech.y,x,y);
+    if(d>=1 && d<=MORTAR_RANGE) out.push({x,y});
+  }
+  return out;
+}
+function weaponTargets(mech){
+  return mech.weapon==="cannon" ? cannonTargets(mech) : mortarTargets(mech);
+}
+// describe affected tiles + pushes for preview
+function previewFor(mech,target){
+  if(mech.weapon==="cannon"){
+    return { hits:[{x:target.x,y:target.y,dmg:1}], pushes:[{x:target.x,y:target.y,dir:target.dir}] };
+  } else {
+    const hits=[{x:target.x,y:target.y,dmg:1}];
+    const pushes=[];
+    for(const dr of DIRS){
+      const nx=target.x+dr.x, ny=target.y+dr.y;
+      if(inB(nx,ny)) pushes.push({x:nx,y:ny,dir:dr});
+    }
+    return { hits, pushes };
+  }
+}
+
+//===================================================================
+// DAMAGE / PUSH
+//===================================================================
+function addEffect(e){ e.t=0; e.life=e.life||0.45; effects.push(e); }
+
+function damageUnit(u, n){
+  if(!u || !u.alive) return;
+  u.hp -= n;
+  addEffect({ type:"hit", x:u.x, y:u.y });
+  if(u.hp<=0){ killUnit(u); }
+}
+function killUnit(u){
+  if(!u.alive) return;
+  u.alive=false;
+  addEffect({ type:"die", x:u.x, y:u.y, color:u.side==="enemy"?u.color:"#36d6c0" });
+  if(u.side==="enemy"){ score += SCORE_KILL; }
+}
+function destroyBuilding(x,y){
+  if(terrain[y][x]!=="building") return;
+  terrain[y][x]="rubble";
+  grid = Math.max(0, grid-1);
+  addEffect({ type:"core", x, y });
+}
+// push a unit one tile in dir; handle collisions
+function pushUnit(u, dir){
+  if(!u || !u.alive || !u.pushable && u.side==="enemy") return;
+  if(u.side==="enemy" && !u.pushable) return; // heavy
+  const nx=u.x+dir.x, ny=u.y+dir.y;
+  if(!inB(nx,ny)){ damageUnit(u,1); return; }                 // shoved into the edge
+  if(terrain[ny][nx]==="building"){ destroyBuilding(nx,ny); damageUnit(u,1); return; }
+  if(terrain[ny][nx]==="mountain"){ terrain[ny][nx]="rubble"; addEffect({type:"core",x:nx,y:ny,plain:true}); damageUnit(u,1); return; }
+  const other = unitAt(nx,ny);
+  if(other){ damageUnit(u,1); damageUnit(other,1); return; }   // bumped into another unit
+  u.x=nx; u.y=ny;                                              // free to slide
+}
+
+//===================================================================
+// FIRE A WEAPON
+//===================================================================
+function fireWeapon(mech, target){
+  const dmgTiles = [];
+  if(mech.weapon==="cannon"){
+    addEffect({ type:"bolt", fromx:mech.x, fromy:mech.y, x:target.x, y:target.y, color:"#36d6c0" });
+    const t = terrain[target.y][target.x];
+    const v = unitAt(target.x,target.y);
+    if(v){ damageUnit(v,1); pushUnit(v, target.dir); }
+    else if(t==="building"){ destroyBuilding(target.x,target.y); }
+    else if(t==="mountain"){ terrain[target.y][target.x]="rubble"; addEffect({type:"core",x:target.x,y:target.y,plain:true}); }
+  } else {
+    addEffect({ type:"mortar", x:target.x, y:target.y });
+    const v = unitAt(target.x,target.y);
+    if(v) damageUnit(v,1);
+    else if(terrain[target.y][target.x]==="building") destroyBuilding(target.x,target.y);
+    else if(terrain[target.y][target.x]==="mountain"){ terrain[target.y][target.x]="rubble"; addEffect({type:"core",x:target.x,y:target.y,plain:true}); }
+    // push 4 neighbours outward (collect first, then apply)
+    for(const dr of DIRS){
+      const nx=target.x+dr.x, ny=target.y+dr.y;
+      const nv = unitAt(nx,ny);
+      if(nv) dmgTiles.push({u:nv,dir:dr});
+    }
+    for(const p of dmgTiles) pushUnit(p.u, p.dir);
+  }
+  mech.acted = true;
+}
+
+//===================================================================
+// ENEMY AI
+//===================================================================
+function targetTiles(){ // tiles enemies want to reach/hit: buildings + mechs
+  const out=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) if(terrain[y][x]==="building") out.push({x,y,kind:"core"});
+  for(const m of mechs()) out.push({x:m.x,y:m.y,kind:"mech"});
+  return out;
+}
+function nearestTarget(u, tgs){
+  let best=null, bd=1e9;
+  for(const t of tgs){ const d=manh(u.x,u.y,t.x,t.y); if(d<bd){ bd=d; best=t; } }
+  return best;
+}
+// cardinal line of sight; returns first solid/unit tile struck, or null if clear to edge
+function traceLine(x,y,dir){
+  let cx=x+dir.x, cy=y+dir.y;
+  while(inB(cx,cy)){
+    if(unitAt(cx,cy) || isSolid(cx,cy)) return {x:cx,y:cy};
+    cx+=dir.x; cy+=dir.y;
+  }
+  return null;
+}
+// BFS distances from a unit over passable tiles (treats other units as blockers)
+function bfsFrom(u){
+  const dist={}; dist[key(u.x,u.y)]=0; const q=[{x:u.x,y:u.y}];
+  while(q.length){
+    const c=q.shift(); const d=dist[key(c.x,c.y)];
+    for(const dr of DIRS){
+      const nx=c.x+dr.x, ny=c.y+dr.y, k=key(nx,ny);
+      if(dist[k]!==undefined) continue;
+      if(!passable(nx,ny)) continue;
+      dist[k]=d+1; q.push({x:nx,y:ny});
+    }
+  }
+  return dist;
+}
+function enemyChooseMove(u){
+  const tgs = targetTiles();
+  if(!tgs.length) return {x:u.x,y:u.y};
+  const tgt = nearestTarget(u,tgs);
+  const dist = bfsFrom(u);
+  // candidate tiles within move range (plus staying put)
+  const cands = [{x:u.x,y:u.y}];
+  for(const k in dist){ if(dist[k]>0 && dist[k]<=u.move){ const [x,y]=k.split(",").map(Number); cands.push({x,y}); } }
+  let best=cands[0], bestScore=-1e9;
+  for(const c of cands){
+    let s=0;
+    const dToTgt = manh(c.x,c.y,tgt.x,tgt.y);
+    if(u.melee){
+      // want to be adjacent to ANY target
+      let adj=false;
+      for(const t of tgs){ if(manh(c.x,c.y,t.x,t.y)===1){ adj=true; break; } }
+      s = (adj?1000:0) - dToTgt*4 - (dist[key(c.x,c.y)]||0);
+    } else {
+      // spitter: want clear cardinal LOS to a target, ideally at range>=2
+      let los=false, losDist=99;
+      for(const t of tgs){
+        if(c.x===t.x || c.y===t.y){
+          const dr = { x:Math.sign(t.x-c.x), y:Math.sign(t.y-c.y) };
+          const hit = traceLine(c.x,c.y,dr);
+          if(hit && hit.x===t.x && hit.y===t.y){ los=true; losDist=Math.min(losDist, manh(c.x,c.y,t.x,t.y)); }
+        }
+      }
+      s = (los?1000:0) + (los&&losDist>=2?120:0) - dToTgt*4 - (dist[key(c.x,c.y)]||0);
+    }
+    // small bias to keep formation deterministic-ish, prefer less movement on ties
+    if(s>bestScore){ bestScore=s; best=c; }
+  }
+  return best;
+}
+// An enemy's attack is stored as a DIRECTION, not a fixed tile. The struck
+// tile is recomputed live from the enemy's current position — so shoving an
+// attacker redirects (or cancels) its strike, and the telegraph follows it.
+function enemyQueue(u){
+  u.queued=null;
+  const tgs = targetTiles();
+  if(!tgs.length) return;
+  if(u.melee){
+    // face an adjacent target (prefer a core, else a mech)
+    let bestDir=null, bestRank=-1;
+    for(const dr of DIRS){
+      const nx=u.x+dr.x, ny=u.y+dr.y;
+      if(!inB(nx,ny)) continue;
+      const isCore = terrain[ny][nx]==="building";
+      const m = unitAt(nx,ny);
+      const isMech = m && m.side==="mech";
+      const rank = isCore?2 : (isMech?1:-1);
+      if(rank>bestRank){ bestRank=rank; bestDir=dr; }
+    }
+    if(bestRank>=0) u.queued = { dir:bestDir, dmg:u.dmg };
+  } else {
+    // spitter: face a cardinal line whose first strike lands on a target
+    let chosen=null;
+    for(const t of tgs){
+      if(u.x===t.x || u.y===t.y){
+        const dr={ x:Math.sign(t.x-u.x), y:Math.sign(t.y-u.y) };
+        const hit=traceLine(u.x,u.y,dr);
+        if(hit){
+          const isTargetTile = (terrain[hit.y][hit.x]==="building") || (unitAt(hit.x,hit.y) && unitAt(hit.x,hit.y).side==="mech");
+          if(isTargetTile){ chosen=dr; break; }
+        }
+      }
+    }
+    if(chosen) u.queued = { dir:chosen, dmg:u.dmg };
+  }
+}
+// the tile(s) an enemy will strike RIGHT NOW, from its current position
+function attackTiles(u){
+  if(!u.queued || !u.alive) return [];
+  const dir=u.queued.dir;
+  if(u.melee){
+    const nx=u.x+dir.x, ny=u.y+dir.y;
+    return inB(nx,ny) ? [{x:nx,y:ny}] : [];
+  } else {
+    const hit=traceLine(u.x,u.y,dir);
+    return hit ? [hit] : [];
+  }
+}
+function queueAllEnemyAttacks(){ for(const e of enemies()) enemyQueue(e); }
+
+//===================================================================
+// EMERGENCE (spawns)
+//===================================================================
+function planEmergence(){
+  emergence = [];
+  const maxOnBoard = Math.min(3 + Math.floor(turn/2), 7);
+  const room = maxOnBoard - enemies().length;
+  if(room<=0) return;
+  const perTurn = turn<3 ? 1 : (turn<7 ? 2 : 3);
+  const count = Math.min(room, perTurn);
+  // open, unoccupied tiles biased toward the upper board
+  const spots=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    if(terrain[y][x]==="open" && !unitAt(x,y)){
+      const weight = (H-y);            // higher rows favoured
+      spots.push({x,y,w:weight});
+    }
+  }
+  if(!spots.length) return;
+  shuffle(spots);
+  spots.sort((a,b)=> b.w - a.w);
+  const chosen = spots.slice(0, Math.min(spots.length, count+3));
+  shuffle(chosen);
+  for(let i=0;i<count && i<chosen.length;i++){
+    const s=chosen[i];
+    if(emergence.some(e=>e.x===s.x&&e.y===s.y)) { i--; continue; }
+    let t="crawler";
+    const r=Math.random();
+    if(turn>=4 && r<0.22) t="brute";
+    else if(r<0.55) t="crawler";
+    else t="spitter";
+    emergence.push({x:s.x,y:s.y,type:t});
+  }
+}
+
+//===================================================================
+// PHASES
+//===================================================================
+function startPlayerPhase(){
+  phase="player";
+  for(const m of mechs()){ m.moved=false; m.acted=false; m.sx=m.x; m.sy=m.y; }
+  sel = { mech:null, stage:"idle", target:null, preview:null };
+  takeSnapshot();
+  updateHUD(); setHint();
+}
+
+async function endTurn(){
+  if(busy || phase!=="player") return;
+  busy=true; sel={mech:null,stage:"idle",target:null,preview:null};
+  phase="enemy"; setHint(); updateButtons();
+
+  // (a) resolve telegraphed attacks (struck tiles recomputed from live positions)
+  const atks = enemies().filter(e=>e.queued);
+  if(atks.length){
+    for(const e of atks){ for(const t of attackTiles(e)) addEffect({type:"strike",x:t.x,y:t.y}); }
+    await wait(360);
+    for(const e of atks){
+      if(!e.alive) continue;
+      for(const t of attackTiles(e)){
+        const v=unitAt(t.x,t.y);
+        if(v) damageUnit(v, e.queued.dmg);
+        else if(terrain[t.y][t.x]==="building") destroyBuilding(t.x,t.y);
+      }
+      e.queued=null;
+    }
+    await wait(260);
+  }
+  cleanup();
+  if(grid<=0 || mechs().length===0){ return gameOver(); }
+
+  // (b) emergence -> new enemies
+  if(emergence.length){
+    for(const e of emergence) addEffect({type:"emerge",x:e.x,y:e.y});
+    await wait(280);
+    for(const e of emergence){
+      const occ=unitAt(e.x,e.y);
+      if(occ){ damageUnit(occ,1); }              // crushed if standing on the rift
+      else if(terrain[e.y][e.x]==="open"){ spawnEnemy(e.x,e.y,e.type); }
+    }
+    emergence=[];
+    cleanup();
+    await wait(220);
+  }
+  if(grid<=0 || mechs().length===0){ return gameOver(); }
+
+  // (c) move enemies (sequential so they don't stack)
+  for(const e of enemies()){
+    const dest = enemyChooseMove(e);
+    if(dest.x!==e.x || dest.y!==e.y){ e.x=dest.x; e.y=dest.y; await wait(120); }
+  }
+  await wait(160);
+
+  // (d) telegraph next strikes
+  queueAllEnemyAttacks();
+  // (e) plan next emergence
+  turn++;
+  planEmergence();
+  score += SCORE_TURN;
+
+  busy=false;
+  startPlayerPhase();
+}
+
+function cleanup(){ units = units.filter(u=>u.alive); }
+
+//===================================================================
+// GAME OVER
+//===================================================================
+function gameOver(){
+  phase="over"; busy=false;
+  let best=0;
+  try{ best=parseInt(localStorage.getItem(BEST_KEY)||"0",10)||0; }catch(e){}
+  const isNew = score>best;
+  if(isNew){ try{ localStorage.setItem(BEST_KEY, String(score)); }catch(e){} best=score; }
+  document.getElementById("overScore").textContent = score;
+  document.getElementById("overTurns").textContent = "Held "+turn+" turn"+(turn===1?"":"s");
+  document.getElementById("overNew").classList.toggle("hidden", !isNew);
+  document.getElementById("overBest").textContent = "Best  "+best;
+  overScreen.classList.remove("hidden");
+}
+
+//===================================================================
+// INPUT — tile picking & state machine
+//===================================================================
+function tileFromEvent(ev){
+  const r = canvas.getBoundingClientRect();
+  const px = (ev.clientX - r.left) / r.width * boardPx;
+  const py = (ev.clientY - r.top)  / r.height* boardPx;
+  const x = Math.floor(px/tilePx), y = Math.floor(py/tilePx);
+  if(!inB(x,y)) return null;
+  return {x,y};
+}
+function onTap(ev){
+  if(busy || phase!=="player") return;
+  const t = tileFromEvent(ev);
+  if(!t) return;
+  const u = unitAt(t.x,t.y);
+
+  if(sel.stage==="idle"){
+    if(u && u.side==="mech" && !u.acted){ selectMech(u); }
+    return;
+  }
+  if(sel.stage==="move"){
+    // tap another available mech -> switch
+    if(u && u.side==="mech" && u.id!==sel.mech.id && !u.acted){ selectMech(u); return; }
+    // tap a reachable tile -> move there
+    if(reachable(sel.mech).some(c=>c.x===t.x&&c.y===t.y) && !unitAt(t.x,t.y) || (t.x===sel.mech.x&&t.y===sel.mech.y)){
+      sel.mech.x=t.x; sel.mech.y=t.y; sel.mech.moved=(t.x!==sel.mech.sx||t.y!==sel.mech.sy);
+      sel.stage="aim"; setHint(); updateButtons();
+    }
+    return;
+  }
+  if(sel.stage==="aim" || sel.stage==="preview"){
+    // tap the mech -> undo move, re-plan
+    if(u && u.side==="mech" && u.id===sel.mech.id){ undoMove(); return; }
+    if(u && u.side==="mech" && !u.acted){ selectMech(u); return; }
+    const tg = weaponTargets(sel.mech).find(c=>c.x===t.x&&c.y===t.y);
+    if(tg){
+      if(sel.stage==="preview" && sel.target && sel.target.x===t.x && sel.target.y===t.y){
+        commitFire();                        // tap same target again = confirm
+      } else {
+        sel.target = tg; sel.preview = previewFor(sel.mech, tg); sel.stage="preview";
+        setHint(); updateButtons();
+      }
+    }
+    return;
+  }
+}
+function selectMech(m){
+  // revert any prior unacted movement of a different mech is unnecessary (snapshot covers reset)
+  if(sel.mech && sel.mech.id!==m.id && !sel.mech.acted){ sel.mech.x=sel.mech.sx; sel.mech.y=sel.mech.sy; sel.mech.moved=false; }
+  m.x=m.sx; m.y=m.sy; m.moved=false;          // re-selecting resets its move
+  sel = { mech:m, stage:"move", target:null, preview:null };
+  setHint(); updateButtons();
+}
+function undoMove(){
+  const m=sel.mech; m.x=m.sx; m.y=m.sy; m.moved=false;
+  sel.stage="move"; sel.target=null; sel.preview=null;
+  setHint(); updateButtons();
+}
+function commitFire(){
+  const m=sel.mech, tg=sel.target;
+  fireWeapon(m, tg);
+  cleanup();
+  sel={mech:null,stage:"idle",target:null,preview:null};
+  if(grid<=0 || mechs().length===0){ gameOver(); return; }
+  setHint(); updateButtons(); updateHUD();
+}
+function holdFire(){ // finish mech without firing
+  if(!sel.mech) return;
+  sel.mech.acted=true;
+  sel={mech:null,stage:"idle",target:null,preview:null};
+  setHint(); updateButtons();
+}
+
+//===================================================================
+// UI updates
+//===================================================================
+function updateHUD(){
+  elTurn.textContent = turn;
+  elScore.textContent = score;
+  let html="";
+  for(let i=0;i<START_GRID;i++){ html += '<div class="pip'+(i<grid?' on':'')+'"></div>'; }
+  elPips.innerHTML = html;
+}
+function updateButtons(){
+  const s=sel.stage;
+  btnUndo.classList.toggle("hide", !(s==="aim"||s==="preview"));
+  btnFire.classList.toggle("hide", s!=="preview");
+  btnDone.classList.toggle("hide", !(s==="aim"||s==="preview"));
+  btnUndo.disabled = sel.mech ? (sel.mech.sx===sel.mech.x && sel.mech.sy===sel.mech.y) : true;
+  const lock = busy || phase!=="player";
+  btnReset.disabled = lock;
+  btnEnd.disabled = lock;
+}
+function setHint(){
+  let h="";
+  if(phase==="enemy"){ h="<b>Enemy advance…</b>"; }
+  else if(phase==="player"){
+    if(sel.stage==="idle"){
+      const ready = mechs().filter(m=>!m.acted).length;
+      h = ready>0 ? "Select a machine to move &amp; fire." : "All machines spent — <span class='k'>End Turn</span>.";
+    } else if(sel.stage==="move"){
+      h = "Tap a tile to move — or tap the machine to fire in place.";
+    } else if(sel.stage==="aim"){
+      h = sel.mech.weapon==="cannon"
+        ? "Tap a <span class='k'>direction</span> to fire the bolt — or Hold Fire."
+        : "Tap any <span class='k'>tile</span> to drop the mortar — or Hold Fire.";
+    } else if(sel.stage==="preview"){
+      h = "Tap <span class='k'>Fire</span> to confirm — or pick another target.";
+    }
+  }
+  elHint.innerHTML = h;
+  updateButtons();
+}
+
+//===================================================================
+// RENDER
+//===================================================================
+function resize(){
+  const wrap=document.getElementById("boardWrap");
+  const rect=wrap.getBoundingClientRect();
+  const size=Math.max(220, Math.min(rect.width-4, rect.height-4));
+  boardPx=Math.floor(size); tilePx=boardPx/W;
+  dpr=Math.min(window.devicePixelRatio||1, 2.5);
+  canvas.style.width=boardPx+"px"; canvas.style.height=boardPx+"px";
+  canvas.width=Math.floor(boardPx*dpr); canvas.height=Math.floor(boardPx*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+const cx=(x)=> x*tilePx + tilePx/2;
+const cy=(y)=> y*tilePx + tilePx/2;
+
+let lastTs=0;
+function render(ts){
+  const dt=Math.min(0.05,(ts-lastTs)/1000||0); lastTs=ts;
+  // tween render positions
+  for(const u of units){
+    if(u.px===undefined){u.px=u.x;u.py=u.y;}
+    const k=1-Math.pow(0.0009, dt);  // smoothing
+    u.px += (u.x-u.px)*k; u.py += (u.y-u.py)*k;
+    if(Math.abs(u.x-u.px)<0.002) u.px=u.x;
+    if(Math.abs(u.y-u.py)<0.002) u.py=u.y;
+  }
+  // advance effects
+  for(const e of effects){ e.t+=dt; }
+  for(let i=effects.length-1;i>=0;i--){ if(effects[i].t>=effects[i].life) effects.splice(i,1); }
+
+  ctx.clearRect(0,0,boardPx,boardPx);
+  drawTiles();
+  drawTelegraphs();
+  drawSelectionLayer();
+  drawUnits();
+  drawEffects();
+
+  requestAnimationFrame(render);
+}
+
+function drawTiles(){
+  // board backdrop
+  ctx.fillStyle="#0b0e13"; rr(0,0,boardPx,boardPx,14); ctx.fill();
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const px=x*tilePx, py=y*tilePx, pad=1.5;
+    const t=terrain[y][x];
+    const even=(x+y)%2===0;
+    ctx.fillStyle = even ? "#19212e" : "#161d28";
+    rr(px+pad,py+pad,tilePx-pad*2,tilePx-pad*2,5); ctx.fill();
+    if(t==="building") drawBuilding(x,y);
+    else if(t==="mountain") drawMountain(x,y);
+    else if(t==="rubble") drawRubble(x,y);
+  }
+}
+function drawBuilding(x,y){
+  const px=x*tilePx, py=y*tilePx, s=tilePx, m=s*0.16;
+  ctx.save();
+  const g=ctx.createLinearGradient(px,py,px,py+s);
+  g.addColorStop(0,"#26465a"); g.addColorStop(1,"#1a2f3d");
+  ctx.fillStyle=g; rr(px+m,py+m,s-m*2,s-m*2,6); ctx.fill();
+  ctx.fillStyle="rgba(54,214,192,.9)";
+  const cs=s*0.20, gap=s*0.07, ox=px+s/2-cs-gap/2, oy=py+s/2-cs-gap/2;
+  for(let i=0;i<2;i++) for(let j=0;j<2;j++){ rr(ox+i*(cs+gap), oy+j*(cs+gap), cs, cs, 2); ctx.fill(); }
+  ctx.strokeStyle="rgba(54,214,192,.35)"; ctx.lineWidth=1.5;
+  rr(px+m,py+m,s-m*2,s-m*2,6); ctx.stroke();
+  ctx.restore();
+}
+function drawMountain(x,y){
+  const px=x*tilePx, py=y*tilePx, s=tilePx, m=s*0.18;
+  ctx.fillStyle="#3a4456";
+  ctx.beginPath();
+  ctx.moveTo(px+m, py+s-m);
+  ctx.lineTo(px+s*0.38, py+m*1.5);
+  ctx.lineTo(px+s*0.55, py+s*0.5);
+  ctx.lineTo(px+s*0.7, py+m*2);
+  ctx.lineTo(px+s-m, py+s-m);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,.08)";
+  ctx.beginPath();
+  ctx.moveTo(px+s*0.38,py+m*1.5); ctx.lineTo(px+s*0.48,py+s*0.42); ctx.lineTo(px+s*0.3,py+s*0.6); ctx.closePath(); ctx.fill();
+}
+function drawRubble(x,y){
+  const px=x*tilePx, py=y*tilePx, s=tilePx;
+  ctx.fillStyle="rgba(120,135,160,.18)";
+  for(let i=0;i<5;i++){
+    const rx=px+s*0.22+ (i*97%55)/100*s*0.5;
+    const ry=py+s*0.3+ (i*53%60)/100*s*0.4;
+    rr(rx,ry,s*0.12,s*0.12,2); ctx.fill();
+  }
+}
+
+function drawTelegraphs(){
+  const pulse=0.5+0.5*Math.sin(Date.now()/260);
+  // emergence rifts
+  for(const e of emergence){
+    const px=e.x*tilePx, py=e.y*tilePx, s=tilePx;
+    ctx.save();
+    ctx.strokeStyle="rgba(255,209,102,"+(0.5+0.4*pulse)+")"; ctx.lineWidth=2; ctx.setLineDash([5,4]);
+    rr(px+4,py+4,s-8,s-8,5); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle="rgba(255,209,102,.9)"; ctx.font="bold "+(s*0.34)+"px "+getFont();
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("▲", cx(e.x), cy(e.y));
+    ctx.restore();
+  }
+  // queued enemy attacks
+  for(const en of enemies()){
+    if(!en.queued) continue;
+    for(const t of attackTiles(en)){
+      const px=t.x*tilePx, py=t.y*tilePx, s=tilePx;
+      ctx.save();
+      ctx.fillStyle="rgba(255,93,108,"+(0.16+0.12*pulse)+")"; rr(px+3,py+3,s-6,s-6,5); ctx.fill();
+      ctx.strokeStyle="rgba(255,93,108,"+(0.7+0.3*pulse)+")"; ctx.lineWidth=2.5; rr(px+3,py+3,s-6,s-6,5); ctx.stroke();
+      // damage marker dots
+      ctx.fillStyle="rgba(255,93,108,.95)"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.font="bold "+(s*0.3)+"px "+getFont();
+      ctx.fillText(en.queued.dmg>=2?"✸":"✶", cx(t.x), cy(t.y));
+      ctx.restore();
+    }
+  }
+}
+
+function drawSelectionLayer(){
+  if(!sel.mech) return;
+  const s=tilePx;
+  if(sel.stage==="move"){
+    for(const c of reachable(sel.mech)){
+      if(unitAt(c.x,c.y) && !(c.x===sel.mech.x&&c.y===sel.mech.y)) continue;
+      const px=c.x*tilePx, py=c.y*tilePx;
+      ctx.fillStyle="rgba(90,200,255,.14)"; rr(px+3,py+3,s-6,s-6,5); ctx.fill();
+      ctx.strokeStyle="rgba(90,200,255,.4)"; ctx.lineWidth=1.5; rr(px+3,py+3,s-6,s-6,5); ctx.stroke();
+    }
+  }
+  if(sel.stage==="aim" || sel.stage==="preview"){
+    const col = sel.mech.weapon==="cannon" ? "54,214,192" : "255,180,84";
+    for(const tg of weaponTargets(sel.mech)){
+      const px=tg.x*tilePx, py=tg.y*tilePx;
+      ctx.fillStyle="rgba("+col+",.10)"; rr(px+4,py+4,s-8,s-8,5); ctx.fill();
+      ctx.strokeStyle="rgba("+col+",.4)"; ctx.lineWidth=1.5; rr(px+4,py+4,s-8,s-8,5); ctx.stroke();
+    }
+  }
+  if(sel.stage==="preview" && sel.preview){
+    const pv=sel.preview;
+    for(const h of pv.hits){
+      const px=h.x*tilePx, py=h.y*tilePx;
+      ctx.fillStyle="rgba(255,93,108,.3)"; rr(px+3,py+3,s-6,s-6,5); ctx.fill();
+      ctx.strokeStyle="rgba(255,93,108,.95)"; ctx.lineWidth=2.5; rr(px+3,py+3,s-6,s-6,5); ctx.stroke();
+    }
+    for(const p of pv.pushes){
+      drawArrow(p.x,p.y,p.dir);
+    }
+  }
+}
+function drawArrow(x,y,dir){
+  const px=cx(x), py=cy(y), s=tilePx*0.22;
+  ctx.save();
+  ctx.translate(px,py); ctx.rotate(Math.atan2(dir.y,dir.x));
+  ctx.fillStyle="rgba(255,255,255,.85)";
+  ctx.beginPath(); ctx.moveTo(s,0); ctx.lineTo(-s*0.4,s*0.7); ctx.lineTo(-s*0.4,-s*0.7); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawUnits(){
+  for(const u of units){
+    if(!u.alive) continue;
+    if(u.side==="mech") drawMech(u); else drawEnemy(u);
+  }
+}
+function drawMech(m){
+  const px=m.px*tilePx, py=m.py*tilePx, s=tilePx, m0=s*0.18;
+  const isSel = sel.mech && sel.mech.id===m.id;
+  const col = m.weapon==="cannon" ? "#36d6c0" : "#ffb454";
+  ctx.save();
+  if(m.acted) ctx.globalAlpha=0.5;
+  // base
+  const g=ctx.createLinearGradient(px,py,px,py+s);
+  g.addColorStop(0,col); g.addColorStop(1, m.weapon==="cannon"?"#1c8f81":"#b8761f");
+  ctx.fillStyle=g; rr(px+m0,py+m0,s-m0*2,s-m0*2,7); ctx.fill();
+  if(isSel){ ctx.strokeStyle="#fff"; ctx.lineWidth=2.5; rr(px+m0-2,py+m0-2,s-m0*2+4,s-m0*2+4,8); ctx.stroke(); }
+  // emblem
+  ctx.fillStyle="rgba(10,16,22,.85)"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.font="bold "+(s*0.3)+"px "+getFont();
+  ctx.fillText(m.weapon==="cannon"?"◧":"◈", cx(m.px), cy(m.py)+1);
+  // hp pips
+  drawHp(m, col);
+  ctx.restore();
+}
+function drawEnemy(e){
+  const px=e.px*tilePx, py=e.py*tilePx, s=tilePx;
+  ctx.save();
+  const ccx=cx(e.px), ccy=cy(e.py);
+  if(e.etype==="crawler"){
+    ctx.fillStyle=e.color; ctx.beginPath();
+    ctx.moveTo(ccx, ccy-s*0.26); ctx.lineTo(ccx+s*0.26,ccy); ctx.lineTo(ccx,ccy+s*0.26); ctx.lineTo(ccx-s*0.26,ccy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=e.dark; ctx.beginPath(); ctx.arc(ccx,ccy,s*0.08,0,7); ctx.fill();
+  } else if(e.etype==="spitter"){
+    ctx.fillStyle=e.color; ctx.beginPath(); ctx.arc(ccx,ccy,s*0.26,0,7); ctx.fill();
+    ctx.fillStyle=e.dark; rr(ccx-s*0.05,ccy-s*0.05,s*0.28,s*0.1,2); ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,.5)"; ctx.beginPath(); ctx.arc(ccx-s*0.07,ccy-s*0.07,s*0.05,0,7); ctx.fill();
+  } else { // brute
+    const m0=s*0.14;
+    const g=ctx.createLinearGradient(px,py,px,py+s); g.addColorStop(0,e.color); g.addColorStop(1,e.dark);
+    ctx.fillStyle=g; rr(px+m0,py+m0,s-m0*2,s-m0*2,6); ctx.fill();
+    ctx.strokeStyle="rgba(0,0,0,.4)"; ctx.lineWidth=3; rr(px+m0+3,py+m0+3,s-m0*2-6,s-m0*2-6,4); ctx.stroke();
+  }
+  drawHp(e, e.color);
+  ctx.restore();
+}
+function drawHp(u, col){
+  if(u.maxhp<=1) return;
+  const s=tilePx, n=u.maxhp, w=s*0.12, gap=s*0.04;
+  const total=n*w+(n-1)*gap;
+  let sx=cx(u.px)-total/2, sy=u.py*tilePx + s*0.84;
+  for(let i=0;i<n;i++){
+    ctx.fillStyle = i<u.hp ? col : "rgba(0,0,0,.45)";
+    rr(sx+i*(w+gap), sy, w, w*0.55, 1.5); ctx.fill();
+  }
+}
+
+function drawEffects(){
+  for(const e of effects){
+    const p=e.t/e.life;
+    if(e.type==="hit"){
+      const a=1-p; ctx.strokeStyle="rgba(255,255,255,"+a+")"; ctx.lineWidth=3;
+      const r=tilePx*(0.2+p*0.3); ctx.beginPath(); ctx.arc(cx(e.x),cy(e.y),r,0,7); ctx.stroke();
+    } else if(e.type==="die"){
+      const a=1-p; ctx.fillStyle="rgba(255,255,255,"+(a*0.9)+")";
+      for(let i=0;i<6;i++){ const ang=i/6*7; const d=tilePx*p*0.5;
+        ctx.beginPath(); ctx.arc(cx(e.x)+Math.cos(ang)*d, cy(e.y)+Math.sin(ang)*d, tilePx*0.06*a+1,0,7); ctx.fill(); }
+    } else if(e.type==="strike"){
+      const a=1-p; ctx.fillStyle="rgba(255,93,108,"+(a*0.55)+")"; rr(e.x*tilePx+3,e.y*tilePx+3,tilePx-6,tilePx-6,5); ctx.fill();
+    } else if(e.type==="emerge"){
+      const a=1-p; ctx.strokeStyle="rgba(255,209,102,"+a+")"; ctx.lineWidth=3;
+      const r=tilePx*(0.1+p*0.4); ctx.beginPath(); ctx.arc(cx(e.x),cy(e.y),r,0,7); ctx.stroke();
+    } else if(e.type==="bolt"){
+      const a=1-p; ctx.strokeStyle="rgba(54,214,192,"+a+")"; ctx.lineWidth=4; ctx.lineCap="round";
+      ctx.beginPath(); ctx.moveTo(cx(e.fromx),cy(e.fromy)); ctx.lineTo(cx(e.x),cy(e.y)); ctx.stroke(); ctx.lineCap="butt";
+    } else if(e.type==="mortar"){
+      const a=1-p; ctx.strokeStyle="rgba(255,180,84,"+a+")"; ctx.lineWidth=4;
+      const r=tilePx*(0.1+p*0.55); ctx.beginPath(); ctx.arc(cx(e.x),cy(e.y),r,0,7); ctx.stroke();
+    } else if(e.type==="core"){
+      const a=1-p; ctx.fillStyle=(e.plain?"rgba(180,190,210,":"rgba(54,214,192,")+(a*0.6)+")";
+      const r=tilePx*(0.2+p*0.4); ctx.beginPath(); ctx.arc(cx(e.x),cy(e.y),r,0,7); ctx.fill();
+    }
+  }
+}
+let _font=null;
+function getFont(){ if(!_font){ _font = getComputedStyle(document.body).fontFamily || "sans-serif"; } return _font; }
+
+//===================================================================
+// WIRING
+//===================================================================
+canvas.addEventListener("pointerdown", (e)=>{ e.preventDefault(); onTap(e); }, {passive:false});
+btnEnd.addEventListener("click", endTurn);
+btnReset.addEventListener("click", ()=>{ if(!busy && phase==="player"){ restoreSnapshot(); } });
+btnUndo.addEventListener("click", ()=>{ if(sel.mech) undoMove(); });
+btnDone.addEventListener("click", holdFire);
+btnFire.addEventListener("click", ()=>{ if(sel.stage==="preview") commitFire(); });
+
+document.getElementById("btnStart").addEventListener("click", begin);
+document.getElementById("btnAgain").addEventListener("click", begin);
+function begin(){
+  startScreen.classList.add("hidden");
+  overScreen.classList.add("hidden");
+  resize();
+  newGame();
+}
+
+window.addEventListener("resize", resize);
+window.addEventListener("orientationchange", ()=> setTimeout(resize,200));
+
+// boot
+resize();
+// idle preview board behind the start screen
+terrain=[]; for(let y=0;y<H;y++) terrain.push(new Array(W).fill("open"));
+units=[]; emergence=[]; grid=START_GRID; turn=1; score=0; phase="menu";
+terrain[3][3]="building"; terrain[3][4]="building"; terrain[4][4]="building"; terrain[4][3]="mountain";
+updateHUD();
+requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>
