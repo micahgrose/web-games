@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#1d2433" />
+<title>Marigold</title>
+<style>
+  :root {
+    --bg: #161b27;
+    --panel: #1d2433;
+    --ink: #f4ecdc;
+    --muted: #8a93a6;
+    --accent: #ffce54;
+    --shadow: rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+  }
+  #app {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #243049 0%, var(--bg) 55%);
+  }
+  header {
+    width: 100%; max-width: 560px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 6px;
+  }
+  .title {
+    font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    font-size: 15px; color: var(--accent);
+    flex: 0 0 auto;
+  }
+  .title small { display:block; font-size:9px; letter-spacing:.22em; color:var(--muted); font-weight:600; margin-top:2px;}
+  .scores { margin-left: auto; display: flex; gap: 16px; align-items: flex-end; }
+  .scorebox { text-align: right; line-height: 1.05; }
+  .scorebox .lbl { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+  .scorebox .val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .scorebox.best .val { color: var(--accent); font-size: 18px; }
+
+  .barwrap { width: 100%; max-width: 560px; padding: 2px 16px 8px; }
+  .bar {
+    height: 8px; border-radius: 99px; background: #0e1320; overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.5);
+  }
+  .bar > i { display:block; height:100%; width:0%; border-radius:99px;
+    background: linear-gradient(90deg, #ff8a5c, var(--accent));
+    transition: width .35s cubic-bezier(.2,.7,.2,1); }
+  .barlabel { display:flex; justify-content:space-between; font-size:10px; color:var(--muted);
+    letter-spacing:.1em; margin-top:5px; text-transform:uppercase;}
+
+  #stage { flex: 1 1 auto; width: 100%; position: relative; min-height: 0; }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+  footer {
+    width: 100%; max-width: 560px;
+    display: flex; gap: 10px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom));
+  }
+  button {
+    font: inherit; color: var(--ink); cursor: pointer;
+    background: var(--panel); border: 1px solid rgba(255,255,255,.06);
+    border-radius: 12px; padding: 11px 14px; font-weight: 600; font-size: 14px;
+    box-shadow: 0 2px 0 rgba(0,0,0,.3);
+    transition: transform .05s ease, background .15s;
+    flex: 1 1 auto;
+  }
+  button:active { transform: translateY(2px); box-shadow: none; }
+  button.icon { flex: 0 0 auto; width: 48px; padding: 11px 0; }
+  button:hover { background: #283248; }
+
+  /* overlay */
+  #overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+    background: rgba(10,13,20,.72); backdrop-filter: blur(3px);
+    text-align: center; padding: 24px; opacity: 0; pointer-events: none;
+    transition: opacity .3s ease;
+  }
+  #overlay.show { opacity: 1; pointer-events: auto; }
+  #overlay h1 { margin: 0; font-size: 30px; letter-spacing: .02em; }
+  #overlay p { margin: 2px 0; color: var(--muted); max-width: 320px; line-height: 1.5; }
+  #overlay .big { font-size: 46px; font-weight: 800; color: var(--accent); margin: 6px 0; font-variant-numeric: tabular-nums; }
+  #overlay .tag { font-size: 13px; color: var(--ink); background: rgba(255,206,84,.14);
+    border:1px solid rgba(255,206,84,.3); padding:5px 12px; border-radius:99px; margin-top:4px;}
+  #overlay button { flex: 0 0 auto; margin-top: 16px; padding: 13px 30px; font-size: 16px;
+    background: var(--accent); color: #2a2410; border: none; }
+  #overlay button:hover { background: #ffd76e; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; max-width: 300px; line-height:1.5;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">Marigold<small>tap • clear • plan</small></div>
+    <div class="scores">
+      <div class="scorebox"><div class="lbl">Score</div><div class="val" id="score">0</div></div>
+      <div class="scorebox best"><div class="lbl">Best</div><div class="val" id="best">0</div></div>
+    </div>
+  </header>
+  <div class="barwrap">
+    <div class="bar"><i id="parfill"></i></div>
+    <div class="barlabel"><span id="parleft">Goal</span><span id="parright"></span></div>
+  </div>
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="overlay">
+      <h1 id="ov-title">Marigold</h1>
+      <div class="big" id="ov-score" style="display:none">0</div>
+      <p id="ov-msg"></p>
+      <div class="tag" id="ov-tag" style="display:none"></div>
+      <button id="ov-btn">Play</button>
+      <div class="hint" id="ov-hint"></div>
+    </div>
+  </div>
+  <footer>
+    <button id="undo">↶ Undo</button>
+    <button id="new">New board</button>
+    <button class="icon" id="mute" title="Sound">♪</button>
+  </footer>
+</div>
+
+<script>
+"use strict";
+(function () {
+  // ---------- config ----------
+  const COLS = 9, ROWS = 13;
+  const COLORS = [
+    { base: "#ff6b6b", lite: "#ff9d9d", glyph: 0 }, // coral
+    { base: "#ffd166", lite: "#ffe39a", glyph: 1 }, // amber
+    { base: "#62c98a", lite: "#9be3b6", glyph: 2 }, // green
+    { base: "#5aa9f0", lite: "#9bccf7", glyph: 3 }, // blue
+    { base: "#c08af0", lite: "#dcb8f7", glyph: 4 }, // violet
+  ];
+  const NCOL = COLORS.length;
+  const STORE_BEST = "marigold.best.v1";
+  const STORE_MUTE = "marigold.mute.v1";
+
+  // points for clearing a group of n tiles: rewards big groups (n-1)^2
+  function groupScore(n) { return (n - 1) * (n - 1) * 5; }
+
+  // ---------- dom ----------
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const stage = document.getElementById("stage");
+  const elScore = document.getElementById("score");
+  const elBest = document.getElementById("best");
+  const elParFill = document.getElementById("parfill");
+  const elParLeft = document.getElementById("parleft");
+  const elParRight = document.getElementById("parright");
+  const overlay = document.getElementById("overlay");
+  const ovTitle = document.getElementById("ov-title");
+  const ovScore = document.getElementById("ov-score");
+  const ovMsg = document.getElementById("ov-msg");
+  const ovTag = document.getElementById("ov-tag");
+  const ovBtn = document.getElementById("ov-btn");
+  const ovHint = document.getElementById("ov-hint");
+  const btnUndo = document.getElementById("undo");
+  const btnNew = document.getElementById("new");
+  const btnMute = document.getElementById("mute");
+
+  // ---------- state ----------
+  let DPR = 1;
+  let tile = 40, originX = 0, originY = 0;       // board layout (css px)
+  let grid = [];                                  // grid[r][c] = tileId | -1
+  const tiles = new Map();                        // id -> {color, x, y, tx, ty, scale, dead, born}
+  let nextId = 1;
+  let particles = [];
+  let pops = [];                                  // floating score popups
+  let score = 0, best = 0, par = 0;
+  let hoverGroup = null;                          // Set of "r,c" keys
+  let hoverScore = 0, hoverCenter = null;
+  let busy = false;                               // animating fall
+  let started = false, over = false;
+  let history = null;                             // single-step undo snapshot
+  let muted = false;
+  let shakeT = 0;
+
+  // ---------- rng (board id only) ----------
+  function rnd(n) { return Math.floor(Math.random() * n); }
+
+  // ---------- audio ----------
+  let actx = null;
+  function audio() {
+    if (muted) return null;
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch (e) { actx = null; }
+    }
+    if (actx && actx.state === "suspended") actx.resume();
+    return actx;
+  }
+  function blip(freq, dur, type, gain) {
+    const a = audio(); if (!a) return;
+    const t = a.currentTime;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.6), t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain || 0.18, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(g).connect(a.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function popSound(n) {
+    const f = 240 + Math.min(n, 14) * 42;
+    blip(f, 0.18, "triangle", 0.16);
+    if (n >= 5) blip(f * 1.5, 0.22, "sine", 0.08);
+  }
+  function clearBoardSound() {
+    [523, 659, 784, 1047].forEach((f, i) =>
+      setTimeout(() => blip(f, 0.4, "sine", 0.14), i * 90));
+  }
+  function thudSound() { blip(120, 0.12, "sine", 0.10); }
+
+  // ---------- layout ----------
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    const w = stage.clientWidth, h = stage.clientHeight;
+    canvas.width = Math.round(w * DPR);
+    canvas.height = Math.round(h * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    const pad = 10;
+    tile = Math.floor(Math.min((w - pad * 2) / COLS, (h - pad * 2) / ROWS));
+    tile = Math.max(8, tile);
+    const boardW = tile * COLS, boardH = tile * ROWS;
+    originX = Math.round((w - boardW) / 2);
+    originY = Math.round((h - boardH) / 2);
+    // snap any settled tiles to new layout
+    snapAll();
+  }
+  function cellX(c) { return originX + c * tile; }
+  function cellY(r) { return originY + r * tile; }
+
+  function snapAll() {
+    for (const [r, row] of grid.entries()) {
+      for (let c = 0; c < COLS; c++) {
+        const id = row[c];
+        if (id < 0) continue;
+        const t = tiles.get(id);
+        if (!t) continue;
+        t.tx = cellX(c); t.ty = cellY(r);
+        if (!busy) { t.x = t.tx; t.y = t.ty; }
+      }
+    }
+  }
+
+  // ---------- board ----------
+  function newBoard() {
+    grid = [];
+    tiles.clear();
+    particles.length = 0; pops.length = 0;
+    nextId = 1;
+    for (let r = 0; r < ROWS; r++) {
+      const row = [];
+      for (let c = 0; c < COLS; c++) {
+        const id = nextId++;
+        const color = rnd(NCOL);
+        tiles.set(id, {
+          color, x: cellX(c), y: cellY(r) - (ROWS + r) * tile * 0.5,
+          tx: cellX(c), ty: cellY(r), scale: 1, dead: false, born: performance.now() + r * 6,
+        });
+        row.push(id);
+      }
+      grid.push(row);
+    }
+    score = 0;
+    par = estimatePar();
+    history = null;
+    over = false;
+    busy = true;
+    setTimeout(() => { busy = false; }, 420);
+    updateHud();
+    hoverGroup = null;
+  }
+
+  // rough "par": reward a strong but reachable run
+  function estimatePar() {
+    // counts color frequency; perfect play roughly sums (count-1)^2*5 per color
+    const counts = new Array(NCOL).fill(0);
+    for (const row of grid) for (const id of row) if (id >= 0) counts[tiles.get(id).color]++;
+    let p = 0;
+    for (const cnt of counts) if (cnt > 1) p += groupScore(cnt) * 0.42;
+    return Math.max(300, Math.round(p / 50) * 50);
+  }
+
+  // flood fill connected same-color group from (r,c)
+  function findGroup(r, c) {
+    const startId = grid[r][c];
+    if (startId < 0) return [];
+    const color = tiles.get(startId).color;
+    const out = [], seen = new Set();
+    const stack = [[r, c]];
+    seen.add(r + "," + c);
+    while (stack.length) {
+      const [cr, cc] = stack.pop();
+      out.push([cr, cc]);
+      const nb = [[cr - 1, cc], [cr + 1, cc], [cr, cc - 1], [cr, cc + 1]];
+      for (const [nr, nc] of nb) {
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
+        const k = nr + "," + nc;
+        if (seen.has(k)) continue;
+        const id = grid[nr][nc];
+        if (id >= 0 && tiles.get(id).color === color) { seen.add(k); stack.push([nr, nc]); }
+      }
+    }
+    return out;
+  }
+
+  function anyMovesLeft() {
+    const seen = new Set();
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (grid[r][c] < 0) continue;
+        const k = r + "," + c;
+        if (seen.has(k)) continue;
+        const g = findGroup(r, c);
+        for (const [gr, gc] of g) seen.add(gr + "," + gc);
+        if (g.length >= 2) return true;
+      }
+    }
+    return false;
+  }
+
+  function tilesRemaining() {
+    let n = 0;
+    for (const row of grid) for (const id of row) if (id >= 0) n++;
+    return n;
+  }
+
+  // ---------- interaction ----------
+  function cellFromPx(px, py) {
+    const c = Math.floor((px - originX) / tile);
+    const r = Math.floor((py - originY) / tile);
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return null;
+    return [r, c];
+  }
+
+  function updateHover(px, py) {
+    if (busy || over || !started) { hoverGroup = null; return; }
+    const cell = cellFromPx(px, py);
+    if (!cell) { hoverGroup = null; return; }
+    const [r, c] = cell;
+    if (grid[r][c] < 0) { hoverGroup = null; return; }
+    const g = findGroup(r, c);
+    if (g.length < 2) { hoverGroup = null; return; }
+    hoverGroup = new Set(g.map(([gr, gc]) => gr + "," + gc));
+    hoverScore = groupScore(g.length);
+    // center for popup
+    let sx = 0, sy = 0;
+    for (const [gr, gc] of g) { sx += cellX(gc) + tile / 2; sy += cellY(gr) + tile / 2; }
+    hoverCenter = { x: sx / g.length, y: sy / g.length };
+  }
+
+  function snapshot() {
+    history = {
+      grid: grid.map(row => row.slice()),
+      tiles: new Map([...tiles].map(([id, t]) => [id, { ...t }])),
+      score, nextId,
+    };
+  }
+
+  function doUndo() {
+    if (!history || busy || over) return;
+    grid = history.grid.map(row => row.slice());
+    tiles.clear();
+    for (const [id, t] of history.tiles) tiles.set(id, { ...t });
+    score = history.score;
+    nextId = history.nextId;
+    history = null;
+    busy = true; snapAll();
+    setTimeout(() => { busy = false; }, 10);
+    updateHud();
+    blip(330, 0.12, "sine", 0.08);
+  }
+
+  function clickAt(px, py) {
+    if (busy || over || !started) return;
+    const cell = cellFromPx(px, py);
+    if (!cell) return;
+    const [r, c] = cell;
+    if (grid[r][c] < 0) return;
+    const g = findGroup(r, c);
+    if (g.length < 2) { blip(160, 0.08, "sine", 0.05); return; }
+
+    snapshot();
+
+    const gained = groupScore(g.length);
+    score += gained;
+
+    // spawn popup + particles, kill tiles
+    const cx = hoverCenter ? hoverCenter.x : cellX(c) + tile / 2;
+    const cy = hoverCenter ? hoverCenter.y : cellY(r) + tile / 2;
+    pops.push({ x: cx, y: cy, txt: "+" + gained, t: 0, life: 0.9, big: g.length >= 6 });
+
+    for (const [gr, gc] of g) {
+      const id = grid[gr][gc];
+      const t = tiles.get(id);
+      spawnParticles(cellX(gc) + tile / 2, cellY(gr) + tile / 2, COLORS[t.color]);
+      tiles.delete(id);
+      grid[gr][gc] = -1;
+    }
+    popSound(g.length);
+    shakeT = Math.min(0.35, 0.06 + g.length * 0.012);
+
+    applyGravityAndCollapse();
+    hoverGroup = null;
+    busy = true;
+    updateHud();
+
+    // settle, then resolve end states
+    setTimeout(() => {
+      busy = false;
+      thudSound();
+      const remaining = tilesRemaining();
+      if (remaining === 0) {
+        const bonus = 2000;
+        score += bonus;
+        pops.push({ x: originX + COLS * tile / 2, y: originY + ROWS * tile / 2,
+                    txt: "CLEAR! +" + bonus, t: 0, life: 1.6, big: true });
+        clearBoardSound();
+        updateHud();
+        setTimeout(() => endGame(true), 900);
+      } else if (!anyMovesLeft()) {
+        // penalty: leftover tiles cost a little, encouraging full clears
+        endGame(false, remaining);
+      }
+    }, 300);
+  }
+
+  function applyGravityAndCollapse() {
+    // gravity within each column
+    for (let c = 0; c < COLS; c++) {
+      let write = ROWS - 1;
+      for (let r = ROWS - 1; r >= 0; r--) {
+        if (grid[r][c] >= 0) {
+          const id = grid[r][c];
+          grid[r][c] = -1;
+          grid[write][c] = id;
+          write--;
+        }
+      }
+      while (write >= 0) { grid[write][c] = -1; write--; }
+    }
+    // collapse empty columns to the left
+    let writeCol = 0;
+    for (let c = 0; c < COLS; c++) {
+      let any = false;
+      for (let r = 0; r < ROWS; r++) if (grid[r][c] >= 0) { any = true; break; }
+      if (any) {
+        if (writeCol !== c) {
+          for (let r = 0; r < ROWS; r++) { grid[r][writeCol] = grid[r][c]; grid[r][c] = -1; }
+        }
+        writeCol++;
+      }
+    }
+    // set new targets (tiles tween toward them in render loop)
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const id = grid[r][c];
+        if (id < 0) continue;
+        const t = tiles.get(id);
+        t.tx = cellX(c); t.ty = cellY(r);
+      }
+    }
+  }
+
+  // ---------- particles & popups ----------
+  function spawnParticles(x, y, color) {
+    const n = 5;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 40 + Math.random() * 130;
+      particles.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40,
+        life: 0.5 + Math.random() * 0.35, t: 0,
+        r: tile * (0.08 + Math.random() * 0.12), col: color.lite,
+      });
+    }
+  }
+
+  // ---------- hud / overlay ----------
+  function updateHud() {
+    elScore.textContent = score;
+    if (score > best) { best = score; try { localStorage.setItem(STORE_BEST, best); } catch (e) {} }
+    elBest.textContent = best;
+    const pct = par > 0 ? Math.min(100, (score / par) * 100) : 0;
+    elParFill.style.width = pct + "%";
+    if (score >= par && par > 0) {
+      elParLeft.textContent = "Goal cleared ✦";
+      elParRight.textContent = score + " / " + par;
+    } else {
+      elParLeft.textContent = "Goal";
+      elParRight.textContent = score + " / " + par;
+    }
+  }
+
+  function showOverlay(opts) {
+    ovTitle.textContent = opts.title;
+    ovMsg.innerHTML = opts.msg || "";
+    if (opts.score != null) { ovScore.style.display = "block"; ovScore.textContent = opts.score; }
+    else ovScore.style.display = "none";
+    if (opts.tag) { ovTag.style.display = "inline-block"; ovTag.textContent = opts.tag; }
+    else ovTag.style.display = "none";
+    ovBtn.textContent = opts.btn || "Play";
+    ovHint.innerHTML = opts.hint || "";
+    overlay.classList.add("show");
+  }
+  function hideOverlay() { overlay.classList.remove("show"); }
+
+  function startGame() {
+    hideOverlay();
+    started = true;
+    newBoard();
+    audio(); // unlock on gesture
+  }
+
+  function endGame(cleared, remaining) {
+    over = true;
+    let tag = "";
+    if (score >= par) tag = "Goal beaten ✦";
+    if (cleared) {
+      showOverlay({
+        title: "Board cleared!",
+        score: score,
+        msg: "You emptied the whole board — that's the big one.",
+        tag: "Perfect clear ✦",
+        btn: "Play again",
+        hint: "Best: " + best,
+      });
+    } else {
+      showOverlay({
+        title: "No moves left",
+        score: score,
+        msg: remaining + " tile" + (remaining === 1 ? "" : "s") + " stranded with no pair. " +
+             (score >= par ? "But you beat the goal." : "Merge same colors before clearing to go further."),
+        tag: tag,
+        btn: "Play again",
+        hint: "Best: " + best,
+      });
+    }
+  }
+
+  // ---------- drawing ----------
+  function drawTile(t, x, y, sz, dim, lift) {
+    const col = COLORS[t.color];
+    const r = sz * 0.22;
+    const inset = sz * 0.06;
+    const X = x + inset, Y = y + inset, S = sz - inset * 2;
+    // shadow
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,.35)";
+    ctx.shadowBlur = lift ? sz * 0.28 : sz * 0.12;
+    ctx.shadowOffsetY = lift ? sz * 0.12 : sz * 0.06;
+    // body gradient
+    const g = ctx.createLinearGradient(X, Y, X, Y + S);
+    g.addColorStop(0, col.lite);
+    g.addColorStop(0.55, col.base);
+    g.addColorStop(1, shade(col.base, -16));
+    ctx.fillStyle = g;
+    roundRect(X, Y, S, S, r); ctx.fill();
+    ctx.restore();
+
+    // glossy top highlight
+    ctx.save();
+    roundRect(X, Y, S, S, r); ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,.22)";
+    roundRect(X + S * 0.12, Y + S * 0.1, S * 0.76, S * 0.34, r * 0.8); ctx.fill();
+    ctx.restore();
+
+    // glyph (helps tell colors apart / adds charm)
+    drawGlyph(t.color, X + S / 2, Y + S / 2, S);
+
+    if (dim) {
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      ctx.fillStyle = "#0b0e16";
+      roundRect(X, Y, S, S, r); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawGlyph(color, cx, cy, S) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.5)";
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    ctx.lineWidth = Math.max(1.2, S * 0.045);
+    const rr = S * 0.16;
+    ctx.beginPath();
+    switch (color) {
+      case 0: // dot
+        ctx.arc(cx, cy, rr * 0.7, 0, Math.PI * 2); ctx.fill(); break;
+      case 1: // ring
+        ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke(); break;
+      case 2: // triangle
+        ctx.moveTo(cx, cy - rr); ctx.lineTo(cx + rr * 0.92, cy + rr * 0.7);
+        ctx.lineTo(cx - rr * 0.92, cy + rr * 0.7); ctx.closePath(); ctx.stroke(); break;
+      case 3: { // square
+        const s = rr * 0.85; ctx.rect(cx - s, cy - s, s * 2, s * 2); ctx.stroke(); break; }
+      case 4: // diamond
+        ctx.moveTo(cx, cy - rr); ctx.lineTo(cx + rr, cy);
+        ctx.lineTo(cx, cy + rr); ctx.lineTo(cx - rr, cy); ctx.closePath(); ctx.stroke(); break;
+    }
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function shade(hex, amt) {
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n >> 16) + amt, g = ((n >> 8) & 255) + amt, b = (n & 255) + amt;
+    r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  }
+
+  // ---------- loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt);
+    render(now);
+    requestAnimationFrame(frame);
+  }
+
+  function update(dt) {
+    let moving = false;
+    const k = 1 - Math.pow(0.001, dt); // smooth critically-ish damped lerp
+    for (const t of tiles.values()) {
+      const bornDelay = t.born ? Math.max(0, t.born - performance.now()) : 0;
+      if (bornDelay > 0) { moving = true; continue; }
+      t.x += (t.tx - t.x) * k;
+      t.y += (t.ty - t.y) * k;
+      if (Math.abs(t.x - t.tx) > 0.4 || Math.abs(t.y - t.ty) > 0.4) moving = true;
+      else { t.x = t.tx; t.y = t.ty; }
+    }
+    // particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.t += dt;
+      p.vy += 520 * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.t >= p.life) particles.splice(i, 1);
+    }
+    for (let i = pops.length - 1; i >= 0; i--) {
+      pops[i].t += dt;
+      if (pops[i].t >= pops[i].life) pops.splice(i, 1);
+    }
+    if (shakeT > 0) shakeT = Math.max(0, shakeT - dt);
+  }
+
+  function render(now) {
+    const w = canvas.width / DPR, h = canvas.height / DPR;
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    if (shakeT > 0) {
+      const m = shakeT * 8;
+      ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+    }
+
+    // board backing
+    const bw = COLS * tile, bh = ROWS * tile;
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    roundRect(originX - 6, originY - 6, bw + 12, bh + 12, 16); ctx.fill();
+
+    const hov = hoverGroup;
+    // draw tiles
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const id = grid[r][c];
+        if (id < 0) continue;
+        const t = tiles.get(id);
+        if (!t) continue;
+        const lifted = hov && hov.has(r + "," + c);
+        // dim everything else when hovering a group
+        const dim = hov && !lifted;
+        let dx = t.x, dy = t.y;
+        if (lifted) {
+          const pulse = Math.sin(now / 140) * tile * 0.04;
+          dy -= tile * 0.06 + pulse;
+        }
+        drawTile(t, dx, dy, tile, dim, lifted);
+      }
+    }
+
+    // hover outline + score bubble
+    if (hov && hoverCenter) {
+      ctx.save();
+      ctx.font = "700 " + Math.round(tile * 0.55) + "px Segoe UI, system-ui, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const txt = "+" + hoverScore;
+      const padX = tile * 0.28;
+      const tw = ctx.measureText(txt).width + padX * 2;
+      const th = tile * 0.72;
+      const bx = hoverCenter.x, by = hoverCenter.y - tile * 0.9;
+      ctx.fillStyle = "rgba(20,24,36,.92)";
+      roundRect(bx - tw / 2, by - th / 2, tw, th, th / 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,206,84,.6)"; ctx.lineWidth = 2;
+      roundRect(bx - tw / 2, by - th / 2, tw, th, th / 2); ctx.stroke();
+      ctx.fillStyle = "#ffce54";
+      ctx.fillText(txt, bx, by + 1);
+      ctx.restore();
+    }
+
+    // particles
+    for (const p of particles) {
+      const a = 1 - p.t / p.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillStyle = p.col;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (0.5 + a * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // popups
+    for (const p of pops) {
+      const a = 1 - p.t / p.life;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.font = "800 " + Math.round(tile * (p.big ? 0.7 : 0.5)) + "px Segoe UI, system-ui, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 6;
+      ctx.fillText(p.txt, p.x, p.y - p.t * 46);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // ---------- input ----------
+  function pos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const src = e.touches && e.touches[0] ? e.touches[0] : e;
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+  }
+  canvas.addEventListener("mousemove", (e) => { const p = pos(e); updateHover(p.x, p.y); });
+  canvas.addEventListener("mouseleave", () => { hoverGroup = null; });
+  canvas.addEventListener("click", (e) => { const p = pos(e); updateHover(p.x, p.y); clickAt(p.x, p.y); });
+  canvas.addEventListener("touchstart", (e) => {
+    const p = pos(e); updateHover(p.x, p.y);
+  }, { passive: true });
+  canvas.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const src = e.changedTouches[0];
+    const x = src.clientX - rect.left, y = src.clientY - rect.top;
+    updateHover(x, y); clickAt(x, y); hoverGroup = null;
+  }, { passive: false });
+
+  btnUndo.addEventListener("click", doUndo);
+  btnNew.addEventListener("click", () => {
+    if (!started) return;
+    over = false;
+    newBoard();
+  });
+  btnMute.addEventListener("click", () => {
+    muted = !muted;
+    try { localStorage.setItem(STORE_MUTE, muted ? "1" : "0"); } catch (e) {}
+    btnMute.textContent = muted ? "♪̷" : "♪";
+    btnMute.style.color = muted ? "var(--muted)" : "var(--ink)";
+    if (!muted) blip(660, 0.1, "sine", 0.1);
+  });
+  ovBtn.addEventListener("click", startGame);
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", () => setTimeout(resize, 200));
+
+  // ---------- boot ----------
+  try { best = parseInt(localStorage.getItem(STORE_BEST) || "0", 10) || 0; } catch (e) {}
+  try { muted = localStorage.getItem(STORE_MUTE) === "1"; } catch (e) {}
+  elBest.textContent = best;
+  if (muted) { btnMute.textContent = "♪̷"; btnMute.style.color = "var(--muted)"; }
+
+  resize();
+  // need a board to exist for resize/snap before first play
+  grid = [];
+  for (let r = 0; r < ROWS; r++) grid.push(new Array(COLS).fill(-1));
+
+  showOverlay({
+    title: "Marigold",
+    msg: "Clear clusters of the same color. Bigger clusters are worth far more — so merge before you pop.",
+    btn: "Play",
+    hint: "Tap a group of 2+ to clear it. Plan the order. Empty the board for a big bonus.",
+  });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
