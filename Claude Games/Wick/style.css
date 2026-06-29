@@ -329,8 +329,30 @@ button.ghost:hover { color: var(--ink); border-color: rgba(255,255,255,0.35); }
   gap: 18px;
   flex-wrap: wrap;
   justify-content: center;
+  align-items: flex-start;
   max-width: 92vw;
 }
+
+/* each card plus its (optional) evo tag stack centered together */
+.cardwrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.cardEvoTag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--warm2);
+  text-shadow: 0 0 12px rgba(255, 210, 63, 0.4);
+}
+.cardEvoTag .evoIco { display: inline-flex; }
+.cardEvoTag .evoIco svg { width: 20px; height: 20px; color: var(--warm2); vertical-align: middle; }
 
 .card {
   width: 196px;
@@ -384,7 +406,66 @@ button.ghost:hover { color: var(--ink); border-color: rgba(255,255,255,0.35); }
 }
 .ctier.new { color: #7ee08a; }
 .cdesc { font-size: 12.5px; line-height: 1.5; color: var(--ink); flex: 1; }
+.cdesc b { color: var(--warm2); }
 .cflav { font-size: 11px; font-style: italic; color: var(--dim); line-height: 1.4; }
+
+/* evolution cards — earned, and unmistakable */
+.card.evo {
+  border-color: var(--warm2);
+  background: linear-gradient(180deg, rgba(60, 44, 18, 0.97), rgba(28, 20, 10, 0.97));
+  box-shadow: 0 0 26px rgba(255, 210, 63, 0.28);
+  animation: cardin 0.3s ease backwards, evoPulse 2.2s ease-in-out infinite;
+}
+.card.evo:hover { border-color: #fff0bf; box-shadow: 0 0 40px rgba(255, 215, 80, 0.5); }
+.card.evo .cicon { background: rgba(255, 210, 63, 0.16); border-color: var(--warm2); }
+.card.evo .cicon svg { color: var(--warm2); }
+.card.evo .cname { color: var(--warm2); text-shadow: 0 0 14px rgba(255, 210, 63, 0.5); }
+.ctier.evoTier { color: var(--warm2); }
+@keyframes evoPulse {
+  0%, 100% { box-shadow: 0 0 22px rgba(255, 210, 63, 0.22); }
+  50%      { box-shadow: 0 0 34px rgba(255, 210, 63, 0.42); }
+}
+
+/* ---------- starting-flame picker ---------- */
+
+#flamepick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  margin: 6px 0 4px;
+}
+.fpLabel {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+#fpRow { display: flex; gap: 10px; }
+.fpBtn {
+  width: 50px; height: 50px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel);
+  border: 1px solid rgba(255, 179, 71, 0.22);
+  border-radius: 10px;
+  color: var(--dim);
+}
+.fpBtn svg { width: 26px; height: 26px; color: currentColor; }
+.fpBtn:hover { color: var(--ink); border-color: rgba(255, 179, 71, 0.5); transform: translateY(-2px); }
+.fpBtn.on {
+  color: var(--warm2);
+  border-color: var(--warm2);
+  background: rgba(255, 179, 71, 0.12);
+  box-shadow: 0 0 16px rgba(255, 179, 71, 0.3);
+}
+.fpDesc {
+  font-size: 12.5px;
+  color: var(--ink);
+  min-height: 18px;
+  max-width: 340px;
+  line-height: 1.4;
+}
+.fpDesc b { color: var(--warm2); }
 
 .keysHint { margin-top: 6px; }
 
