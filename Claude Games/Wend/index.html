@@ -298,6 +298,8 @@ var Audio = (function(){
 // =========================================================================
 var TERR = { GRASS:0, FOREST:1, HIGH:2, WATER:3, CHASM:4, ROAD:5 };
 var AGES = ["Medieval","Industrial","Modern"];
+var GOLD_MUL = 1.8;        // gold earned per kill (tuned up from 1.0)
+var EARLY_BONUS = 0.6;     // fraction of next wave's bounty granted for sending early (4x of original 0.15)
 
 // helper: clamp
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
@@ -431,11 +433,11 @@ var ENEMIES = {
   phaser:{ id:"phaser", name:"Wraith", hp:52, spd:1.7, bounty:13, leak:1, r:0.38, color:"#9fb0ff", phase:true,
     blurb:"Phases intangible in pulses — untouchable while shimmering. Time your DPS." },
   // bosses
-  boss_ram:{ id:"boss_ram", name:"The Iron Ram", hp:1400, spd:0.95, bounty:120, leak:10, r:0.7, color:"#caa", boss:1, armor:0.4, sapper:true,
+  boss_ram:{ id:"boss_ram", name:"The Iron Ram", hp:1400, spd:0.95, bounty:200, leak:10, r:0.7, color:"#ccaa99", boss:1, armor:0.4, sapper:true,
     blurb:"BOSS — armored battering ram that smashes walls." },
-  boss_brood:{ id:"boss_brood", name:"Brood Mother", hp:1900, spd:1.0, bounty:160, leak:10, r:0.75, color:"#9ad06a", boss:2, spawns:"swarm",
+  boss_brood:{ id:"boss_brood", name:"Brood Mother", hp:1900, spd:1.0, bounty:280, leak:10, r:0.75, color:"#9ad06a", boss:2, spawns:"swarm",
     blurb:"BOSS — spews endless swarms as it advances." },
-  boss_storm:{ id:"boss_storm", name:"Storm Drake", hp:2600, spd:1.25, bounty:220, leak:12, r:0.8, color:"#c779e0", boss:3, fly:true,
+  boss_storm:{ id:"boss_storm", name:"Storm Drake", hp:2600, spd:1.25, bounty:380, leak:12, r:0.8, color:"#c779e0", boss:3, fly:true,
     blurb:"BOSS — a colossal flyer. The maze is useless; meet it with guns." }
 };
 
@@ -623,7 +625,8 @@ function teleportBack(e, n){
 }
 function killEnemy(e){
   if(e.dead) return; e.dead=true; G.killed++;
-  G.gold += e.def.bounty; addFloat(e.cx,e.cy,"+"+e.def.bounty,"#f6c94b");
+  var bnty=Math.round(e.def.bounty*GOLD_MUL);
+  G.gold += bnty; addFloat(e.cx,e.cy,"+"+bnty,"#f6c94b");
   burst(e.cx,e.cy,e.def.boss?40:10, e.def.color, e.def.boss?7:4, 0.6, e.def.boss?5:3);
   Audio.sfx.death(); if(e.def.boss){ addShake(8); Audio.sfx.win(); }
   if(e.def.splits && !e.isChild){
@@ -982,12 +985,16 @@ function genLevel(n){
   var nC=cols*rows;
   terr=new Array(nC); blocker=new Array(nC); dist=new Array(nC); ghostField=new Array(nC);
   for(var i=0;i<nC;i++){ terr[i]=TERR.GRASS; blocker[i]=-1; }
-  // spawn/exit on opposite edges (varied)
+  // spawn/exit on opposite edges, spread across BOTH axes so the road
+  // crosses the whole board (no dead corners / empty halves)
   var edge=n%4;
-  if(edge===0){ spawn={x:0,y:rint(2,rows-3)}; exitC={x:cols-1,y:rint(2,rows-3)}; }
-  else if(edge===1){ spawn={x:cols-1,y:rint(2,rows-3)}; exitC={x:0,y:rint(2,rows-3)}; }
-  else if(edge===2){ spawn={x:rint(2,cols-3),y:0}; exitC={x:rint(2,cols-3),y:rows-1}; }
-  else { spawn={x:rint(2,cols-3),y:rows-1}; exitC={x:rint(2,cols-3),y:0}; }
+  var loY=rint(1,Math.floor(rows/3)), hiY=rint(Math.floor(rows*2/3),rows-2);
+  var loX=rint(1,Math.floor(cols/3)), hiX=rint(Math.floor(cols*2/3),cols-2);
+  if(rng()<0.5){ var t1=loY; loY=hiY; hiY=t1; } if(rng()<0.5){ var t2=loX; loX=hiX; hiX=t2; }
+  if(edge===0){ spawn={x:0,y:loY}; exitC={x:cols-1,y:hiY}; }
+  else if(edge===1){ spawn={x:cols-1,y:loY}; exitC={x:0,y:hiY}; }
+  else if(edge===2){ spawn={x:loX,y:0}; exitC={x:hiX,y:rows-1}; }
+  else { spawn={x:hiX,y:rows-1}; exitC={x:loX,y:0}; }
   // terrain blobs (chasm=free walls, water, forest, highland)
   function blob(type,count,size){ for(var b=0;b<count;b++){ var bx=rint(3,cols-4), by=rint(2,rows-3);
     for(var s=0;s<size;s++){ var x=clamp(bx+rint(-1,1),0,cols-1), y=clamp(by+rint(-1,1),0,rows-1);
@@ -1055,7 +1062,7 @@ function startWave(){
   var base=G.waveClock + (active?0.2:0);
   for(var g=0;g<wv.groups.length;g++){ var grp=wv.groups[g];
     for(var c=0;c<grp.count;c++){ G.spawnQ.push({type:grp.type, at: base+grp.delay+c*grp.gap}); }
-    if(active) earlyBonus += grp.count* (ENEMIES[grp.type].bounty||3) *0.15;
+    if(active) earlyBonus += grp.count* (ENEMIES[grp.type].bounty||3) *EARLY_BONUS;
   }
   G.spawnQ.sort(function(a,b){return a.at-b.at;});
   if(wv.boss) G.bossActive=true;
@@ -1144,6 +1151,7 @@ function PY(cy){ return oy+cy*cell; }
 // =========================================================================
 function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 function shade(hex,amt){ var n=parseInt(hex.slice(1),16); var r=clamp((n>>16)+amt,0,255),g=clamp(((n>>8)&255)+amt,0,255),b=clamp((n&255)+amt,0,255); return "rgb("+r+","+g+","+b+")"; }
+function hexRGB(hex){ var n=parseInt(hex.slice(1),16); return ((n>>16)&255)+","+((n>>8)&255)+","+(n&255); }
 
 function drawTowerShape(c, fam, tier, px, py, sz, angle, flash){
   var def=TOWERS[fam]; var col=def.base; var s=sz, h=s*0.5;
@@ -1215,45 +1223,85 @@ function drawTowerShape(c, fam, tier, px, py, sz, angle, flash){
 
 function drawEnemy(c, e){
   var px=PX(e.cx), py=PY(e.cy), s=e.def.r*cell*2, t=G.time;
-  var col=e.def.color;
+  var id=e.def.id, col=e.def.color, dark=shade(col,-75), lite=shade(col,45);
+  var fly=e.def.fly, big=e.def.boss?1.15:1;
   c.save(); c.translate(px,py);
-  // flyer shadow on ground
-  if(e.def.fly){ c.fillStyle="rgba(0,0,0,.25)"; c.beginPath(); c.ellipse(0,s*0.5,s*0.4,s*0.16,0,0,6.283); c.fill(); c.translate(0,-s*0.35-Math.sin(t*4+e.legPhase)*s*0.08); }
-  var phase=e.phaseInt?0.4:1;
-  c.globalAlpha=phase;
-  // legs (bob)
-  if(!e.def.fly){ c.strokeStyle=shade(col,-50); c.lineWidth=Math.max(1.5,s*0.08);
-    var lb=Math.sin(e.legPhase)*s*0.12;
-    c.beginPath(); c.moveTo(-s*0.18,s*0.1); c.lineTo(-s*0.22,s*0.42+lb); c.moveTo(s*0.18,s*0.1); c.lineTo(s*0.22,s*0.42-lb); c.stroke(); }
-  // body
-  var bob=e.def.fly?0:Math.abs(Math.sin(e.legPhase))*s*0.04;
-  c.fillStyle=col; c.beginPath(); c.ellipse(0,-bob,s*0.34,s*0.36,0,0,6.283); c.fill();
-  c.fillStyle="rgba(255,255,255,.12)"; c.beginPath(); c.ellipse(-s*0.1,-s*0.12-bob,s*0.12,s*0.1,0,0,6.283); c.fill();
-  // type features
-  if(e.def.id==="brute"||e.def.id==="boss_ram"){ c.fillStyle=shade(col,40); c.beginPath(); c.moveTo(-s*0.3,-s*0.2);c.lineTo(-s*0.45,-s*0.4);c.lineTo(-s*0.2,-s*0.3);c.fill(); c.beginPath(); c.moveTo(s*0.3,-s*0.2);c.lineTo(s*0.45,-s*0.4);c.lineTo(s*0.2,-s*0.3);c.fill(); }
-  if(e.def.fly){ var wf=Math.sin(t*16+e.legPhase); c.fillStyle="rgba(199,121,224,.7)";
-    c.beginPath(); c.ellipse(-s*0.3,-s*0.1,s*0.28,s*0.12,wf*0.5,0,6.283); c.fill();
-    c.beginPath(); c.ellipse(s*0.3,-s*0.1,s*0.28,s*0.12,-wf*0.5,0,6.283); c.fill(); }
-  if(e.def.heal){ c.strokeStyle="#7be0c0"; c.lineWidth=Math.max(1.5,s*0.06); c.beginPath(); c.arc(0,-s*0.55,s*0.12,0,6.283); c.stroke();
-    c.fillStyle="#7be0c0"; c.fillRect(-s*0.03,-s*0.62,s*0.06,s*0.16); c.fillRect(-s*0.08,-s*0.57,s*0.16,s*0.06); }
-  if(e.def.frontShield){ c.save(); c.rotate(e.facing); c.fillStyle="rgba(180,200,220,.85)"; roundRect(c,s*0.28,-s*0.3,s*0.12,s*0.6,s*0.05); c.fill(); c.restore(); }
-  if(e.def.regen){ c.fillStyle="#8fd07a"; for(var i=0;i<3;i++){ c.beginPath(); c.arc(-s*0.2+i*s*0.2,-s*0.3,s*0.05,0,6.283); c.fill(); } }
-  if(e.def.sapper){ c.strokeStyle="#7a5a30"; c.lineWidth=s*0.06; c.beginPath(); c.moveTo(s*0.2,-s*0.2);c.lineTo(s*0.4,-s*0.4); c.stroke(); }
-  if(e.burrowing){ c.globalAlpha=phase*0.4; c.fillStyle="#5a3f28"; c.beginPath(); c.ellipse(0,s*0.1,s*0.5,s*0.2,0,0,6.283); c.fill(); }
-  // eyes
-  c.globalAlpha=phase; c.fillStyle="#1a1a1a"; var ey=-s*0.05-bob;
-  c.beginPath(); c.arc(-s*0.1,ey,s*0.05,0,6.283); c.arc(s*0.1,ey,s*0.05,0,6.283); c.fill();
-  c.fillStyle="#fff"; c.beginPath(); c.arc(-s*0.08,ey-s*0.02,s*0.02,0,6.283); c.arc(s*0.12,ey-s*0.02,s*0.02,0,6.283); c.fill();
-  // status tints
-  if(e.slow>0||e.slowT>0){ c.strokeStyle="rgba(127,228,255,.7)"; c.lineWidth=2; c.beginPath(); c.arc(0,-bob,s*0.42,0,6.283); c.stroke(); }
-  if(e.burnT>0){ c.fillStyle="rgba(255,123,74,.8)"; c.beginPath(); c.arc((rng()-0.5)*s*0.3,-s*0.4-rng()*s*0.2,s*0.06,0,6.283); c.fill(); }
-  if(e.poisonT>0){ c.fillStyle="rgba(166,224,90,.8)"; c.beginPath(); c.arc((rng()-0.5)*s*0.3,-s*0.3,s*0.04,0,6.283); c.fill(); }
-  if(e.root>0){ c.strokeStyle="#aaa"; c.lineWidth=2; c.beginPath(); c.arc(0,s*0.3,s*0.3,0,3.14); c.stroke(); }
+  // ground shadow
+  c.fillStyle="rgba(0,0,0,.30)"; c.beginPath(); c.ellipse(0,s*0.46,s*0.36*big,s*0.14,0,0,6.283); c.fill();
+  if(fly){ c.translate(0,-s*0.32-Math.sin(t*5+e.legPhase)*s*0.07); }
+  var phase=e.phaseInt?0.35:1; c.globalAlpha=phase;
+  var bob=fly?0:Math.abs(Math.sin(e.legPhase))*s*0.05;
+  var dir=Math.cos(e.facing)>=0?1:-1;
+  c.lineJoin="round"; c.lineCap="round";
+
+  // ---- legs ----
+  if(!fly){ c.strokeStyle=dark; c.lineWidth=Math.max(2,s*0.1);
+    var lb=Math.sin(e.legPhase)*s*0.14;
+    c.beginPath(); c.moveTo(-s*0.15,s*0.2-bob); c.lineTo(-s*0.19,s*0.46+lb);
+                   c.moveTo(s*0.15,s*0.2-bob);  c.lineTo(s*0.19,s*0.46-lb); c.stroke(); }
+  // ---- wings (flyer) ----
+  if(fly){ var wf=Math.sin(t*16+e.legPhase); c.fillStyle="rgba("+hexRGB(col)+",.6)"; c.strokeStyle=dark; c.lineWidth=Math.max(1,s*0.04);
+    for(var w=-1;w<=1;w+=2){ c.save(); c.scale(w,1); c.beginPath(); c.moveTo(s*0.14,-s*0.08);
+      c.quadraticCurveTo(s*0.62,-s*0.32-wf*s*0.2, s*0.5,s*0.12); c.quadraticCurveTo(s*0.32,0,s*0.14,-s*0.04); c.closePath(); c.fill(); c.stroke(); c.restore(); } }
+
+  // ---- body (per-type silhouette) ----
+  c.save(); c.translate(0,-bob);
+  c.lineWidth=Math.max(1.5,s*0.07); c.strokeStyle=dark; c.fillStyle=col;
+  if(id==="brute"||id==="regen"||id.indexOf("boss")===0){
+    c.beginPath(); c.ellipse(0,0,s*0.42*big,s*0.4*big,0,0,6.283); c.fill(); c.stroke();
+  } else if(id==="armored"||id==="shield"){
+    roundRect(c,-s*0.33,-s*0.34,s*0.66,s*0.7,s*0.12); c.fill(); c.stroke();
+    c.strokeStyle="rgba(255,255,255,.22)"; c.beginPath(); c.moveTo(-s*0.28,-s*0.04);c.lineTo(s*0.28,-s*0.04); c.stroke();
+  } else if(id==="splitter"){
+    var wob=Math.sin(t*4+e.legPhase)*s*0.04;
+    c.beginPath(); c.ellipse(0,0.02*s,s*0.36+wob,s*0.34-wob,0,0,6.283); c.fill(); c.stroke();
+  } else if(id==="phaser"){
+    c.beginPath(); c.moveTo(-s*0.26,0); c.quadraticCurveTo(-s*0.3,-s*0.52,0,-s*0.52); c.quadraticCurveTo(s*0.3,-s*0.52,s*0.26,0);
+    c.quadraticCurveTo(s*0.12,s*0.42,0,s*0.26); c.quadraticCurveTo(-s*0.12,s*0.42,-s*0.26,0); c.closePath(); c.fill(); c.stroke();
+  } else if(id==="burrow"){
+    c.beginPath(); c.ellipse(0,0,s*0.4,s*0.32,0,0,6.283); c.fill(); c.stroke();
+    c.fillStyle=lite; c.beginPath(); c.ellipse(dir*s*0.32,s*0.03,s*0.13,s*0.1,0,0,6.283); c.fill(); c.stroke();
+  } else {
+    c.beginPath(); c.ellipse(0,0,s*0.34,s*0.36,0,0,6.283); c.fill(); c.stroke();
+  }
+  // belly highlight
+  c.fillStyle="rgba(255,255,255,.18)"; c.beginPath(); c.ellipse(-dir*s*0.08,-s*0.14,s*0.14,s*0.1,0,0,6.283); c.fill();
+
+  // ---- type extras ----
+  if(id==="brute"||id==="boss_ram"){ c.fillStyle=lite; c.strokeStyle=dark; c.lineWidth=s*0.05;
+    c.beginPath(); c.moveTo(-s*0.32,-s*0.26);c.lineTo(-s*0.52,-s*0.5);c.lineTo(-s*0.22,-s*0.36);c.closePath(); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(s*0.32,-s*0.26);c.lineTo(s*0.52,-s*0.5);c.lineTo(s*0.22,-s*0.36);c.closePath(); c.fill(); c.stroke(); }
+  if(e.def.heal){ c.strokeStyle="#bdfff0"; c.lineWidth=s*0.06; c.beginPath(); c.ellipse(0,-s*0.56,s*0.16,s*0.06,0,0,6.283); c.stroke();
+    c.fillStyle="#eafff8"; c.fillRect(-s*0.035,-s*0.72,s*0.07,s*0.22); c.fillRect(-s*0.1,-s*0.66,s*0.2,s*0.07); }
+  if(id==="regen"){ c.fillStyle=lite; for(var i=0;i<3;i++){ c.beginPath(); c.arc(-s*0.18+i*s*0.18,-s*0.3,s*0.06,0,6.283); c.fill(); } }
+  if(e.def.sapper){ c.strokeStyle="#caa46a"; c.lineWidth=s*0.07; c.beginPath(); c.moveTo(dir*s*0.08,-s*0.06); c.lineTo(dir*s*0.48,-s*0.42); c.stroke();
+    c.strokeStyle="#9aa3ad"; c.beginPath(); c.moveTo(dir*s*0.38,-s*0.52); c.lineTo(dir*s*0.58,-s*0.32); c.stroke(); }
+  c.restore();
+
+  // ---- shield (front arc) ----
+  if(e.def.frontShield){ c.save(); c.rotate(e.facing); c.fillStyle="rgba(214,228,242,.92)"; c.strokeStyle="#8aa3b8"; c.lineWidth=s*0.04;
+    roundRect(c,s*0.3,-s*0.34,s*0.13,s*0.68,s*0.06); c.fill(); c.stroke(); c.restore(); }
+
+  // ---- eyes (track movement) ----
+  var ey=-s*0.06-bob, ex=dir*s*0.04;
+  c.fillStyle="#fff"; c.beginPath(); c.arc(-s*0.11+ex,ey,s*0.075,0,6.283); c.arc(s*0.11+ex,ey,s*0.075,0,6.283); c.fill();
+  c.fillStyle="#15171c"; c.beginPath(); c.arc(-s*0.11+ex+dir*s*0.028,ey,s*0.04,0,6.283); c.arc(s*0.11+ex+dir*s*0.028,ey,s*0.04,0,6.283); c.fill();
+  if(id==="brute"||id==="armored"||id==="shield"||id.indexOf("boss")===0){ c.strokeStyle=dark; c.lineWidth=s*0.05;
+    c.beginPath(); c.moveTo(-s*0.19+ex,ey-s*0.13);c.lineTo(-s*0.03+ex,ey-s*0.05); c.moveTo(s*0.19+ex,ey-s*0.13);c.lineTo(s*0.03+ex,ey-s*0.05); c.stroke(); }
+
+  // ---- status fx ----
+  if(e.burrowing){ c.globalAlpha=phase*0.5; c.fillStyle="#5a3f28"; c.beginPath(); c.ellipse(0,s*0.12,s*0.5,s*0.2,0,0,6.283); c.fill(); c.globalAlpha=phase; }
+  if(e.slow>0||e.slowT>0){ c.strokeStyle="rgba(127,228,255,.8)"; c.lineWidth=2; c.beginPath(); c.arc(0,-bob,s*0.46,0,6.283); c.stroke(); }
+  if(e.burnT>0){ for(var b=0;b<2;b++){ c.fillStyle=b?"#ffd24a":"#ff6b3a"; c.globalAlpha=phase*0.85; c.beginPath(); c.arc((rng()-0.5)*s*0.4,-s*0.42-rng()*s*0.25,s*0.06,0,6.283); c.fill(); } c.globalAlpha=phase; }
+  if(e.poisonT>0){ c.fillStyle="rgba(166,224,90,.85)"; c.beginPath(); c.arc((rng()-0.5)*s*0.3,-s*0.32,s*0.045,0,6.283); c.fill(); }
+  if(e.root>0){ c.strokeStyle="#cfd8e0"; c.lineWidth=2; c.beginPath(); c.arc(0,s*0.3,s*0.32,0.2,2.94); c.stroke(); }
   c.globalAlpha=1; c.restore();
-  // hp bar
-  if(e.hp<e.maxhp){ var bw=s*0.8, bx=px-bw/2, by=py-s*0.55-(e.def.fly?s*0.35:0);
-    c.fillStyle="rgba(0,0,0,.55)"; c.fillRect(bx-1,by-1,bw+2,4+1);
-    c.fillStyle=e.def.boss?"#ff6b6b":(e.hp/e.maxhp>0.4?"#76e08a":"#ffb259"); c.fillRect(bx,by,bw*Math.max(0,e.hp/e.maxhp),4); }
+
+  // ---- hp bar ----
+  if(e.hp<e.maxhp){ var bw=s*0.86, bx=px-bw/2, by=py-s*0.6-(fly?s*0.34:0);
+    c.fillStyle="rgba(0,0,0,.6)"; c.fillRect(bx-1,by-1,bw+2,5);
+    var fr=Math.max(0,e.hp/e.maxhp);
+    c.fillStyle=e.def.boss?"#ff6b6b":(fr>0.5?"#76e08a":(fr>0.25?"#ffd24a":"#ff7043")); c.fillRect(bx,by,bw*fr,3); }
 }
 
 function terrCol(t,x,y){
