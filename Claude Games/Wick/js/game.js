@@ -251,7 +251,7 @@
       flavor: 'They only want to help.',
       blurb: 'small embers circle you and bite',
       stats: {
-        dmg: [8, 22, 22, 22, 22],
+        dmg: [12, 22, 22, 32, 42],
         count: [2, 2, 3, 3, 4],
         rad: [64, 64, 64, 92, 92],
         spin: 2.7
@@ -340,12 +340,12 @@
     // thief — a big, rare scavenger that roams hoovering up your fallen sparks; kill it to get them back, or let your hoard run off into the dark
     thief:   { hp: 150, spd: 138, dmg: 5,  r: 19, xp: 5, eye: '#ffe066', eyeS: 3.4, steals: true },
     snuffer: { hp: 380, spd: 62,  dmg: 16, r: 17, xp: 0, eye: '#cfe2ff', eyeS: 3.2, elite: true },
-    // mourn — the unlit: a multi-phase melee charger; the FIRST boss wall
+    // mourn — the unlit: a multi-phase ring-caster that stalks you; the FIRST boss wall
     mourn:   { hp: 3750, spd: 48, dmg: 32, r: 46, xp: 0, eye: '#f4f0ff', eyeS: 6, boss: true },
     // hush — the gaunt lantern: a ranged spiral-caster that summons wisps to drink your light; the SECOND wall
     hush:    { hp: 11000, spd: 40, dmg: 24, r: 38, xp: 0, eye: '#bfe0ff', eyeS: 5, boss: true, gaunt: true },
     // gutter — the leaping dark: a huge, glowing menace; blinks, scatters, leaps and slams; the DAWN finale
-    gutter:  { hp: 80000, spd: 70, dmg: 30, r: 60, xp: 0, eye: '#e5240d', eyeS: 7, boss: true, leaper: true }
+    gutter:  { hp: 160000, spd: 70, dmg: 30, r: 60, xp: 0, eye: '#e5240d', eyeS: 7, boss: true, leaper: true }
   };
 
   const DEATH_LINES = [
@@ -1054,7 +1054,7 @@
       }
     }
     else if (w.evo === 'halo') {
-      w.ang += dt * 3.1;
+      w.ang += dt * 3.2;
       const n = 6, rad = 122;
       G.haloR = Math.max(G.haloR, rad + 16); // reel in sparks across the whole ring
       w.wisps.length = 0;
@@ -1068,7 +1068,7 @@
           if (dist2(wx, wy, e.x, e.y) < (18 + e.r) * (18 + e.r)) {
             e.orbitT = 0.26; // near-continuous burn — it's a solid wheel of fire now
             const dd = Math.hypot(e.x - wx, e.y - wy) || 1;
-            damageEnemy(e, 27 * m, (e.x - wx) / dd, (e.y - wy) / dd, 50);
+            damageEnemy(e, 48 * m, (e.x - wx) / dd, (e.y - wy) / dd, 50);
           }
         }
         // an enemy shot that strikes an ember is snuffed
@@ -1227,6 +1227,17 @@
 
   /* ---------------- enemies ---------------- */
 
+  // summon reinforcements evenly spaced in a ring around the boss (not scattered around the player)
+  function summonRing(e, kind, count, gap) {
+    const rad = e.r + (gap || 70), off = Math.random() * TAU;
+    for (let i = 0; i < count; i++) {
+      const a = off + (i / count) * TAU + rand(-0.1, 0.1);
+      const en = spawnEnemy(kind);
+      en.x = e.x + Math.cos(a) * rad;
+      en.y = e.y + Math.sin(a) * rad;
+    }
+  }
+
   function fireBossRing(e, spd, dmg) {
     const n = 26;
     for (let i = 0; i < n; i++) {
@@ -1240,13 +1251,13 @@
     Sound.play('nova');
   }
 
-  /* mourn, the unlit — a melee charger with three phases */
+  /* mourn, the unlit — a stalking ring-caster with three phases */
   function updateMourn(e, dt, nx, ny) {
     e.bT -= dt;
     if (e.phaseN === 1 && e.hp < e.maxHp * 0.55) { e.phaseN = 2; announce('mourn comes apart at the seams'); addShake(8); }
     if (e.phaseN === 2 && e.hp < e.maxHp * 0.25) { e.phaseN = 3; announce('it will not be put out quietly', true); addShake(12); }
     const enraged = e.phaseN === 3;
-    // from phase 2 on it slams the ground between charges — outrun the ring
+    // from phase 2 on it slams the ground between volleys — outrun the ring
     if (e.phaseN >= 2) {
       e.castT -= dt;
       if (e.castT <= 0) {
@@ -1256,24 +1267,16 @@
         addShake(7); Sound.play('nova');
       }
     }
-    if (e.bState === 'chase') {
-      e.x += nx * e.spd * dt; e.y += ny * e.spd * dt;
-      if (e.bT <= 0) { e.bState = 'tell'; e.bT = enraged ? 0.6 : 0.85; e.cdx = nx; e.cdy = ny; }
-    } else if (e.bState === 'tell') {
-      e.x -= e.cdx * 24 * dt;
-      if (e.bT <= 0) { e.bState = 'charge'; e.bT = 0.6; addShake(4); }
-    } else if (e.bState === 'charge') {
-      e.x += e.cdx * 660 * dt; e.y += e.cdy * 660 * dt;
-      if (Math.random() < 0.6) puff(e.x, e.y, '#5d5080', 1, 40, 0.4, 4);
-      if (e.bT <= 0) {
-        e.bState = 'post'; e.bT = 0.55;
-        fireBossRing(e, enraged ? 175 : 150, enraged ? 22 : 18);
-        if (enraged) { e.phase += 0.12; fireBossRing(e, 110, 16); } // a second, offset ring in the throes
-        if (e.phaseN >= 2) for (let i = 0; i < 5; i++) spawnEnemy('moth', Math.random() * TAU, 0.6);
-      }
-    } else { // post
-      e.x += nx * 20 * dt; e.y += ny * 20 * dt;
-      if (e.bT <= 0) { e.bState = 'chase'; e.bT = enraged ? 1.2 : e.phaseN === 2 ? 1.8 : 2.3; }
+    // mourn no longer charges — it drifts after you and looses concentric rings of cold fire on a cadence
+    e.x += nx * e.spd * dt; e.y += ny * e.spd * dt;
+    if (e.bT <= 0) {
+      e.bT = enraged ? 1.9 : e.phaseN === 2 ? 2.5 : 3.1;
+      fireBossRing(e, enraged ? 175 : 150, enraged ? 22 : 18);
+      e.phase += 0.12; // offset the inner ring so the two circles interleave
+      fireBossRing(e, enraged ? 115 : 100, enraged ? 16 : 14); // a second, tighter concentric ring
+      if (enraged) { e.phase += 0.12; fireBossRing(e, 60, 12); } // a third in the throes
+      addShake(4);
+      if (e.phaseN >= 2) summonRing(e, 'moth', 5); // reinforcements ring the boss
     }
     if (Math.random() < 0.3) puff(e.x + rand(-30, 30), e.y - e.r + rand(-10, 10), '#241f38', 1, 16, 0.9, 5);
   }
@@ -1312,8 +1315,7 @@
     e.summonT -= dt;
     if (e.summonT <= 0) {
       e.summonT = p2 ? 6 : 9.5;
-      const k = p2 ? 4 : 3;
-      for (let i = 0; i < k; i++) spawnEnemy('wisp', Math.random() * TAU, 0.5);
+      summonRing(e, 'wisp', p2 ? 4 : 3, 60); // wisps ring the lantern
       Sound.play('nova');
     }
     // an aimed lantern-volley to punish standing still
@@ -1329,11 +1331,28 @@
     if (Math.random() < 0.4) puff(e.x + rand(-22, 22), e.y + rand(-22, 22), '#2a3a55', 1, 18, 0.6, 4);
   }
 
-  /* gutter, the leaping dark — stalks toward you, blinks & scatters, leaps & slams;
-     past half-health it also breaks into a radial burst or a spinning spiral */
+  /* gutter, the leaping dark — stalks toward you, blinks & scatters, leaps & slams, charges;
+     past half-health he also trails a rotating spiral and looses concentric bursts WHILE he moves */
   function updateGutter(e, dt, nx, ny, d) {
-    if (e.phaseN === 1 && e.hp < e.maxHp * 0.5) { e.phaseN = 2; announce('gutter splits the dark', true); addShake(8); }
+    if (e.phaseN === 1 && e.hp < e.maxHp * 0.5) { e.phaseN = 2; announce('gutter splits the dark', true); addShake(8); e.spinFireT = 0; e.burstT = 2; }
     const p2 = e.phaseN >= 2;
+    // phase 2: he keeps up ranged pressure WHILE he leaps / charges / blinks —
+    // a rotating spiral he trails, and a concentric radial burst on a delay
+    if (p2) {
+      e.spinA += dt * 2.2;
+      e.spinFireT -= dt;
+      if (e.spinFireT <= 0) {
+        e.spinFireT = 0.16;
+        for (let k = 0; k < 2; k++) { const a = e.spinA + k * Math.PI; ebullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, r: 6, dmg: 12 * dmgScale(), life: 6 }); }
+      }
+      e.burstT -= dt;
+      if (e.burstT <= 0) {
+        e.burstT = rand(3.2, 4.2);
+        const n = 26;
+        for (let i = 0; i < n; i++) { const a = (i / n) * TAU + e.spinA; ebullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 185, vy: Math.sin(a) * 185, r: 6, dmg: 14 * dmgScale(), life: 6 }); }
+        addShake(5); Sound.play('nova'); puff(e.x, e.y, '#ff5a2a', 16, 200, 0.5, 4);
+      }
+    }
     // dawn-coming encouragement as it weakens
     const hpf = e.hp / e.maxHp;
     if (!e.enc80 && hpf < 0.8) { e.enc80 = true; announce('the sky greys at the edges — keep going'); }
@@ -1345,8 +1364,9 @@
     else if (e.bState === 'blinkwait') {
       // stalk toward the player between teleports
       e.x += nx * e.spd * 0.6 * dt; e.y += ny * e.spd * 0.6 * dt;
-      // past half health it periodically breaks into a new attack instead of blinking
-      if (p2) { e.atkT -= dt; if (e.atkT <= 0) { e.atkT = rand(7, 10); startGutterAttack(e); return; } }
+      // periodically it breaks off to telegraph and charge (mourn's old dash)
+      e.atkT -= dt;
+      if (e.atkT <= 0) { e.atkT = rand(7, 10); startGutterDash(e); return; }
       if (e.bT <= 0) {
         // blink to a new spot — erratic, and farther out with each jump of the cycle
         const a = Math.random() * TAU, dist = 220 + e.blinks * 45 + rand(0, 120);
@@ -1383,31 +1403,29 @@
         }
         e.bState = 'blinkwait'; e.bT = 0.7; e.blinks = 0; e.blinkGoal = 4 + (Math.random() * 3 | 0);
       }
-    } else if (e.bState === 'burst') {
-      // a moment of stillness, then a wide radial volley
+    } else if (e.bState === 'dashtell') {
+      // rear back and telegraph the charge (inherited from mourn)
+      e.x -= e.cdx * 30 * dt; e.y -= e.cdy * 30 * dt;
+      if (Math.random() < 0.5) puff(e.x, e.y, '#a0301a', 1, 40, 0.4, 4);
+      if (e.bT <= 0) { e.bState = 'dashgo'; e.bT = 0.6; addShake(4); Sound.play('nova'); }
+    } else if (e.bState === 'dashgo') {
+      // a fast lunge along the telegraphed line
+      e.x += e.cdx * 680 * dt; e.y += e.cdy * 680 * dt;
+      if (Math.random() < 0.7) puff(e.x, e.y, '#ff5a2a', 1, 50, 0.4, 4);
       if (e.bT <= 0) {
-        const n = 26;
-        for (let i = 0; i < n; i++) { const a = (i / n) * TAU + e.spinA; ebullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 190, vy: Math.sin(a) * 190, r: 6, dmg: 14 * dmgScale(), life: 6 }); }
-        addShake(7); Sound.play('nova'); puff(e.x, e.y, '#ff5a2a', 20, 220, 0.6, 4);
-        e.bState = 'blinkwait'; e.bT = 0.9; e.blinks = 0; e.blinkGoal = 4 + (Math.random() * 3 | 0);
+        // slams to a stop, loosing a ring on arrival
+        fireBossRing(e, p2 ? 185 : 160, p2 ? 18 : 15); addShake(6);
+        e.bState = 'blinkwait'; e.bT = 0.7; e.blinks = 0; e.blinkGoal = 4 + (Math.random() * 3 | 0);
       }
-    } else if (e.bState === 'spiral') {
-      // a spinning sprinkler of fire for a couple of seconds
-      e.spinA += dt * 3.6;
-      e.fireT -= dt;
-      if (e.fireT <= 0) {
-        e.fireT = 0.09;
-        for (let k = 0; k < 3; k++) { const a = e.spinA + (k / 3) * TAU; ebullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150, r: 6, dmg: 13 * dmgScale(), life: 6 }); }
-      }
-      if (e.bT <= 0) { e.bState = 'blinkwait'; e.bT = 0.9; e.blinks = 0; e.blinkGoal = 4 + (Math.random() * 3 | 0); }
     }
   }
 
-  // gutter's phase-2 alternates: a radial burst or a spinning spiral
-  function startGutterAttack(e) {
-    if (Math.random() < 0.5) { e.bState = 'burst'; e.bT = 0.45; addShake(4); }
-    else { e.bState = 'spiral'; e.bT = 1.6; e.fireT = 0; addShake(3); }
-    puff(e.x, e.y, '#ff5a2a', 12, 150, 0.5, 4);
+  // aim and telegraph gutter's charge toward the player's current position
+  function startGutterDash(e) {
+    const a = Math.atan2(P.y - e.y, P.x - e.x);
+    e.cdx = Math.cos(a); e.cdy = Math.sin(a);
+    e.bState = 'dashtell'; e.bT = 0.85;
+    puff(e.x, e.y, '#a0301a', 10, 120, 0.4, 4);
     Sound.play('boss');
   }
 
@@ -2519,15 +2537,15 @@
     }
     ctx.restore();
 
-    // mourn's charge warning
-    if (e.type === 'mourn' && e.bState === 'tell') {
+    // gutter's charge warning — a telegraph line down its lunge path
+    if (e.type === 'gutter' && e.bState === 'dashtell') {
       ctx.save();
       ctx.globalAlpha = 0.16 + 0.1 * Math.sin(AT * 24);
-      ctx.strokeStyle = '#c9b5ff';
+      ctx.strokeStyle = '#ff7a3a';
       ctx.lineWidth = e.r * 1.6;
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x + e.cdx * 460, e.y + e.cdy * 460);
+      ctx.lineTo(e.x + e.cdx * 520, e.y + e.cdy * 520);
       ctx.stroke();
       ctx.restore();
     }
@@ -3023,7 +3041,7 @@
     gloom: 'Armored in cooled wax; every blow is blunted. Melt it with fire and area.',
     thief: 'A big scavenger that hoards your fallen sparks and bolts. Kill it to get them back.',
     snuffer: 'An elite of the dark. Put it out and it leaves a gift behind.',
-    mourn: 'The first great wall — a charging horror that comes apart into fiercer phases.',
+    mourn: 'The first great wall — it stalks you and looses concentric rings of cold fire, coming apart into fiercer phases.',
     hush: 'A gaunt iron lantern that spins cold fire and summons wisps to blind you.',
     gutter: 'The leaping dark of the final hour. He holds the coming dawn within him — free it.'
   };
