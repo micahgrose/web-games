@@ -111,6 +111,7 @@ F.newGame = function(seed){
   const S = F.newState(seed == null ? (Math.random() * 0xffffffff) >>> 0 : seed);
   F.genWorld(S);
   S.msProg = {};
+  S.powerDirty = true;
   return S;
 };
 
@@ -149,6 +150,7 @@ F.place = function(S, key, x, y, dir, free){
   S.ents.push(e);
   stamp(S, e);
   if (def.kind === 'ubelt') linkTunnel(S, e, def);
+  S.powerDirty = true;
   F.emit(S, { type:'place', key, x, y });
   return e;
 };
@@ -168,6 +170,7 @@ function initEnt(S, e, def){
     case 'gen':      e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'solar':    break;
+    case 'pole':     e.links = []; e.netId = 0; break;
     case 'pump':     e.tank = 0; e.prog = 0; break;
   }
 }
@@ -210,8 +213,68 @@ F.remove = function(S, x, y){
   }
   unstamp(S, e);
   S.ents.splice(S.ents.indexOf(e), 1);
+  S.powerDirty = true;
   F.emit(S, { type:'remove', key: e.key, x, y });
   return e;
+};
+
+/* ==================================================================== */
+/* POWER NETWORKS (poles carry power from generators to machines)      */
+/* ==================================================================== */
+
+function poleCovers(p, e){
+  const c = F.BUILDINGS[p.key].cover;
+  return !(e.x > p.x + c || e.x + e.w - 1 < p.x - c ||
+           e.y > p.y + c || e.y + e.h - 1 < p.y - c);
+}
+F.poleCovers = poleCovers;
+
+F.computePowerNetworks = function(S){
+  const poles = [];
+  for (const e of S.ents){
+    if (e.kind === 'pole'){ e.links = []; e.netId = 0; poles.push(e); }
+  }
+  // wire poles together: within the larger of the two reaches
+  for (let i = 0; i < poles.length; i++){
+    const a = poles[i], ra = F.BUILDINGS[a.key].reach;
+    for (let j = i + 1; j < poles.length; j++){
+      const b = poles[j], rb = F.BUILDINGS[b.key].reach;
+      const d = Math.hypot(b.x - a.x, b.y - a.y);
+      if (d <= Math.max(ra, rb)){
+        a.links.push(b.id);
+        b.links.push(a.id);
+      }
+    }
+  }
+  // flood networks
+  let nid = 0;
+  const byId = new Map(poles.map(p => [p.id, p]));
+  for (const p of poles){
+    if (p.netId) continue;
+    nid++;
+    const stack = [p];
+    p.netId = nid;
+    while (stack.length){
+      const cur = stack.pop();
+      for (const lid of cur.links){
+        const o = byId.get(lid);
+        if (o && !o.netId){ o.netId = nid; stack.push(o); }
+      }
+    }
+  }
+  S.netCount = nid;
+  // attach every producer/consumer to the first covering pole's network
+  for (const e of S.ents){
+    if (e.kind === 'pole') continue;
+    const def = F.BUILDINGS[e.key];
+    if (!def) continue;
+    if (e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || def.power){
+      e.netId = 0;
+      for (const p of poles){
+        if (p.netId && poleCovers(p, e)){ e.netId = p.netId; break; }
+      }
+    }
+  }
 };
 
 /* ==================================================================== */
@@ -416,37 +479,55 @@ F.tick = function(S, dt){
   S.time += dt;
   const ents = S.ents;
 
-  /* ---- pass A: power book-keeping ---- */
-  let supply = 0, demand = 0;
+  /* ---- pass A: power book-keeping (per pole-network) ---- */
+  if (S.powerDirty){ F.computePowerNetworks(S); S.powerDirty = false; }
+  const sup = {}, dem = {};
+  let unpowered = 0, unpoweredDem = 0;
   const useMul = F.powerUseMul(S), outMul = F.powerMul(S);
   for (let i = 0; i < ents.length; i++){
     const e = ents[i], def = F.BUILDINGS[e.key];
     if (!def) continue;
     if (e.kind === 'gen' || e.kind === 'turbine'){
-      if (e.fuelT > 0 || e.fuelBuf > 0) supply += def.out * outMul;
+      e._fueled = e.fuelT > 0 || e.fuelBuf > 0;
+      if (e._fueled && e.netId) sup[e.netId] = (sup[e.netId] || 0) + def.out * outMul;
     } else if (e.kind === 'solar'){
-      supply += def.out * outMul;
+      if (e.netId) sup[e.netId] = (sup[e.netId] || 0) + def.out * outMul;
     } else if (def.power){
       // does it want to work?
       let wants = false;
       if (e.kind === 'miner') wants = minerWants(S, e);
       else if (e.kind === 'pump') wants = e.tank < 30;
       else if (e.kind === 'machine') wants = e.crafting || !!machineCanStart(S, e, def);
-      if (wants) demand += def.power * useMul;
       e._want = wants;
+      if (wants){
+        if (e.netId) dem[e.netId] = (dem[e.netId] || 0) + def.power * useMul;
+        else { unpowered++; unpoweredDem += def.power * useMul; }
+      }
     }
   }
-  const ratio = demand > supply ? (supply > 0 ? supply / demand : 0) : 1;
-  S.stats.powerSupply = supply; S.stats.powerDemand = demand; S.stats.powerRatio = ratio;
-  if (ratio < 0.98 && demand > 0 && !S.flags.brownout){ S.flags.brownout = true; F.emit(S, { type:'tip', id:'firstBrownout' }); }
+  const ratioByNet = {};
+  let totSup = 0, totDem = unpoweredDem, served = 0;
+  for (const nid of new Set([...Object.keys(sup), ...Object.keys(dem)])){
+    const s0 = sup[nid] || 0, d0 = dem[nid] || 0;
+    totSup += s0; totDem += d0; served += Math.min(s0, d0);
+    ratioByNet[nid] = d0 > s0 ? (s0 > 0 ? s0 / d0 : 0) : 1;
+  }
+  S._netRatio = ratioByNet; S._netSupply = sup; S._netDemand = dem;
+  S.stats.powerSupply = totSup;
+  S.stats.powerDemand = totDem;
+  S.stats.powerRatio = totDem > 0 ? served / totDem : 1;
+  S.stats.unpowered = unpowered;
+  if (S.stats.powerRatio < 0.98 && totDem > 0 && !S.flags.brownout){ S.flags.brownout = true; F.emit(S, { type:'tip', id:'firstBrownout' }); }
+  if (unpowered > 0 && !S.flags.unpowered){ S.flags.unpowered = true; F.emit(S, { type:'tip', id:'firstUnpowered' }); }
 
-  /* generators burn according to load */
-  const load = supply > 0 ? clamp(demand / supply, 0, 1) : 0;
+  /* generators burn according to their own network's load */
   for (let i = 0; i < ents.length; i++){
     const e = ents[i];
     if (e.kind !== 'gen' && e.kind !== 'turbine') continue;
     const def = F.BUILDINGS[e.key];
-    e.load = (e.fuelT > 0 || e.fuelBuf > 0) ? load : 0;
+    if (!e._fueled || !e.netId){ e.load = 0; continue; }
+    const s0 = sup[e.netId] || 0, d0 = dem[e.netId] || 0;
+    e.load = s0 > 0 ? clamp(d0 / s0, 0, 1) : 0;
     if (e.load > 0){
       e.fuelT -= dt * e.load;
       if (e.fuelT <= 0){
@@ -457,13 +538,14 @@ F.tick = function(S, dt){
   }
 
   /* ---- pass B: machines ---- */
+  const pr = (e, def) => def.power ? (e.netId ? (ratioByNet[e.netId] || 0) : 0) : 1;
   for (let i = 0; i < ents.length; i++){
     const e = ents[i], def = F.BUILDINGS[e.key];
     if (!def) continue;
     switch (e.kind){
-      case 'miner': tickMiner(S, e, def, dt, ratio); break;
-      case 'machine': tickMachine(S, e, def, dt, ratio); break;
-      case 'pump': tickPump(S, e, def, dt, ratio); break;
+      case 'miner': tickMiner(S, e, def, dt, pr(e, def)); break;
+      case 'machine': tickMachine(S, e, def, dt, pr(e, def)); break;
+      case 'pump': tickPump(S, e, def, dt, pr(e, def)); break;
       case 'chest': tickChest(S, e, dt); break;
     }
   }
@@ -850,6 +932,11 @@ F.deserialize = function(data){
     stamp(S, e);
   }
   S.nextId = data.nextId || (Math.max(0, ...S.ents.map(e => e.id)) + 1);
+  // migration: content added after this save was made (e.g. power poles)
+  // must still unlock — re-apply every completed milestone's unlock list
+  for (let i = 0; i < S.msIndex && i < F.MILESTONES.length; i++)
+    for (const u of F.MILESTONES[i].unlocks) S.unlocked[u] = true;
+  S.powerDirty = true;
   return S;
 };
 

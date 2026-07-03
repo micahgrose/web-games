@@ -406,11 +406,33 @@ function drawEntBody(x, e, s, time, S){
     case 'gen': drawGen(x, e, s, time, def); break;
     case 'turbine': drawTurbine(x, e, s, time, def); break;
     case 'solar': drawSolar(x, e, s, def); break;
+    case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
     case 'core': drawCore(x, e, s, time, S); break;
   }
+  // disconnected from any pole network → blinking red bolt
+  if (S && !e.netId &&
+      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar'))){
+    drawBolt(x, s * .22, s * .24, s * .30, `rgba(255,110,110,${.55 + .35 * Math.sin(time * 5)})`);
+  }
 }
 R.drawEntBody = drawEntBody;
+
+/* small lightning bolt marker */
+function drawBolt(x, bx, by, sz, color){
+  x.fillStyle = color;
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  x.lineWidth = 1;
+  x.beginPath();
+  x.moveTo(bx + sz * .14, by - sz * .5);
+  x.lineTo(bx - sz * .26, by + sz * .12);
+  x.lineTo(bx - sz * .02, by + sz * .12);
+  x.lineTo(bx - sz * .14, by + sz * .5);
+  x.lineTo(bx + sz * .26, by - sz * .12);
+  x.lineTo(bx + sz * .02, by - sz * .12);
+  x.closePath();
+  x.fill(); x.stroke();
+}
 
 /* ---- belts ---- */
 function beltLane(x, e, s){
@@ -976,6 +998,125 @@ function drawSolar(x, e, s, def){
   x.closePath(); x.fill();
 }
 
+/* ---- power pole / pylon ----
+   Drawn in fake perspective: base on the tile, mast rising "north";
+   wires attach at R.poleTop(). */
+R.poleTop = function(e){
+  const pylon = e.key === 'pole2';
+  return [e.x + .5, e.y + .5 - (pylon ? 1.05 : .78)];
+};
+function drawPole(x, e, s, time, S){
+  const c = s / 2;
+  const pylon = e.key === 'pole2';
+  const live = !!(S && S._netSupply && e.netId && S._netSupply[e.netId] > 0);
+  const topY = c - (pylon ? 1.05 : .78) * s;
+  // ground shadow + base plate
+  x.fillStyle = 'rgba(0,0,0,.3)';
+  x.beginPath(); x.ellipse(c + s * .06, c + s * .1, s * .2, s * .1, 0, 0, 7); x.fill();
+  x.fillStyle = '#2c333f';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  x.beginPath(); x.arc(c, c, s * .16, 0, 7); x.fill(); x.stroke();
+  if (pylon){
+    // lattice tower
+    x.strokeStyle = '#7d8999';
+    x.lineWidth = Math.max(1, s * .05);
+    x.beginPath();
+    x.moveTo(c - s * .16, c); x.lineTo(c - s * .07, topY);
+    x.moveTo(c + s * .16, c); x.lineTo(c + s * .07, topY);
+    // cross-bracing
+    for (let i = 0; i < 3; i++){
+      const y0 = c + (topY - c) * (i / 3), y1 = c + (topY - c) * ((i + 1) / 3);
+      const w0 = s * (.16 - .03 * i), w1 = s * (.16 - .03 * (i + 1));
+      x.moveTo(c - w0, y0); x.lineTo(c + w1, y1);
+      x.moveTo(c + w0, y0); x.lineTo(c - w1, y1);
+    }
+    x.stroke();
+    // double crossarm
+    x.strokeStyle = '#96a3b5';
+    x.lineWidth = Math.max(1.4, s * .07);
+    x.beginPath();
+    x.moveTo(c - s * .34, topY + s * .1); x.lineTo(c + s * .34, topY + s * .1);
+    x.moveTo(c - s * .24, topY - s * .04); x.lineTo(c + s * .24, topY - s * .04);
+    x.stroke();
+  } else {
+    // simple steel pole
+    x.strokeStyle = '#8b96a6';
+    x.lineWidth = Math.max(1.6, s * .09);
+    x.lineCap = 'round';
+    x.beginPath(); x.moveTo(c, c); x.lineTo(c, topY); x.stroke();
+    x.strokeStyle = 'rgba(0,0,0,.35)';
+    x.lineWidth = Math.max(.8, s * .03);
+    x.beginPath(); x.moveTo(c + s * .03, c); x.lineTo(c + s * .03, topY); x.stroke();
+    // crossarm
+    x.strokeStyle = '#96a3b5';
+    x.lineWidth = Math.max(1.4, s * .07);
+    x.lineCap = 'round';
+    x.beginPath(); x.moveTo(c - s * .26, topY + s * .04); x.lineTo(c + s * .26, topY + s * .04); x.stroke();
+  }
+  // insulators glow when the network carries power
+  const insCol = live ? `rgba(120,220,255,${.7 + .25 * Math.sin(time * 3 + e.id)})` : 'rgba(140,150,165,.8)';
+  x.fillStyle = insCol;
+  for (const ix of pylon ? [-s * .3, s * .3, -s * .2, s * .2] : [-s * .22, s * .22]){
+    x.beginPath();
+    x.arc(c + ix, topY + (pylon && Math.abs(ix) < s * .25 ? -s * .04 : s * .04) + (pylon ? 0 : 0), Math.max(1.2, s * .045), 0, 7);
+    x.fill();
+  }
+  // unlinked, uncovered pole with no neighbours: subtle hint dot
+  if (S && e.links && !e.links.length){
+    x.fillStyle = `rgba(255,214,138,${.35 + .25 * Math.sin(time * 4)})`;
+    x.beginPath(); x.arc(c, topY - s * .1, s * .05, 0, 7); x.fill();
+  }
+}
+
+/* wires between linked poles — drawn as a world-space overlay pass */
+R.drawWires = function(x, S, time){
+  const poles = [];
+  for (const e of S.ents) if (e.kind === 'pole') poles.push(e);
+  if (!poles.length) return;
+  const s = R.tilePx();
+  const byId = new Map(poles.map(p => [p.id, p]));
+  x.lineCap = 'round';
+  for (const p of poles){
+    for (const lid of p.links){
+      if (lid <= p.id) continue;             // draw each pair once
+      const o = byId.get(lid);
+      if (!o) continue;
+      const [ax, ay] = R.worldToScreen(...R.poleTop(p));
+      const [bx, by] = R.worldToScreen(...R.poleTop(o));
+      // cull if both ends far off-screen
+      if ((ax < -60 && bx < -60) || (ay < -60 && by < -60) ||
+          (ax > R.W + 60 && bx > R.W + 60) || (ay > R.H + 60 && by > R.H + 60)) continue;
+      const dist = Math.hypot(bx - ax, by - ay);
+      const midX = (ax + bx) / 2, midY = (ay + by) / 2 + dist * .07 + s * .1;
+      const live = !!(S._netSupply && p.netId && S._netSupply[p.netId] > 0);
+      x.strokeStyle = 'rgba(8,10,15,.85)';
+      x.lineWidth = Math.max(1, s * .045);
+      x.beginPath(); x.moveTo(ax, ay); x.quadraticCurveTo(midX, midY, bx, by); x.stroke();
+      if (live){
+        x.strokeStyle = `rgba(130,215,255,${.18 + .1 * Math.sin(time * 2.4 + p.id)})`;
+        x.lineWidth = Math.max(.6, s * .02);
+        x.beginPath(); x.moveTo(ax, ay); x.quadraticCurveTo(midX, midY, bx, by); x.stroke();
+      }
+    }
+  }
+};
+
+/* coverage square for a pole (selection / ghost) */
+R.drawPoleCoverage = function(x, S, px, py, key){
+  const def = F.BUILDINGS[key];
+  const c = def.cover;
+  const s = R.tilePx();
+  const [sx, sy] = R.worldToScreen(px - c, py - c);
+  const size = (c * 2 + 1) * s;
+  x.fillStyle = 'rgba(89,214,255,.07)';
+  x.fillRect(sx, sy, size, size);
+  x.strokeStyle = 'rgba(89,214,255,.45)';
+  x.setLineDash([s * .18, s * .12]);
+  x.lineWidth = 1.5;
+  x.strokeRect(sx, sy, size, size);
+  x.setLineDash([]);
+};
+
 /* ---- pumpjack ---- */
 function drawPump(x, e, s, time, def){
   chassis(x, e, s, '#7de08a', 0);
@@ -1289,6 +1430,35 @@ function drawGhost(x, S, ghost, time){
   if (!def) return;
   const s = R.tilePx();
   const [px, py] = R.worldToScreen(ghost.x, ghost.y);
+  // pole ghost: coverage square + dashed previews of the links it would form
+  if (def.kind === 'pole'){
+    R.drawPoleCoverage(x, S, ghost.x, ghost.y, ghost.key);
+    const topA = [ghost.x + .5, ghost.y + .5 - (ghost.key === 'pole2' ? 1.05 : .78)];
+    const [ax, ay] = R.worldToScreen(topA[0], topA[1]);
+    x.setLineDash([s * .12, s * .1]);
+    x.lineWidth = Math.max(1, s * .04);
+    for (const p of S.ents){
+      if (p.kind !== 'pole') continue;
+      const d = Math.hypot(p.x - ghost.x, p.y - ghost.y);
+      if (d > Math.max(def.reach, F.BUILDINGS[p.key].reach)) continue;
+      const [bx, by] = R.worldToScreen(...R.poleTop(p));
+      x.strokeStyle = `rgba(130,215,255,${.5 + .2 * Math.sin(time * 4)})`;
+      x.beginPath(); x.moveTo(ax, ay);
+      x.quadraticCurveTo((ax + bx) / 2, (ay + by) / 2 + s * .3, bx, by);
+      x.stroke();
+    }
+    x.setLineDash([]);
+  }
+  // electric building ghost: live "will it have power?" bolt
+  if (def.power || def.kind === 'gen' || def.kind === 'turbine' || def.kind === 'solar'){
+    let covered = false;
+    const foot = { x: ghost.x, y: ghost.y, w: def.w, h: def.h };
+    for (const p of S.ents){
+      if (p.kind === 'pole' && F.poleCovers(p, foot)){ covered = true; break; }
+    }
+    drawBolt(x, px + def.w * s - s * .22, py + s * .26, s * .34,
+      covered ? 'rgba(120,220,255,.95)' : `rgba(255,110,110,${.6 + .3 * Math.sin(time * 5)})`);
+  }
   x.save();
   x.translate(px, py);
   x.globalAlpha = .55;
@@ -1486,6 +1656,9 @@ R.draw = function(S, dt, U){
     }
   }
 
+  /* power wires (overhead, above machines and items) */
+  R.drawWires(x, S, time);
+
   /* ambient effects */
   emitAmbient(S, dt, vis);
   updateParticles(dt);
@@ -1524,6 +1697,7 @@ R.draw = function(S, dt, U){
     }
     if (U.selection){
       const e = U.selection;
+      if (e.kind === 'pole') R.drawPoleCoverage(x, S, e.x, e.y, e.key);
       const [px, py] = R.worldToScreen(e.x, e.y);
       x.strokeStyle = 'rgba(255,180,84,.9)';
       x.lineWidth = 2;
@@ -1603,6 +1777,7 @@ R.draw = function(S, dt, U){
 function zOf(e){
   if (e.kind === 'belt' || e.kind === 'pipe') return 0;
   if (e.kind === 'ubelt' || e.kind === 'splitter') return 1;
+  if (e.kind === 'pole') return 2.5;   // masts overlap neighbours gracefully
   if (e.kind === 'core') return 3;
   return 2;
 }
@@ -1613,6 +1788,7 @@ function lodColor(e){
     case 'miner': return '#8a6a3a';
     case 'machine': return '#46536a';
     case 'gen': case 'turbine': case 'solar': return '#7a6c3a';
+    case 'pole': return '#5a6472';
     case 'chest': return '#5d5344';
     case 'pump': return '#3a5a44';
     default: return '#444';

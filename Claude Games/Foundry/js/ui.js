@@ -463,6 +463,7 @@ function showBuildTip(ev, key){
   if (def.power) stats.push(`${def.power} P draw`);
   if (def.fuel) stats.push('burns coal');
   if (def.span) stats.push(`spans ${def.span} tiles`);
+  if (def.kind === 'pole') stats.push(`links ${def.reach} tiles · powers ${def.cover * 2 + 1}×${def.cover * 2 + 1}`);
   if (def.cap && def.kind === 'chest') stats.push(`holds ${def.cap}`);
   if (stats.length) html += `<div class="tt-stat">${stats.join(' · ')}</div>`;
   html += '<div class="tt-cost">' + Object.entries(def.cost).map(([k, n]) => {
@@ -548,6 +549,19 @@ function refreshSelPanel(){
     html += row('Power draw', def.power + ' P');
   }
   if (e.kind === 'pipe') html += row('Crude', `${e.fluid.toFixed(1)} / ${def.cap}`);
+  if (e.kind === 'pole'){
+    const S2 = UI.S;
+    html += row('Linked poles', e.links ? e.links.length : 0);
+    if (e.netId){
+      const sup = (S2._netSupply && S2._netSupply[e.netId]) || 0;
+      const dm = (S2._netDemand && S2._netDemand[e.netId]) || 0;
+      html += row('Network', '#' + e.netId);
+      html += row('Net power', `${Math.round(dm)} / ${Math.round(sup)} P`);
+    } else {
+      html += row('Network', '<span style="color:var(--bad)">isolated</span>');
+    }
+    html += `<div class="ghostNote">Powers everything in the ${def.cover * 2 + 1}×${def.cover * 2 + 1} area around it; links to poles within ${def.reach} tiles.</div>`;
+  }
 
   // fuel
   if (def.fuel || e.kind === 'gen' || e.kind === 'turbine'){
@@ -596,7 +610,7 @@ function refreshSelPanel(){
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
     miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery'}[def.fam] || 'machine',
-    gen:'power', turbine:'power', solar:'power', pump:'extraction' }[def.kind] || def.kind;
+    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction' }[def.kind] || def.kind;
 }
 function row(k, v){ return `<div class="selRow"><span>${k}</span><b>${v}</b></div>`; }
 function rateStr(e){
@@ -709,7 +723,8 @@ function refreshPower(){
   fill.id = 'powerBarFill';
   if (st.powerRatio < .999) fill.classList.add('brown');
   else if (frac > .8) fill.classList.add('strain');
-  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P`;
+  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P` +
+    (st.unpowered ? ` · ${st.unpowered} no pole` : '');
 }
 
 /* ==================================================================== */
