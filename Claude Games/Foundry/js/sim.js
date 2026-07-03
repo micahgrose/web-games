@@ -320,6 +320,7 @@ function deliverToCore(S, item){
 F.handMine = function(S, x, y, dt){
   if (!F.inMap(S, x, y)) return 0;
   const i = idx(S, x, y);
+  if (S.grid[i]) return 0;   // a building covers this tile — click selects it instead
   const t = S.oreType[i];
   if (!t || t === F.OIL_TYPE || S.oreAmt[i] <= 0) return 0;
   const key = i;

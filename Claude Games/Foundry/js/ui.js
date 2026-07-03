@@ -1024,7 +1024,7 @@ UI.update = function(dt){
     if (t && P.moved <= 8){
       const i = F.tileIdx(S, t[0], t[1]);
       const ot = S.oreType[i];
-      if (ot && ot !== F.OIL_TYPE && S.oreAmt[i] > 0){
+      if (ot && ot !== F.OIL_TYPE && S.oreAmt[i] > 0 && !S.grid[i]){
         P.mining = true;
         const res = F.handMine(S, t[0], t[1], dt);
         if (res){
