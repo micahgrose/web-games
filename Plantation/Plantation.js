@@ -55,95 +55,6 @@ class Teleporter extends Item{
     }
 
     use(){farmer.x = this.x; farmer.y = this.y;}
-
-    // ---- rough-draft visual: a glowing sci-fi teleport reticle ----
-    draw() {
-        const sx = (this.x - cam.x) * zoom; // world -> screen (sits under the cursor)
-        const sy = (this.y - cam.y) * zoom;
-        const t = performance.now() / 1000;
-        const pulse = 0.5 + 0.5 * Math.sin(t * 4);
-        const R = (24 + pulse * 4) * zoom;   // radius breathes, and scales with zoom
-
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.shadowColor = 'rgba(120, 220, 255, 0.9)';
-        ctx.shadowBlur = 16;
-
-        // outer dashed ring, slowly spinning
-        ctx.strokeStyle = 'rgba(140, 230, 255, 0.95)';
-        ctx.lineWidth = Math.max(1, 2.5 * zoom);
-        ctx.setLineDash([7 * zoom, 6 * zoom]);
-        ctx.lineDashOffset = -t * 40;
-        ctx.beginPath();
-        ctx.arc(0, 0, R, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // inner solid ring
-        ctx.setLineDash([]);
-        ctx.strokeStyle = 'rgba(205, 245, 255, 0.85)';
-        ctx.lineWidth = Math.max(1, 1.5 * zoom);
-        ctx.beginPath();
-        ctx.arc(0, 0, R * 0.55, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // crosshair ticks at the four cardinals
-        ctx.beginPath();
-        for (const a of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
-            const ca = Math.cos(a), sa = Math.sin(a);
-            ctx.moveTo(ca * R * 0.7, sa * R * 0.7);
-            ctx.lineTo(ca * R * 1.05, sa * R * 1.05);
-        }
-        ctx.stroke();
-
-        // bright core
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = 'rgba(235, 250, 255, 0.95)';
-        ctx.beginPath();
-        ctx.arc(0, 0, Math.max(2, 3 * zoom), 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-    }
-
-    // ---- hotbar-slot icon: a compact, static version of the reticle ----
-    drawIcon(cx, cy, size) {
-        const R = size * 0.30;
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.shadowColor = 'rgba(120, 220, 255, 0.8)';
-        ctx.shadowBlur = 7;
-
-        // outer ring
-        ctx.strokeStyle = 'rgba(140, 230, 255, 0.95)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, R, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // inner ring
-        ctx.strokeStyle = 'rgba(205, 245, 255, 0.85)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // crosshair ticks
-        ctx.beginPath();
-        for (const a of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
-            const ca = Math.cos(a), sa = Math.sin(a);
-            ctx.moveTo(ca * R * 0.75, sa * R * 0.75);
-            ctx.lineTo(ca * R * 1.2, sa * R * 1.2);
-        }
-        ctx.stroke();
-
-        // core
-        ctx.fillStyle = 'rgba(235, 250, 255, 0.95)';
-        ctx.beginPath();
-        ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-    }
 }
 
 const teleporter = new Teleporter();
@@ -185,6 +96,106 @@ function updateSelectedItem() {
     const held = inventory.hotBar[inventory.selectedHotBar];
     if(held) held.update();
 }
+
+
+// ============================================================
+//  ITEM VISUALS
+//  draw() = world visual while the item is selected.
+//  drawIcon(cx, cy, size) = the icon inside its hotbar slot.
+//  Defined on each class's prototype so the class bodies up top
+//  stay focused on logic. `this` is the item instance, exactly
+//  like a normal method. Add a new item's visuals under its own
+//  header here — no need to touch the class.
+// ============================================================
+
+// ---- Teleporter: glowing sci-fi teleport reticle (world) ----
+Teleporter.prototype.draw = function () {
+    const sx = (this.x - cam.x) * zoom; // world -> screen (sits under the cursor)
+    const sy = (this.y - cam.y) * zoom;
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
+    const R = (24 + pulse * 4) * zoom;   // radius breathes, and scales with zoom
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.shadowColor = 'rgba(120, 220, 255, 0.9)';
+    ctx.shadowBlur = 16;
+
+    // outer dashed ring, slowly spinning
+    ctx.strokeStyle = 'rgba(140, 230, 255, 0.95)';
+    ctx.lineWidth = Math.max(1, 2.5 * zoom);
+    ctx.setLineDash([7 * zoom, 6 * zoom]);
+    ctx.lineDashOffset = -t * 40;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // inner solid ring
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(205, 245, 255, 0.85)';
+    ctx.lineWidth = Math.max(1, 1.5 * zoom);
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // crosshair ticks at the four cardinals
+    ctx.beginPath();
+    for (const a of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
+        const ca = Math.cos(a), sa = Math.sin(a);
+        ctx.moveTo(ca * R * 0.7, sa * R * 0.7);
+        ctx.lineTo(ca * R * 1.05, sa * R * 1.05);
+    }
+    ctx.stroke();
+
+    // bright core
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = 'rgba(235, 250, 255, 0.95)';
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(2, 3 * zoom), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+};
+
+// ---- Teleporter: compact reticle icon (hotbar slot) ----
+Teleporter.prototype.drawIcon = function (cx, cy, size) {
+    const R = size * 0.30;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.shadowColor = 'rgba(120, 220, 255, 0.8)';
+    ctx.shadowBlur = 7;
+
+    // outer ring
+    ctx.strokeStyle = 'rgba(140, 230, 255, 0.95)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // inner ring
+    ctx.strokeStyle = 'rgba(205, 245, 255, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // crosshair ticks
+    ctx.beginPath();
+    for (const a of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
+        const ca = Math.cos(a), sa = Math.sin(a);
+        ctx.moveTo(ca * R * 0.75, sa * R * 0.75);
+        ctx.lineTo(ca * R * 1.2, sa * R * 1.2);
+    }
+    ctx.stroke();
+
+    // core
+    ctx.fillStyle = 'rgba(235, 250, 255, 0.95)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+};
 
 
 
@@ -352,7 +363,7 @@ function buildFarmerSprite() {
         '...xoooooooox...',
         '...xooddddoox...',
         '...xoooooooox...',
-        '...xoooddooox...',
+        '...xoooooooox...',
         '...xbbbxxbbbx...',
         '...xbbbxxbbbx...',
         '................',
