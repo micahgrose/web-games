@@ -54,14 +54,13 @@ class Teleporter extends Item{
         this.y = cam.y + mouse.y / zoom;
     }
 
-    use(){farmer.x = this.x; farmer.y = this.y;}
+    use(){if(!farmerMode) {farmer.x = this.x; farmer.y = this.y;}}
 }
 
 const teleporter = new Teleporter();
 let items = [teleporter];
 const inventory = new Inventory();
 const farmer = new Farmer();
-
 
 // ---- Loop ----
 let then = performance.now();
@@ -70,7 +69,7 @@ function gameLoop(now) {
     then = now;
     if (dt > 0.05) dt = 0.05; // clamp after tab-outs
 
-    updateCam(dt);
+    updateMovement(dt);
     selectHotBar();
     updateSelectedItem();
 
@@ -219,6 +218,31 @@ let shiftHeld = false;
 cam.x = farmer.x - canvas.width / 2;
 cam.y = farmer.y - canvas.height / 2;
 
+// ---- Mode: Free (roam the camera) <-> Farmer (walk the farmer). Tab toggles. ----
+const modeEl = document.getElementById('mode');
+let farmerMode = false;
+const FARMER_SPEED = 210;   // walk speed (px/s) — deliberately slower than the free cam
+const FARMER_RUN   = 1.9;   // Shift multiplier while walking
+const CAM_FOLLOW   = 8;     // how fast the camera eases to re-centre on the farmer
+
+let farmerVX = 0, farmerVY = 0; // farmer velocity, kept out of the user's class
+let walkPhase = 0;              // advances while moving; drives the leg cycle
+let walkAmt = 0;                // 0..1 eased "how much to animate" (fades on start/stop)
+let facing = 'front';           // which baked body he shows: front/back/side/front34/back34
+let facingMirror = false;       // true = flip horizontally (walking left-ish)
+
+function setMode(toFarmer) {
+    farmerMode = toFarmer;
+    if (!modeEl) return;
+    modeEl.textContent = farmerMode ? 'Farmer' : 'Free';
+    // green pill in Free, amber pill in Farmer
+    modeEl.style.borderColor = farmerMode ? 'rgba(240,200,110,0.85)' : 'rgba(120,200,130,0.7)';
+    modeEl.style.color       = farmerMode ? 'rgba(255,236,182,0.95)' : 'rgba(200,245,200,0.95)';
+    modeEl.style.boxShadow   = farmerMode
+        ? '0 0 14px rgba(240,200,110,0.3)'
+        : '0 0 14px rgba(120,200,130,0.25)';
+}
+
 // ---- Zoom (mouse wheel) ----
 let zoom = 1;
 const MIN_ZOOM = 0.40;   // pulled back — survey the whole field
@@ -251,6 +275,10 @@ const keys = Object.create(null);
 const PAN_KEYS = ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'ArrowLeft', 'KeyA', 'ArrowRight', 'KeyD'];
 window.addEventListener('keydown', (e) => {
     if (e.key === 'Shift') shiftHeld = true;
+    if (e.code === 'Tab' && !e.repeat) {       // Tab flips Free <-> Farmer (once per press)
+        e.preventDefault();
+        setMode(!farmerMode);
+    }
     keys[e.code] = true;                       // single source of truth for held keys
     if (PAN_KEYS.includes(e.code)) e.preventDefault();
 });
@@ -339,15 +367,33 @@ function buildTiles() {
 }
 buildTiles();
 
-// ---- Pixel-art farmer ----
-// A tiny front-facing dude: straw hat, blue overalls, boots. Baked to a
-// 16x19 offscreen canvas at 1px per cell, then drawn scaled with smoothing
-// off so the pixels stay crisp and blocky at any zoom.
-const FARMER_PX = 3; // world px per sprite pixel
-const farmerSprite = buildFarmerSprite();
+// ---- Pixel-art farmer (animated) ----
+// The body (hat -> hips) is baked once; the legs are drawn procedurally every
+// frame so they can walk — and the cycle speeds up when he runs. Pixels stay
+// crisp (imageSmoothingEnabled = false) and everything scales with zoom.
+const FARMER_PX = 3;   // world px per sprite pixel
+const FARMER_W = 16;   // sprite width in pixels
+const FARMER_H = 18;   // full logical height (body + legs) used for centring
 
-function buildFarmerSprite() {
-    const map = [
+const FARMER_PAL = {
+    x: '#241a12', // outline
+    h: '#eccb73', // straw hat, light
+    g: '#caa347', // straw hat brim, dark
+    s: '#f2c396', // skin
+    k: '#d89a68', // skin shadow (jaw/mouth)
+    e: '#241a12', // eyes
+    n: '#4a2f1a', // hair (back of head)
+    r: '#c34733', // shirt (red)
+    o: '#35688f', // overalls (blue)
+    d: '#244a66', // overalls dark (pocket seam)
+    b: '#5a3b22', // boots
+};
+
+// One baked body (hat -> hips) per facing; right-handed versions only — the
+// left-facing ones are drawn mirrored at render time. Legs attach at row 13.
+const FARMER_MAPS = {
+    // walking DOWN (towards camera) — the classic front view
+    front: [
         '................',
         '.....xxxxxx.....',
         '....xhhhhhhx....',
@@ -362,32 +408,89 @@ function buildFarmerSprite() {
         '..xsoooooooosx..',
         '...xoooooooox...',
         '...xooddddoox...',
-        '...xoooooooox...',
-        '...xoooooooox...',
-        '...xbbbxxbbbx...',
-        '...xbbbxxbbbx...',
+    ],
+    // walking UP (away) — hat + hair, overall straps crossing the shirt, back pocket
+    back: [
         '................',
-    ];
-    const pal = {
-        x: '#241a12', // outline
-        h: '#eccb73', // straw hat, light
-        g: '#caa347', // straw hat brim, dark
-        s: '#f2c396', // skin
-        k: '#d89a68', // skin shadow (jaw/mouth)
-        e: '#241a12', // eyes
-        r: '#c34733', // shirt (red)
-        o: '#35688f', // overalls (blue)
-        d: '#244a66', // overalls dark (pockets/legs seam)
-        b: '#5a3b22', // boots
-    };
-    const W = 16, H = map.length;
+        '.....xxxxxx.....',
+        '....xhhhhhhx....',
+        '...xhhhhhhhhx...',
+        '..xggggggggggx..',
+        '....xnnnnnnx....',
+        '....xnnnnnnx....',
+        '....xsnnnnsx....',
+        '...xssssssssx...',
+        '..xroorrrroorx..',
+        '..xsoooooooosx..',
+        '..xsoooooooosx..',
+        '...xoooooooox...',
+        '...xoodxxdoox...',
+    ],
+    // walking RIGHT — profile: brim pokes forward, one eye, arm over the side
+    side: [
+        '................',
+        '.....xxxxx......',
+        '....xhhhhhx.....',
+        '....xhhhhhx.....',
+        '....xggggggggx..',
+        '.....xssssx.....',
+        '.....xsssex.....',
+        '.....xsskkx.....',
+        '.....xssssx.....',
+        '....xrrrrrrx....',
+        '....xrossrrx....',
+        '....xrossrrx....',
+        '.....xooooox....',
+        '.....xoodoox....',
+    ],
+    // walking DOWN-RIGHT — front view turned: eyes shifted, brim swung forward
+    front34: [
+        '................',
+        '.....xxxxxx.....',
+        '....xhhhhhhx....',
+        '...xhhhhhhhhx...',
+        '..xgggggggggggx.',
+        '....xssssssx....',
+        '....xssessex....',
+        '....xssskksx....',
+        '...xssssssssx...',
+        '..xrrrrrrrrrrx..',
+        '..xsoooooooosx..',
+        '..xsoooooooosx..',
+        '...xoooooooox...',
+        '...xooddddoox...',
+    ],
+    // walking UP-RIGHT — back view turned: brim swung, sliver of cheek showing
+    back34: [
+        '................',
+        '.....xxxxxx.....',
+        '....xhhhhhhx....',
+        '...xhhhhhhhhx...',
+        '..xgggggggggggx.',
+        '....xnnnnnnx....',
+        '....xnnnnnsx....',
+        '....xsnnnnsx....',
+        '...xssssssssx...',
+        '..xroorrrroorx..',
+        '..xsoooooooosx..',
+        '..xsoooooooosx..',
+        '...xoooooooox...',
+        '...xoodxxdoox...',
+    ],
+};
+
+const FARMER_BODIES = {};
+for (const name in FARMER_MAPS) FARMER_BODIES[name] = bakeFarmerMap(FARMER_MAPS[name]);
+
+function bakeFarmerMap(map) {
+    const W = FARMER_W, H = map.length;
     const off = document.createElement('canvas');
     off.width = W;
     off.height = H;
     const c = off.getContext('2d');
     for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
-            const col = pal[map[y][x]];
+            const col = FARMER_PAL[map[y][x]];
             if (!col) continue;
             c.fillStyle = col;
             c.fillRect(x, y, 1, 1);
@@ -396,35 +499,126 @@ function buildFarmerSprite() {
     return off;
 }
 
+// fill a sprite-space rect (cols/rows may be fractional) into screen space
+function fillSpritePx(ox, oy, u, col, row, w, h, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(ox + col * u), Math.round(oy + row * u),
+                 Math.ceil(w * u), Math.ceil(h * u));
+}
+
+// One leg = an overalls-blue limb pivoting at the hip. `th` is signed radians
+// from straight-down (negative = out to the left, positive = right). `lift`
+// bends the knee: it shortens the leg, raising the boot off the ground.
+const FARMER_LEG_LEN = 2; // sprite px
+function drawFarmerLeg(ox, oy, u, hipCol, hipRow, th, lift) {
+    const len = FARMER_LEG_LEN - lift;
+    const footCol = hipCol + len * Math.sin(th);
+    const footRow = hipRow + len * Math.cos(th);
+
+    // limb (overalls) from hip to foot — nice and chunky
+    ctx.strokeStyle = FARMER_PAL.o;
+    ctx.lineWidth = 3.4 * u;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(ox + hipCol * u, oy + hipRow * u);
+    ctx.lineTo(ox + footCol * u, oy + footRow * u);
+    ctx.stroke();
+
+    // boot + dark sole at the foot (axis-aligned block keeps the chunky look)
+    fillSpritePx(ox, oy, u, footCol - 1.5, footRow - 0.8, 3, 1.6, FARMER_PAL.b);
+    fillSpritePx(ox, oy, u, footCol - 1.5, footRow + 0.8, 3, 0.6, FARMER_PAL.x);
+}
+
+// Classic 8-frame walk cycle (contact -> down -> passing -> up, then mirrored).
+// body = sprite-px of vertical offset (+ = sinks, - = rises). Two leg styles:
+// SPLAY for front/back views (feet part sideways, knees tuck on the pass) and
+// SCISSOR for side/diagonal views (one leg swings forward, the other trails —
+// what you actually see when someone walks past you).
+const FARMER_SPLAY_FRAMES = [
+    { l: { th: -0.50, lift: 0   }, r: { th: 0.50, lift: 0   }, body:  0.0 }, // CONTACT 1 (/\)
+    { l: { th: -0.34, lift: 0   }, r: { th: 0.34, lift: 0   }, body:  0.7 }, // DOWN (compress)
+    { l: { th: -0.05, lift: 0   }, r: { th: 0.10, lift: 1.4 }, body:  0.2 }, // PASSING (|| R knee up)
+    { l: { th: -0.03, lift: 0   }, r: { th: 0.16, lift: 0.6 }, body: -0.9 }, // UP (tall push-off)
+    { l: { th: -0.50, lift: 0   }, r: { th: 0.50, lift: 0   }, body:  0.0 }, // CONTACT 2 (/\)
+    { l: { th: -0.34, lift: 0   }, r: { th: 0.34, lift: 0   }, body:  0.7 }, // DOWN
+    { l: { th: -0.10, lift: 1.4 }, r: { th: 0.05, lift: 0   }, body:  0.2 }, // PASSING (|| L knee up)
+    { l: { th: -0.16, lift: 0.6 }, r: { th: 0.03, lift: 0   }, body: -0.9 }, // UP
+];
+// scissor: +th = toward the facing direction (screen-right pre-mirror)
+const FARMER_SCISSOR_FRAMES = [
+    { l: { th:  0.60, lift: 0   }, r: { th: -0.60, lift: 0   }, body:  0.0 }, // CONTACT (stride)
+    { l: { th:  0.38, lift: 0   }, r: { th: -0.38, lift: 0   }, body:  0.7 }, // DOWN
+    { l: { th:  0.05, lift: 0   }, r: { th:  0.05, lift: 1.2 }, body:  0.2 }, // PASSING (R swings thru)
+    { l: { th: -0.20, lift: 0   }, r: { th:  0.35, lift: 0.5 }, body: -0.9 }, // UP (R reaching fwd)
+    { l: { th: -0.60, lift: 0   }, r: { th:  0.60, lift: 0   }, body:  0.0 }, // CONTACT (swapped)
+    { l: { th: -0.38, lift: 0   }, r: { th:  0.38, lift: 0   }, body:  0.7 }, // DOWN
+    { l: { th:  0.05, lift: 1.2 }, r: { th:  0.05, lift: 0   }, body:  0.2 }, // PASSING (L swings thru)
+    { l: { th:  0.35, lift: 0.5 }, r: { th: -0.20, lift: 0   }, body: -0.9 }, // UP (L reaching fwd)
+];
+const FARMER_REST = { l: { th: -0.10, lift: 0 }, r: { th: 0.10, lift: 0 }, body: 0 };
+
+// per-facing rig: which baked body, which leg style, where the hips sit
+const FARMER_RIGS = {
+    front:   { frames: FARMER_SPLAY_FRAMES,   hipL: 6.5, hipR: 9.5 },
+    back:    { frames: FARMER_SPLAY_FRAMES,   hipL: 6.5, hipR: 9.5 },
+    side:    { frames: FARMER_SCISSOR_FRAMES, hipL: 7.6, hipR: 8.6 }, // profile: hips overlap
+    front34: { frames: FARMER_SCISSOR_FRAMES, hipL: 6.8, hipR: 9.2 },
+    back34:  { frames: FARMER_SCISSOR_FRAMES, hipL: 6.8, hipR: 9.2 },
+};
+
 function drawFarmer() {
-    const W = farmerSprite.width, H = farmerSprite.height;
-    const fw = W * FARMER_PX * zoom;
-    const fh = H * FARMER_PX * zoom;
+    const u = FARMER_PX * zoom;
     const cxs = (farmer.x - cam.x) * zoom; // screen centre x
     const cys = (farmer.y - cam.y) * zoom; // screen centre y
 
-    // soft contact shadow to ground him
+    const rig = FARMER_RIGS[facing];
+    const body = FARMER_BODIES[facing];
+
+    // current discrete frame (8 per cycle); walkAmt blends toward rest on stop
+    const f = rig.frames[Math.floor(walkPhase / (Math.PI / 4)) % 8];
+    const a = walkAmt, rest = FARMER_REST;
+    const thL   = rest.l.th + (f.l.th - rest.l.th) * a;
+    const thR   = rest.r.th + (f.r.th - rest.r.th) * a;
+    const liftL = f.l.lift * a;
+    const liftR = f.r.lift * a;
+    const bodyY = f.body * a;
+
+    const baseOy = cys - (FARMER_H * u) / 2; // grounded reference (for the shadow)
+    const ox = cxs - (FARMER_W * u) / 2;
+    const oy = baseOy + bodyY * u;           // down/up frames sink/raise the whole guy
+
+    // contact shadow: swells a touch when he's compressed, tightens at the top
+    // (drawn outside the mirror flip — it's symmetric anyway)
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
-    ctx.ellipse(cxs, cys + fh * 0.42, fw * 0.34, fh * 0.11, 0, 0, Math.PI * 2);
+    ctx.ellipse(cxs, baseOy + 17.3 * u, (5.2 + bodyY * 0.6) * u, (1.5 + bodyY * 0.2) * u, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
-    const prevSmooth = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = false; // keep the pixels crisp
-    ctx.drawImage(
-        farmerSprite,
-        Math.round(cxs - fw / 2),
-        Math.round(cys - fh / 2),
-        Math.round(fw),
-        Math.round(fh)
-    );
-    ctx.imageSmoothingEnabled = prevSmooth;
+    ctx.save();
+    if (facingMirror) { // left-facing = the right-facing art flipped about his centre
+        ctx.translate(cxs, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-cxs, 0);
+    }
+
+    // legs first so the overalls hem (body) overlaps their tops
+    drawFarmerLeg(ox, oy, u, rig.hipL, 13, thL, liftL);
+    drawFarmerLeg(ox, oy, u, rig.hipR, 13, thR, liftR);
+
+    // body on top, crisp pixels
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(body, Math.round(ox), Math.round(oy),
+                  Math.round(FARMER_W * u), Math.round(body.height * u));
+    ctx.imageSmoothingEnabled = prev;
+    ctx.restore();
 }
 
 // ---- Update ----
-function updateCam(dt) {
+function updateMovement(dt) {
+    // shared input -> direction vector (WASD or arrows)
     let tx = 0, ty = 0;
     if (keys.ArrowLeft || keys.KeyA) tx -= 1;
     if (keys.ArrowRight || keys.KeyD) tx += 1;
@@ -432,14 +626,67 @@ function updateCam(dt) {
     if (keys.ArrowDown || keys.KeyS) ty += 1;
     if (tx && ty) { tx *= 0.70710678; ty *= 0.70710678; } // no faster diagonally
 
+    if (farmerMode) updateFarmer(dt, tx, ty);
+    else            updateFreeCam(dt, tx, ty);
+
+    updateWalkAnim(dt);
+}
+
+// Free mode: the camera itself roams; the farmer stands still.
+function updateFreeCam(dt, tx, ty) {
     const speed = MAX_SPEED * (shiftHeld ? SHIFT_BOOST : 1);
-    const targetVX = tx * speed;
-    const targetVY = ty * speed;
     const t = Math.min(1, dt * EASE);
-    cam.vx += (targetVX - cam.vx) * t;
-    cam.vy += (targetVY - cam.vy) * t;
+    cam.vx += (tx * speed - cam.vx) * t;
+    cam.vy += (ty * speed - cam.vy) * t;
     cam.x += cam.vx * dt;
     cam.y += cam.vy * dt;
+    farmerVX = 0; farmerVY = 0;
+}
+
+// Farmer mode: input walks the farmer; the camera eases to keep him centred
+// (that ease also produces the lerp-in when you first press Tab).
+function updateFarmer(dt, tx, ty) {
+    const speed = FARMER_SPEED * (shiftHeld ? FARMER_RUN : 1);
+    const t = Math.min(1, dt * EASE);
+    farmerVX += (tx * speed - farmerVX) * t;
+    farmerVY += (ty * speed - farmerVY) * t;
+    farmer.x += farmerVX * dt;
+    farmer.y += farmerVY * dt;
+
+    const targetX = farmer.x - (canvas.width  / 2) / zoom;
+    const targetY = farmer.y - (canvas.height / 2) / zoom;
+    const f = Math.min(1, dt * CAM_FOLLOW);
+    cam.x += (targetX - cam.x) * f;
+    cam.y += (targetY - cam.y) * f;
+    cam.vx = 0; cam.vy = 0; // don't carry free-cam drift into farmer mode
+}
+
+// Drives the leg cycle: cadence scales with actual speed, so Shift-running
+// speeds the legs up on its own. walkAmt fades the motion in/out smoothly.
+function updateWalkAnim(dt) {
+    const speed = Math.hypot(farmerVX, farmerVY);
+    const moving = speed > 8;
+    if (moving) walkPhase += dt * speed * 0.05; // faster feet the faster he goes
+    const target = moving ? 1 : 0;
+    walkAmt += (target - walkAmt) * Math.min(1, dt * 12);
+    if (!moving && walkAmt < 0.02) { walkAmt = 0; walkPhase = 0; } // settle to neutral
+
+    // face the direction of travel (8-way). Sticky: keeps the last facing
+    // when he stops, so he doesn't snap back to front.
+    if (moving) {
+        const oct = Math.round(Math.atan2(farmerVY, farmerVX) / (Math.PI / 4)); // -4..4, 0 = east
+        switch (oct) {
+            case  0: facing = 'side';    facingMirror = false; break; // right
+            case  1: facing = 'front34'; facingMirror = false; break; // down-right
+            case  2: facing = 'front';   facingMirror = false; break; // down
+            case  3: facing = 'front34'; facingMirror = true;  break; // down-left
+            case  4:
+            case -4: facing = 'side';    facingMirror = true;  break; // left
+            case -3: facing = 'back34';  facingMirror = true;  break; // up-left
+            case -2: facing = 'back';    facingMirror = false; break; // up
+            case -1: facing = 'back34';  facingMirror = false; break; // up-right
+        }
+    }
 }
 
 // ---- Render ----
@@ -486,8 +733,9 @@ function draw() {
 
     // the selected hotbar item draws its world-space visual on top (e.g. the
     // teleport reticle). update() already ran this frame, so its pos is current.
+    // Farmer mode hides item visuals entirely (hotbar icons still show).
     const held = inventory.hotBar[inventory.selectedHotBar];
-    if (held) held.draw();
+    if (held && !farmerMode) held.draw();
 
     coordsEl.textContent = `${Math.round(cam.x)}, ${Math.round(cam.y)}`;
     zoomEl.textContent = `× ${zoom.toFixed(2)}`;
