@@ -254,10 +254,9 @@ F.bufBonus  = S => F.upRank(S,'capacitors') * 2;
 F.TIPS = {
   firstSelect:  'R rotates before you place. Right-click removes a building (full refund).',
   firstBelt:    'Belts carry items in the direction of the chevrons. Point a belt INTO a machine or the Core to feed it.',
-  firstFuelLow: 'A machine is out of coal — click it and use “+ coal”, or belt coal into its side.',
+  firstFuelLow: 'A machine is out of coal — click it and move coal from your pocket into its fuel slot, or belt coal into its side.',
   firstBrownout:'Power demand exceeds supply — everything electric is running slow. Build more generators.',
   firstUnpowered:'An electric machine has no power pole in range. String poles from a generator to it — each pole powers the area around it.',
-  firstDepleted:'A deposit ran dry. Richer veins lie farther from the Core.',
   firstBlocked: 'A machine\'s output is jammed — give it an empty belt to push onto.',
   firstUpgrade: 'The Foundry panel (U) sells permanent upgrades for parts. Faster belts, drills, furnaces…',
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',

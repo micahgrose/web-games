@@ -6,9 +6,15 @@
 const F = root.F;
 const { DX, DY, OPP, clamp } = F;
 
-const MAP_W = 128, MAP_H = 128;
+/* world-gen versions: v1 = original 128² (kept so old saves regenerate
+   identically); v2 = bigger 160² world with wider ore rings */
+const GEN = {
+  1: { size: 128 },
+  2: { size: 160 },
+};
+const GEN_CURRENT = 2;
 const CORE_SIZE = 4;
-F.MAP_W = MAP_W; F.MAP_H = MAP_H; F.CORE_SIZE = CORE_SIZE;
+F.CORE_SIZE = CORE_SIZE;
 
 const idx = (S, x, y) => y * S.w + x;
 F.tileIdx = idx;
@@ -57,7 +63,8 @@ function placePatch(S, rng, distLo, distHi, type, count, richLo, richHi){
 
 F.genWorld = function(S){
   const rng = F.makeRng(S.seed);
-  S.w = MAP_W; S.h = MAP_H;
+  const size = (GEN[S.genVer] || GEN[GEN_CURRENT]).size;
+  S.w = size; S.h = size;
   S.ground = new Uint8Array(S.w * S.h);
   S.oreType = new Uint8Array(S.w * S.h);
   S.oreAmt = new Float64Array(S.w * S.h);
@@ -71,31 +78,61 @@ F.genWorld = function(S){
   S.ents.push(core); S.core = core;
   stamp(S, core);
 
-  /* near field — the starter kit (8..19 tiles out) */
-  placePatch(S, rng, 9, 15, 1, rng.int(30, 40), 350, 700);   // iron
-  placePatch(S, rng, 9, 16, 1, rng.int(24, 32), 300, 600);   // iron 2
-  placePatch(S, rng, 9, 16, 2, rng.int(26, 34), 350, 700);   // copper
-  placePatch(S, rng, 8, 15, 3, rng.int(24, 32), 350, 700);   // coal
-  placePatch(S, rng, 8, 15, 4, rng.int(22, 30), 350, 700);   // stone
-  placePatch(S, rng, 12, 19, 2, rng.int(18, 26), 300, 600);  // copper 2
+  if (S.genVer === 1){
+    /* v1 layout — MUST stay byte-identical so old saves line up */
+    placePatch(S, rng, 9, 15, 1, rng.int(30, 40), 350, 700);
+    placePatch(S, rng, 9, 16, 1, rng.int(24, 32), 300, 600);
+    placePatch(S, rng, 9, 16, 2, rng.int(26, 34), 350, 700);
+    placePatch(S, rng, 8, 15, 3, rng.int(24, 32), 350, 700);
+    placePatch(S, rng, 8, 15, 4, rng.int(22, 30), 350, 700);
+    placePatch(S, rng, 12, 19, 2, rng.int(18, 26), 300, 600);
+    placePatch(S, rng, 25, 36, 5, rng.int(26, 36), 1200, 2400);
+    placePatch(S, rng, 25, 38, 5, rng.int(20, 30), 1200, 2400);
+    placePatch(S, rng, 24, 38, 1, rng.int(34, 48), 1400, 2800);
+    placePatch(S, rng, 24, 38, 2, rng.int(30, 42), 1400, 2800);
+    placePatch(S, rng, 24, 38, 3, rng.int(30, 44), 1400, 2800);
+    placePatch(S, rng, 26, 40, 4, rng.int(24, 34), 1200, 2400);
+    placePatch(S, rng, 46, 58, 6, rng.int(28, 40), 3000, 6000);
+    placePatch(S, rng, 46, 58, 6, rng.int(22, 32), 3000, 6000);
+    placePatch(S, rng, 44, 58, 7, rng.int(10, 16), 20000, 30000);
+    placePatch(S, rng, 44, 58, 7, rng.int(8, 14), 20000, 30000);
+    placePatch(S, rng, 44, 60, 1, rng.int(50, 70), 4000, 8000);
+    placePatch(S, rng, 44, 60, 2, rng.int(40, 60), 4000, 8000);
+    placePatch(S, rng, 44, 60, 3, rng.int(40, 60), 4000, 8000);
+    placePatch(S, rng, 46, 60, 5, rng.int(30, 44), 3000, 6000);
+    return;
+  }
 
-  /* mid ring — expansion (24..40) */
-  placePatch(S, rng, 25, 36, 5, rng.int(26, 36), 1200, 2400); // quartz
-  placePatch(S, rng, 25, 38, 5, rng.int(20, 30), 1200, 2400); // quartz 2
-  placePatch(S, rng, 24, 38, 1, rng.int(34, 48), 1400, 2800); // iron
-  placePatch(S, rng, 24, 38, 2, rng.int(30, 42), 1400, 2800); // copper
-  placePatch(S, rng, 24, 38, 3, rng.int(30, 44), 1400, 2800); // coal
-  placePatch(S, rng, 26, 40, 4, rng.int(24, 34), 1200, 2400); // stone
+  /* v2 layout — 160² world, ore rings spread wider apart */
 
-  /* far ring — the last age (44..60) */
-  placePatch(S, rng, 46, 58, 6, rng.int(28, 40), 3000, 6000); // titanium
-  placePatch(S, rng, 46, 58, 6, rng.int(22, 32), 3000, 6000); // titanium 2
-  placePatch(S, rng, 44, 58, 7, rng.int(10, 16), 20000, 30000); // oil
-  placePatch(S, rng, 44, 58, 7, rng.int(8, 14), 20000, 30000);  // oil 2
-  placePatch(S, rng, 44, 60, 1, rng.int(50, 70), 4000, 8000);  // rich iron
-  placePatch(S, rng, 44, 60, 2, rng.int(40, 60), 4000, 8000);  // rich copper
-  placePatch(S, rng, 44, 60, 3, rng.int(40, 60), 4000, 8000);  // rich coal
-  placePatch(S, rng, 46, 60, 5, rng.int(30, 44), 3000, 6000);  // rich quartz
+  /* near field — the starter kit (10..22 tiles out) */
+  placePatch(S, rng, 11, 18, 1, rng.int(34, 46), 350, 700);   // iron
+  placePatch(S, rng, 11, 19, 1, rng.int(26, 36), 300, 600);   // iron 2
+  placePatch(S, rng, 11, 19, 2, rng.int(28, 38), 350, 700);   // copper
+  placePatch(S, rng, 10, 18, 3, rng.int(26, 36), 350, 700);   // coal
+  placePatch(S, rng, 10, 18, 4, rng.int(24, 34), 350, 700);   // stone
+  placePatch(S, rng, 14, 22, 2, rng.int(20, 28), 300, 600);   // copper 2
+
+  /* mid ring — expansion (32..52) */
+  placePatch(S, rng, 33, 46, 5, rng.int(28, 40), 1200, 2400); // quartz
+  placePatch(S, rng, 33, 50, 5, rng.int(22, 32), 1200, 2400); // quartz 2
+  placePatch(S, rng, 32, 50, 1, rng.int(38, 54), 1400, 2800); // iron
+  placePatch(S, rng, 32, 50, 2, rng.int(34, 46), 1400, 2800); // copper
+  placePatch(S, rng, 32, 50, 3, rng.int(34, 48), 1400, 2800); // coal
+  placePatch(S, rng, 34, 52, 4, rng.int(26, 38), 1200, 2400); // stone
+  placePatch(S, rng, 36, 52, 1, rng.int(30, 42), 1400, 2800); // iron 2
+
+  /* far ring — the last age (56..76) */
+  placePatch(S, rng, 58, 72, 6, rng.int(30, 44), 3000, 6000); // titanium
+  placePatch(S, rng, 58, 72, 6, rng.int(24, 36), 3000, 6000); // titanium 2
+  placePatch(S, rng, 56, 72, 7, rng.int(10, 16), 20000, 30000); // oil
+  placePatch(S, rng, 56, 72, 7, rng.int(8, 14), 20000, 30000);  // oil 2
+  placePatch(S, rng, 58, 74, 7, rng.int(8, 14), 20000, 30000);  // oil 3
+  placePatch(S, rng, 58, 74, 1, rng.int(54, 76), 4000, 8000);  // rich iron
+  placePatch(S, rng, 58, 74, 2, rng.int(44, 64), 4000, 8000);  // rich copper
+  placePatch(S, rng, 58, 74, 3, rng.int(44, 64), 4000, 8000);  // rich coal
+  placePatch(S, rng, 60, 76, 5, rng.int(32, 46), 3000, 6000);  // rich quartz
+  placePatch(S, rng, 60, 76, 4, rng.int(26, 38), 3000, 6000);  // rich stone
 };
 
 function stamp(S, e){
@@ -107,8 +144,9 @@ function unstamp(S, e){
     S.grid[idx(S, e.x + i, e.y + j)] = null;
 }
 
-F.newGame = function(seed){
+F.newGame = function(seed, genVer){
   const S = F.newState(seed == null ? (Math.random() * 0xffffffff) >>> 0 : seed);
+  S.genVer = genVer || GEN_CURRENT;
   F.genWorld(S);
   S.msProg = {};
   S.powerDirty = true;
@@ -392,7 +430,7 @@ F.handMine = function(S, x, y, dt){
   if (S.handProg >= 1){
     S.handProg = 0;
     const item = F.ORES[t].id;
-    S.oreAmt[i] = Math.max(0, S.oreAmt[i] - 1);
+    // deposits are endless — mining never drains them
     F.invAdd(S, item, 1);
     S.handMined[item] = (S.handMined[item] || 0) + 1;
     const ms = F.MILESTONES[S.msIndex];
@@ -401,7 +439,6 @@ F.handMine = function(S, x, y, dt){
       S.msDirty = true;
     }
     F.emit(S, { type:'handmine', item, x, y });
-    if (S.oreAmt[i] <= 0) F.emit(S, { type:'depleted', x, y });
     return 2; // completed one
   }
   return 1; // in progress
@@ -605,14 +642,10 @@ function tickMiner(S, e, def, dt, ratio){
     e.prog -= 1;
     const i = idx(S, e.x, e.y);
     const item = F.ORES[S.oreType[i]].id;
-    S.oreAmt[i] = Math.max(0, S.oreAmt[i] - 1);
+    // deposits are endless — drills never exhaust them
     e.outBuf[item] = (e.outBuf[item] || 0) + 1; e.outTotal++;
     S.stats.made[item] = (S.stats.made[item] || 0) + 1;
     S.stats.bucketAcc[item] = (S.stats.bucketAcc[item] || 0) + 1;
-    if (S.oreAmt[i] <= 0){
-      F.emit(S, { type:'depleted', x: e.x, y: e.y });
-      if (!S.flags.depleted){ S.flags.depleted = true; F.emit(S, { type:'tip', id:'firstDepleted' }); }
-    }
   }
 }
 
@@ -669,8 +702,8 @@ function tickPump(S, e, def, dt, ratio){
   }
   e.active = false;
   if (oil != null && e.tank < 30 && ratio > 0){
-    const drawn = Math.min(def.rate * ratio * dt, S.oreAmt[oil], 30 - e.tank);
-    e.tank += drawn; S.oreAmt[oil] -= drawn;
+    const drawn = Math.min(def.rate * ratio * dt, 30 - e.tank);
+    e.tank += drawn;   // seeps are endless
     e.active = drawn > 0;
   }
   // push into adjacent pipes
@@ -879,23 +912,20 @@ F.serialize = function(S){
     if (e.outIdx) o.oi = e.outIdx;
     ents.push(o);
   }
-  // ore deltas vs fresh generation
-  const fresh = F.newGame(S.seed);
-  const oreDelta = {};
-  for (let i = 0; i < S.oreAmt.length; i++)
-    if (S.oreAmt[i] !== fresh.oreAmt[i]) oreDelta[i] = +S.oreAmt[i].toFixed(2);
+  // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
   return {
-    v: 1, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
+    v: 2, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     msIndex: S.msIndex, msProg: S.msProg,
     upgrades: S.upgrades, unlocked: S.unlocked, flags: S.flags,
     won: S.won, freeplay: S.freeplay, made: S.stats.made,
-    nextId: S.nextId, oreDelta, ents,
+    nextId: S.nextId, ents,
   };
 };
 
 F.deserialize = function(data){
-  const S = F.newGame(data.seed);
+  // v1 saves carry no genVer → regenerate with the original 128² layout
+  const S = F.newGame(data.seed, data.genVer || 1);
   S.time = data.time; S.tick = data.tick;
   S.inv = data.inv || {};
   S.delivered = data.delivered || {};
@@ -907,7 +937,6 @@ F.deserialize = function(data){
   S.flags = data.flags || {};
   S.won = !!data.won; S.freeplay = !!data.freeplay;
   S.stats.made = data.made || {};
-  for (const i in data.oreDelta) S.oreAmt[+i] = data.oreDelta[i];
   for (const o of data.ents){
     const def = F.BUILDINGS[o.k];
     if (!def) continue;

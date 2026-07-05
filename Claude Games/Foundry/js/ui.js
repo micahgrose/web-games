@@ -15,6 +15,8 @@ const UI = F.ui = {
   bigTab: null,
   pointer: { x: 0, y: 0, down: false, btn: 0, id: null, panning: false, moved: 0,
              lastTile: null, mining: false, sx: 0, sy: 0, camx: 0, camy: 0 },
+  mouse: { x: 0, y: 0 },
+  holdStack: null,
   keys: {},
   toastSeen: {},
   autosaveT: 0,
@@ -44,13 +46,19 @@ UI.init = function(){
   bindKeys();
   bindHud();
   initTitle();
+
+  // global mouse tracking for the cursor-held stack
+  root.addEventListener('pointermove', (e) => {
+    UI.mouse.x = e.clientX; UI.mouse.y = e.clientY;
+    positionHeld();
+  });
 };
 
 function hasSave(){
   try { return !!localStorage.getItem(SAVE_KEY); } catch (e){ return false; }
 }
 UI.save = function(){
-  if (!UI.S || R.cine) return;
+  if (!UI.S || R.cine || UI.S.testWorld) return;   // test worlds never touch the real save
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(F.serialize(UI.S))); } catch (e){}
 };
 function loadSave(){
@@ -84,8 +92,13 @@ function initTitle(){
     try { localStorage.removeItem(SAVE_KEY); } catch (e){}
     startGame(F.newGame());
   });
+  startTitleFx();
+}
+
+function startTitleFx(){
   const fx = $('titleFx');
-  let t0 = performance.now();
+  const t0 = performance.now();
+  if (titleRaf) cancelAnimationFrame(titleRaf);
   const tick = (now) => {
     if ($('title').classList.contains('hidden')) return;
     R.titleFx(fx, 0, (now - t0) / 1000);
@@ -94,8 +107,45 @@ function initTitle(){
   titleRaf = requestAnimationFrame(tick);
 }
 
+function quitToTitle(){
+  returnHeld();
+  UI.save();
+  closeMenu();
+  if (UI.bigTab) closeBig();
+  select(null);
+  UI.tool = null;
+  UI.started = false;
+  UI.S = null;
+  R.cine = null;
+  R.particles.length = 0;
+  R.floats.length = 0;
+  A.setActivity(0);
+  $('hud').classList.add('hidden');
+  $('winOverlay').classList.add('hidden');
+  $('winOverlay').classList.remove('solid');
+  $('title').classList.remove('hidden');
+  $('btnContinue').classList.remove('hidden');
+  startTitleFx();
+}
+
+/* dev/test sandbox: everything unlocked, deep pockets, never saved */
+function startTestWorld(){
+  const S = F.newGame();
+  S.testWorld = true;
+  for (const k in F.BUILDINGS) S.unlocked[k] = true;
+  for (const k in F.RECIPES) S.unlocked['r:' + k] = true;
+  for (const k in F.ITEMS) S.inv[k] = 1000;
+  S.msIndex = F.MILESTONES.length - 1;   // sit at Ignition with all prior tiers done
+  S.flags.welcomed = true;
+  startGame(S);
+  toast('<b>Test world</b> — every tier unlocked, 1000 of each item. Progress here is <b>not saved</b>.', 'warn', 10000);
+}
+
 function startGame(S){
   UI.S = S;
+  R.particles.length = 0;
+  R.floats.length = 0;
+  R.cine = null;
   R.buildGround(S);
   // camera on core
   R.cam.x = S.core.x + S.core.w / 2;
@@ -125,6 +175,7 @@ function bindPointer(){
 
   cv.addEventListener('pointerdown', (e) => {
     A.init(); A.resume();
+    if (UI.holdStack){ returnHeld(); return; }   // clicking the world drops the carried stack back in your pocket
     P.x = e.clientX; P.y = e.clientY;
     P.down = true; P.btn = e.button; P.id = e.pointerId;
     P.moved = 0; P.sx = e.clientX; P.sy = e.clientY;
@@ -302,7 +353,14 @@ function bindKeys(){
   root.addEventListener('keydown', (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     UI.keys[e.code] = true;
-    if (!UI.started) return;
+    if (!UI.started){
+      // title screen: T = test world sandbox
+      if (e.code === 'KeyT' && !$('title').classList.contains('hidden')){
+        A.init(); A.resume();
+        startTestWorld();
+      }
+      return;
+    }
     switch (e.code){
       case 'KeyR': {
         UI.dir = (UI.dir + 1) & 3;
@@ -324,10 +382,14 @@ function bindKeys(){
       case 'KeyM': A.setOn(!A.on); $('btnSound').style.opacity = A.on ? 1 : .4; break;
       case 'KeyF': R.cam.x = UI.S.core.x + 2; R.cam.y = UI.S.core.y + 2; break;
       case 'Escape':
-        if (UI.bigTab) closeBig();
+        if (UI.holdStack) returnHeld();
+        else if (!$('menuPop').classList.contains('hidden')) closeMenu();
+        else if (UI.bigTab) closeBig();
         else if (UI.tool) setTool(null);
         else if (UI.selection) select(null);
+        else openMenu();
         break;
+      case 'KeyH': toggleBig('howto'); break;
       default: {
         if (e.code.startsWith('Digit')){
           const n = +e.code.slice(5) - 1;
@@ -355,10 +417,15 @@ function bindHud(){
     A.setOn(!A.on);
     $('btnSound').style.opacity = A.on ? 1 : .4;
   });
-  $('btnMenu').addEventListener('click', () => {
+  $('btnMenu').addEventListener('click', toggleMenu);
+  $('mResume').addEventListener('click', closeMenu);
+  $('mHowto').addEventListener('click', () => { closeMenu(); openBig('howto'); });
+  $('mSave').addEventListener('click', () => {
     UI.save();
+    closeMenu();
     toast('Progress saved.', '', 1800);
   });
+  $('mQuit').addEventListener('click', quitToTitle);
   $('bigClose').addEventListener('click', closeBig);
   $('bigPanelWrap').addEventListener('pointerdown', (e) => {
     if (e.target === $('bigPanelWrap')) closeBig();
@@ -517,7 +584,7 @@ function refreshSelPanel(){
     const i = F.tileIdx(S, e.x, e.y);
     const t = S.oreType[i];
     const ore = t ? F.ORES[t] : null;
-    html += row('Deposit', ore ? `${ore.name} · ${F.fmt(S.oreAmt[i])} left` : '—');
+    html += row('Deposit', ore ? `${ore.name} · endless vein` : '—');
     html += row('Rate', rateStr(e));
     if (def.power) html += row('Power draw', def.power + ' P');
   }
@@ -563,17 +630,28 @@ function refreshSelPanel(){
     html += `<div class="ghostNote">Powers everything in the ${def.cover * 2 + 1}×${def.cover * 2 + 1} area around it; links to poles within ${def.reach} tiles.</div>`;
   }
 
-  // fuel
+  // fuel: two transfer slots — machine buffer ⇄ your pocket
   if (def.fuel || e.kind === 'gen' || e.kind === 'turbine'){
     const isT = e.kind === 'turbine';
     const item = isT ? 'fuelCell' : 'coal';
     const frac = clamp(e.fuelT / (isT ? def.burn : F.COAL_BURN), 0, 1);
-    html += `<div class="selDivider"></div><div class="selSection">Fuel</div>
+    html += `<div class="selDivider"></div><div class="selSection">Fuel — ${isT ? 'fuel cells' : 'coal'}</div>
       <div class="bufRow">${iconImg(item, 16)}
-        <div class="fuelBarOuter"><div class="fuelBarFill" style="width:${frac * 100}%"></div></div>
-        <span class="n">${e.fuelBuf} buffered</span></div>
-      <button class="fuelBtn" data-fuel="1" ${F.invCount(S, item) ? '' : 'disabled'}>
-        + ${isT ? 'fuel cell' : 'coal'} (${F.fmt(F.invCount(S, item))} held)</button>`;
+        <div class="fuelBarOuter"><div class="fuelBarFill" style="width:${frac * 100}%"></div></div></div>
+      <div class="slotRow">
+        <div class="slotBox" data-side="machine">
+          ${iconImg(item, 22)}
+          <span class="slotN">${e.fuelBuf} / ${F.FUEL_CAP}</span>
+          <span class="slotLbl">in machine</span>
+        </div>
+        <div class="slotArrows">⇄</div>
+        <div class="slotBox" data-side="inv">
+          ${iconImg(item, 22)}
+          <span class="slotN">${F.fmt(F.invCount(S, item))}</span>
+          <span class="slotLbl">your pocket</span>
+        </div>
+      </div>
+      <div class="ghostNote">click: pick up all · right-click: half · with a stack in hand, scroll over a box to move one at a time</div>`;
   }
 
   html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
@@ -593,11 +671,12 @@ function refreshSelPanel(){
       refreshSelPanel();
     });
   });
-  const fb = p.querySelector('[data-fuel]');
-  if (fb) fb.addEventListener('click', () => {
-    const moved = F.addFuel(S, e, 5);
-    if (moved){ A.sfx.click(); refreshSelPanel(); }
-    else A.sfx.error();
+  p.querySelectorAll('.slotBox').forEach(box => {
+    const isT = e.kind === 'turbine';
+    const item = isT ? 'fuelCell' : 'coal';
+    box.addEventListener('pointerdown', ev => slotDown(ev, box, box.dataset.side, e, item));
+    box.addEventListener('wheel', ev => slotWheel(ev, box, box.dataset.side, e, item), { passive: false });
+    box.addEventListener('contextmenu', ev => ev.preventDefault());
   });
   p.querySelector('[data-del]').addEventListener('click', () => {
     F.remove(S, e.x, e.y);
@@ -734,7 +813,8 @@ const BIG_TABS = [
   { id:'inventory', name:'Inventory' },
   { id:'milestones', name:'Milestones' },
   { id:'upgrades', name:'Upgrades' },
-  { id:'compendium', name:'Compendium' },
+  { id:'compendium', name:'Recipes' },
+  { id:'howto', name:'How to play' },
   { id:'stats', name:'Stats' },
 ];
 
@@ -831,27 +911,11 @@ function renderBig(){
       break;
     }
     case 'compendium': {
-      let h = '';
-      for (const k in F.RECIPES){
-        const r = F.RECIPES[k];
-        const known = F.recipeUnlocked(S, k);
-        const machineName = { smelter:'Furnace', alloy:'Alloy furnace', asm:'Assembler', refinery:'Refinery' }[r.machine];
-        if (!known){
-          h += `<div class="compRow" style="opacity:.45"><div style="width:26px;text-align:center;color:var(--ink-faint)">?</div>
-            <div class="compMid"><div class="compName" style="color:var(--ink-faint)">Undiscovered</div></div></div>`;
-          continue;
-        }
-        h += `<div class="compRow">
-          <img src="${R.itemIcon(r.out, 52).toDataURL()}" width="26" height="26">
-          <div class="compMid">
-            <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}</div>
-            <div class="compChain">${Object.entries(r.in).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)} ${F.ITEMS[ik].name}</span>`).join('<span class="arrow">+</span>')}${r.fluid ? `<span class="arrow">+</span><span>${r.fluid} crude</span>` : ''}</div>
-          </div>
-          <span class="compMachine">${machineName}</span>
-          <span class="compTime">${r.time}s</span>
-        </div>`;
-      }
-      body.innerHTML = h;
+      body.innerHTML = renderRecipeBook(S);
+      break;
+    }
+    case 'howto': {
+      body.innerHTML = renderHowTo();
       break;
     }
     case 'stats': {
@@ -880,6 +944,218 @@ function renderBig(){
       break;
     }
   }
+}
+
+/* ==================================================================== */
+/* RECIPE BOOK                                                          */
+/* ==================================================================== */
+const MACHINE_NAMES = { smelter:'Furnace', alloy:'Alloy furnace', asm:'Assembler', refinery:'Refinery' };
+
+function recipeRevealed(S, k){
+  const r = F.RECIPES[k];
+  if (F.recipeUnlocked(S, k)) return true;
+  const ms = F.MILESTONES[S.msIndex];
+  if (ms && ms.req && ms.req[r.out]) return true;                       // needed this tier
+  return !!(S.inv[r.out] || S.delivered[r.out] || S.stats.made[r.out]); // held it before
+}
+
+function unlockMsOf(recipeKey){
+  const i = F.MILESTONES.findIndex(ms => ms.unlocks.includes('r:' + recipeKey));
+  return i >= 0 ? F.MILESTONES[i] : null;
+}
+
+/* everything that consumes `item`: revealed recipes + unlocked buildings */
+function usedInHtml(S, item){
+  const uses = [];
+  for (const k in F.RECIPES){
+    const r = F.RECIPES[k];
+    if (r.in[item] && recipeRevealed(S, k))
+      uses.push(`<span title="${F.ITEMS[r.out].name}">${iconImg(r.out, 14)}</span>`);
+  }
+  const bld = [];
+  for (const k of F.BUILD_ORDER){
+    if (S.unlocked[k] && F.BUILDINGS[k].cost[item]) bld.push(F.BUILDINGS[k].name);
+  }
+  for (const id in F.UPGRADES){
+    if (F.UPGRADES[id].costs.some(c => c[item])){ bld.push(F.UPGRADES[id].name + ' upgrades'); break; }
+  }
+  if (!uses.length && !bld.length) return '';
+  let h = `<div class="compUse">used in: ${uses.join(' ')}`;
+  if (bld.length) h += `<span class="compUseB">${uses.length ? ' · ' : ''}${bld.join(', ')}</span>`;
+  return h + '</div>';
+}
+
+function renderRecipeBook(S){
+  const ms = F.MILESTONES[S.msIndex];
+  const needed = (ms && (ms.req || ms.handMine)) || {};
+  let h = '';
+
+  /* --- raw materials --- */
+  h += `<div class="selSection">Raw materials — dug from deposits (endless)</div>`;
+  const RAW = [
+    ['ironOre',  'Grey-blue boulders near the Core. Your first metal.'],
+    ['copperOre','Orange boulders near the Core. Becomes wire.'],
+    ['coal',     'Dark boulders. Fuel for every burner machine and generator, and an alloying agent.'],
+    ['stone',    'Pale boulders. Kilns and bricks.'],
+    ['quartz',   'Pale-blue crystal, a journey out from the Core. Glass and silicon.'],
+    ['titanOre', 'Violet boulders at the far edges of the world. The last age of machines.'],
+  ];
+  for (const [id, note] of RAW){
+    h += `<div class="compRow">
+      <img src="${R.itemIcon(id, 52).toDataURL()}" width="26" height="26">
+      <div class="compMid">
+        <div class="compName">${F.ITEMS[id].name}${needed[id] ? neededBadge() : ''}</div>
+        <div class="compChain"><span>${note}</span></div>
+        ${usedInHtml(S, id)}
+      </div>
+      <span class="compMachine">Drill / hand</span>
+    </div>`;
+  }
+  h += `<div class="compRow">
+    <div style="width:26px;height:26px;border-radius:50%;background:#141712;border:2px solid #3b3320;flex:none"></div>
+    <div class="compMid">
+      <div class="compName">Crude oil</div>
+      <div class="compChain"><span>Black seeps in the far wastes. Pumpjacks draw it; pipes carry it to refineries.</span></div>
+    </div>
+    <span class="compMachine">Pumpjack</span>
+  </div>`;
+
+  /* --- recipes, grouped by tier --- */
+  const TIER_NAMES = { 1:'Smelting & basic parts', 2:'Industrial parts', 3:'Advanced fabrication', 4:'The three works' };
+  let hidden = 0;
+  for (const tier of [1, 2, 3, 4]){
+    let group = '';
+    for (const k in F.RECIPES){
+      const r = F.RECIPES[k];
+      if ((F.ITEMS[r.out].tier || 1) !== tier) continue;
+      if (!recipeRevealed(S, k)){ hidden++; continue; }
+      const locked = !F.recipeUnlocked(S, k);
+      const msu = locked ? unlockMsOf(k) : null;
+      group += `<div class="compRow${locked ? ' compLocked' : ''}">
+        <img src="${R.itemIcon(r.out, 52).toDataURL()}" width="26" height="26">
+        <div class="compMid">
+          <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}${needed[r.out] ? neededBadge() : ''}${locked && msu ? `<span class="lockBadge">unlocks: ${msu.name}</span>` : ''}</div>
+          <div class="compChain">${Object.entries(r.in).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)} ${F.ITEMS[ik].name}</span>`).join('<span class="arrow">+</span>')}${r.fluid ? `<span class="arrow">+</span><span>${r.fluid} crude</span>` : ''}</div>
+          ${usedInHtml(S, r.out)}
+        </div>
+        <span class="compMachine">${MACHINE_NAMES[r.machine]}</span>
+        <span class="compTime">${r.time}s</span>
+      </div>`;
+    }
+    if (group) h += `<div class="selSection" style="margin-top:14px">${TIER_NAMES[tier]}</div>` + group;
+  }
+  if (hidden) h += `<div class="ghostNote" style="margin-top:10px">…${hidden} more recipe${hidden > 1 ? 's' : ''} await discovery in later tiers…</div>`;
+
+  /* --- buildings --- */
+  const bld = F.BUILD_ORDER.filter(k => S.unlocked[k]);
+  if (bld.length){
+    h += `<div class="selSection" style="margin-top:16px">Your buildings</div>`;
+    for (const k of bld){
+      const d = F.BUILDINGS[k];
+      const stats = [];
+      if (d.kind === 'belt') stats.push(`${d.speed} tiles/s`);
+      if (d.kind === 'miner') stats.push(`${(d.speed / d.mineTime).toFixed(2)} ore/s`);
+      if (d.kind === 'machine') stats.push(`${d.speed}× speed`);
+      if (d.out) stats.push(`+${d.out} P`);
+      if (d.power) stats.push(`${d.power} P`);
+      if (d.fuel) stats.push('coal-fired');
+      if (d.kind === 'pole') stats.push(`links ${d.reach} · powers ${d.cover * 2 + 1}×${d.cover * 2 + 1}`);
+      if (d.span) stats.push(`spans ${d.span}`);
+      h += `<div class="compRow">
+        <img src="${R.makeBuildingIcon(k, 52).toDataURL()}" width="26" height="26">
+        <div class="compMid">
+          <div class="compName">${d.name}</div>
+          <div class="compChain">${Object.entries(d.cost).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)}</span>`).join(' ')}</div>
+        </div>
+        <span class="compMachine">${stats.join(' · ')}</span>
+      </div>`;
+    }
+  }
+  return h;
+}
+function neededBadge(){ return '<span class="needBadge">needed this tier</span>'; }
+
+/* ==================================================================== */
+/* HOW TO PLAY                                                          */
+/* ==================================================================== */
+function renderHowTo(){
+  const kb = k => `<span class="kbd">${k}</span>`;
+  const ic = (id, s) => iconImg(id, s || 14);
+  return `
+  <div class="selSection">The loop</div>
+  <p class="howP">The dormant <b>Core</b> sits at the centre of the world. Everything you belt into it
+  becomes <b>construction material</b> in your inventory — deliveries literally fund every building,
+  upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
+  that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
+  Complete all ten tiers to reignite the World Engine.</p>
+
+  <div class="selSection">First steps</div>
+  <p class="howP"><b>Hold left-click on an ore deposit</b> to hand-mine it — slow, but always available,
+  and deposits never run dry. Use your first ore to place a <b>burner drill</b> on iron, feed it coal
+  (click it and move coal from your pocket into its fuel slot — or belt coal into its side), and run a
+  conveyor from the drill's <b>output chute</b> (the small amber arrow) into any side of the Core.
+  In fuel slots: <b>click</b> picks up the whole stack, <b>right-click</b> half; with a stack in hand,
+  click a box to deposit it — or <b>hover a box and scroll</b> to move items one at a time.</p>
+
+  <div class="selSection">Belts & routing</div>
+  <p class="howP"><b>Drag</b> to lay a belt line — it follows your pointer and turns corners automatically.
+  ${kb('R')} rotates before placing. Belts push items into whatever they point at: a machine, the Core,
+  or another belt (side entries merge; head-on is refused). The <b>splitter</b> deals items evenly to
+  every open exit — ideal for feeding rows of machines. <b>Tunnels</b> dive under up to 4 tiles
+  (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
+  buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
+  Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.</p>
+
+  <div class="selSection">Machines</div>
+  <p class="howP">Machines accept ingredients from belts on <b>any side</b> and eject from their
+  <b>chute</b> (amber arrow — watch it when rotating). <b>Furnaces</b> smelt whatever suits their
+  contents; <b>fabricators and assemblers</b> craft one chosen recipe — click the machine and pick it.
+  The <b>alloy furnace</b> fuses two inputs: iron ingots + coal → ${ic('steel')} steel,
+  quartz + coal → ${ic('silicon')} silicon. Mk1 machines burn coal; electric machines are far faster
+  but need the grid. A machine with a blinking <b>amber dot</b> is out of fuel; a stalled machine
+  usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
+
+  <div class="selSection">Power</div>
+  <p class="howP">Generators make power but <b>poles deliver it</b>. A ${ic('wire')} <b>power pole</b>
+  links to poles within 7 tiles (wires draw automatically) and energises the 5×5 area around it —
+  generators must stand in a pole's area too. Separate pole clusters are <b>separate grids</b>, each
+  with its own supply and demand. A blinking <b>red bolt</b> means no pole in range; when demand
+  exceeds supply everything electric slows down proportionally (a brown-out — the top-right bar
+  turns red). Generators idle when nothing draws power, so fuel is never wasted. Later:
+  <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn ${ic('fuelCell')} fuel cells
+  for serious output; the <b>pylon</b> spans 14 tiles.</p>
+
+  <div class="selSection">Oil</div>
+  <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws
+  it endlessly; <b>pipes</b> carry it to a <b>refinery</b>, which cracks it into ${ic('plastic')}
+  plastic (with coal) or ${ic('fuelCell')} fuel cells (with steel). Pipes only connect pumpjacks,
+  refineries and other pipes.</p>
+
+  <div class="selSection">Growing the factory</div>
+  <p class="howP">Ore near the Core is humble; <b>quartz waits in the middle distance and titanium and
+  oil at the world's edge</b> — every age pushes your logistics farther out. Ratios matter: one
+  fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
+  feels polite. The <b>Foundry panel</b> (${kb('U')}) sells permanent upgrades — belt speed, drill
+  speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk versions to
+  rebuild with. Check <b>Stats</b> to see production per minute and find your bottleneck.</p>
+
+  <div class="selSection">Controls</div>
+  <table class="statTable">
+    <tr><td>Place / select / hand-mine</td><td>${kb('Left click')} / hold</td></tr>
+    <tr><td>Lay belt lines</td><td>${kb('Left drag')} with a belt selected</td></tr>
+    <tr><td>Remove (full refund)</td><td>${kb('Right click')} / drag</td></tr>
+    <tr><td>Rotate</td><td>${kb('R')}</td></tr>
+    <tr><td>Pan</td><td>${kb('W A S D')} · ${kb('Middle drag')} · ${kb('Left drag')} on empty ground</td></tr>
+    <tr><td>Zoom</td><td>${kb('Wheel')}</td></tr>
+    <tr><td>Copy hovered building</td><td>${kb('Q')}</td></tr>
+    <tr><td>Quick-select from build bar</td><td>${kb('1')}–${kb('9')}</td></tr>
+    <tr><td>Inventory</td><td>${kb('E')}</td></tr>
+    <tr><td>Foundry panel</td><td>${kb('U')}</td></tr>
+    <tr><td>This guide</td><td>${kb('H')}</td></tr>
+    <tr><td>Centre on the Core</td><td>${kb('F')}</td></tr>
+    <tr><td>Mute</td><td>${kb('M')}</td></tr>
+    <tr><td>Menu / cancel</td><td>${kb('Esc')}</td></tr>
+  </table>`;
 }
 
 /* ==================================================================== */
@@ -916,6 +1192,119 @@ function toastCost(def){
 }
 
 function cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/* ---------- menu popup ---------- */
+function openMenu(){ $('menuPop').classList.remove('hidden'); A.sfx.open(); }
+function closeMenu(){ $('menuPop').classList.add('hidden'); }
+function toggleMenu(){
+  if ($('menuPop').classList.contains('hidden')) openMenu();
+  else closeMenu();
+}
+
+/* ==================================================================== */
+/* FUEL SLOT TRANSFER (pick a stack up onto the cursor, deposit it)     */
+/* UI.holdStack = stack riding the cursor: {item, n}                    */
+/* click: whole stack · right-click: half · with a stack in hand,       */
+/* hovering a box and scrolling moves items 1-by-1 between hand & box   */
+/* ==================================================================== */
+
+function slotAvail(side, ent, item){
+  return side === 'machine' ? ent.fuelBuf : F.invCount(UI.S, item);
+}
+
+function slotDown(ev, box, side, ent, item){
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (ev.button !== 0 && ev.button !== 2) return;
+  if (UI.holdStack){ depositTo(side, ent, item, ev.button); return; }
+  // pick up: all (LMB) or half (RMB)
+  const avail = slotAvail(side, ent, item);
+  if (!avail){ A.sfx.error(); return; }
+  const n = ev.button === 2 ? Math.ceil(avail / 2) : avail;
+  if (side === 'machine') ent.fuelBuf -= n;
+  else F.invAdd(UI.S, item, -n);
+  UI.holdStack = { item, n };
+  showHeld();
+  A.sfx.click();
+  refreshSelPanel();
+}
+
+/* holding a stack + hovering a box + scroll: up takes 1 from the box, down puts 1 in */
+function slotWheel(ev, box, side, ent, item){
+  const H = UI.holdStack;
+  if (!H) return;                       // scroll does nothing with empty hands
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (H.item !== item){ A.sfx.error(); return; }
+  if (ev.deltaY < 0){
+    // take one more into the hand
+    if (slotAvail(side, ent, item) <= 0){ A.sfx.error(); return; }
+    if (side === 'machine') ent.fuelBuf -= 1;
+    else F.invAdd(UI.S, item, -1);
+    H.n += 1;
+  } else {
+    // drop one from the hand into this box
+    if (H.n <= 0) return;
+    if (side === 'machine'){
+      if (ent.fuelBuf >= F.FUEL_CAP){ A.sfx.error(); return; }
+      ent.fuelBuf += 1;
+    } else {
+      F.invAdd(UI.S, item, 1);
+    }
+    H.n -= 1;
+  }
+  if (H.n <= 0){ UI.holdStack = null; hideHeld(); }
+  else showHeld();
+  A.sfx.click();
+  refreshSelPanel();
+}
+
+function depositTo(side, ent, item, btn){
+  const H = UI.holdStack;
+  if (!H) return;
+  const amt = btn === 2 ? Math.ceil(H.n / 2) : H.n;
+  let put = 0;
+  if (side === 'machine'){
+    if (H.item !== item){ A.sfx.error(); return; }
+    put = Math.min(amt, F.FUEL_CAP - ent.fuelBuf);
+    if (!put){ A.sfx.error(); return; }
+    ent.fuelBuf += put;
+  } else {
+    put = amt;
+    F.invAdd(UI.S, H.item, put);
+  }
+  H.n -= put;
+  A.sfx.click();
+  if (H.n <= 0){ UI.holdStack = null; hideHeld(); }
+  else showHeld();
+  refreshSelPanel();
+}
+
+function returnHeld(){
+  const H = UI.holdStack;
+  if (!H) return;
+  F.invAdd(UI.S, H.item, H.n);
+  UI.holdStack = null;
+  hideHeld();
+  if (UI.selection) refreshSelPanel();
+}
+
+function showHeld(){
+  const H = UI.holdStack;
+  const el2 = $('heldStack');
+  if (!H){ el2.classList.add('hidden'); return; }
+  el2.querySelector('img').src = R.itemIcon(H.item, 44).toDataURL();
+  el2.querySelector('span').textContent = H.n;
+  el2.classList.remove('hidden');
+  positionHeld();
+}
+function hideHeld(){ $('heldStack').classList.add('hidden'); }
+function positionHeld(){
+  const el2 = $('heldStack');
+  if (el2.classList.contains('hidden')) return;
+  el2.style.left = UI.mouse.x + 'px';
+  el2.style.top = UI.mouse.y + 'px';
+}
 
 /* ==================================================================== */
 /* EVENTS from the sim                                                  */

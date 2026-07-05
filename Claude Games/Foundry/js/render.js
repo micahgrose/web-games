@@ -1400,9 +1400,6 @@ R.onEvent = function(S, ev){
       }
       break;
     }
-    case 'depleted':
-      R.scarTile(S, ev.x, ev.y);
-      break;
     case 'milestone':
       R.shake = Math.min(R.shake + 5, 8);
       for (let i = 0; i < 40; i++){

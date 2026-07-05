@@ -191,14 +191,30 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .recipeBtn.on{ border-color:var(--accent); background:rgba(255,180,84,.12); }
 .bufRow{ display:flex; align-items:center; gap:7px; margin:4px 0; font-size:12px; }
 .bufRow .n{ color:var(--ink-dim); font-variant-numeric:tabular-nums; margin-left:auto; }
-.fuelBtn{
-  display:flex; align-items:center; gap:6px; font-size:12px;
-  padding:5px 10px; border-radius:7px; border:1px solid var(--line);
-  background:rgba(255,255,255,.04); color:var(--ink);
-  transition:border-color .12s;
+/* fuel transfer slots */
+.slotRow{ display:flex; align-items:stretch; gap:7px; margin:7px 0 3px; }
+.slotBox{
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+  padding:8px 4px 6px; border-radius:9px; cursor:pointer; user-select:none;
+  border:1px solid var(--line); background:rgba(255,255,255,.03);
+  transition:border-color .12s, background .12s;
 }
-.fuelBtn:hover{ border-color:var(--accent); }
-.fuelBtn:disabled{ opacity:.4; cursor:default; }
+.slotBox:hover{ border-color:var(--accent); background:rgba(255,180,84,.07); }
+.slotBox img{ pointer-events:none; }
+.slotN{ font-size:12.5px; font-variant-numeric:tabular-nums; color:var(--ink); pointer-events:none; }
+.slotLbl{ font-size:9.5px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.06em; pointer-events:none; }
+.slotArrows{ display:flex; align-items:center; color:var(--ink-faint); font-size:14px; }
+#heldStack{
+  position:fixed; z-index:70; pointer-events:none;
+  display:flex; align-items:center; gap:4px;
+  transform:translate(10px, 6px);
+  filter:drop-shadow(0 3px 6px rgba(0,0,0,.6));
+}
+#heldStack span{
+  font-size:12px; font-weight:600; color:#fff;
+  background:rgba(10,13,19,.9); border:1px solid var(--line-bright);
+  border-radius:6px; padding:1px 6px; font-variant-numeric:tabular-nums;
+}
 .fuelBarOuter{ flex:1; height:5px; border-radius:3px; background:rgba(255,255,255,.08); overflow:hidden; }
 .fuelBarFill{ height:100%; background:linear-gradient(90deg,#ff9040,#ffc848); border-radius:3px; }
 .progOuter{ height:5px; border-radius:3px; background:rgba(255,255,255,.08); overflow:hidden; margin:6px 0; }
@@ -210,6 +226,22 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 }
 .dangerBtn:hover{ background:rgba(255,118,118,.14); }
 .ghostNote{ font-size:11px; color:var(--ink-faint); line-height:1.5; margin-top:6px; }
+
+/* Menu popup */
+#menuPop{
+  position:absolute; top:60px; right:12px;
+  display:flex; flex-direction:column; gap:2px;
+  padding:6px; min-width:200px;
+  background:rgba(14,18,26,.97);
+}
+.menuBtn{
+  text-align:left; font-size:13px; color:var(--ink);
+  padding:9px 12px; border-radius:7px;
+  transition:background .12s, color .12s;
+}
+.menuBtn:hover{ background:rgba(255,255,255,.06); }
+#mQuit{ color:var(--bad); }
+#mQuit:hover{ background:rgba(255,118,118,.1); }
 
 /* Tooltip */
 #tooltip{
@@ -352,6 +384,29 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .compChain span{ display:inline-flex; align-items:center; gap:3px; font-variant-numeric:tabular-nums; }
 .compTime{ font-size:11px; color:var(--ink-faint); flex:none; }
 .compMachine{ font-size:10.5px; color:var(--accent2); flex:none; }
+.compUse{ font-size:11px; color:var(--ink-faint); margin-top:4px; display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.compUse img{ vertical-align:-3px; }
+.compUseB{ color:var(--ink-faint); }
+.compLocked{ opacity:.6; }
+.needBadge{
+  font-size:9.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+  color:#0d1117; background:var(--accent); border-radius:4px; padding:1px 6px; margin-left:7px;
+  vertical-align:1px;
+}
+.lockBadge{
+  font-size:9.5px; letter-spacing:.04em;
+  color:var(--accent2); border:1px solid rgba(89,214,255,.3); border-radius:4px;
+  padding:1px 6px; margin-left:7px; vertical-align:1px;
+}
+.howP{ font-size:12.5px; line-height:1.65; color:var(--ink-dim); margin:0 0 6px; }
+.howP b{ color:var(--ink); font-weight:600; }
+.howP img{ vertical-align:-3px; }
+.kbd{
+  display:inline-block; font-family:var(--font-d); font-size:10.5px; font-weight:600;
+  color:var(--ink); background:rgba(255,255,255,.07);
+  border:1px solid var(--line-bright); border-bottom-width:2px; border-radius:5px;
+  padding:1px 7px; margin:0 1px;
+}
 .statTable{ width:100%; border-collapse:collapse; font-size:12.5px; }
 .statTable td{ padding:6px 8px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
 .statTable td:last-child{ text-align:right; color:var(--ink-dim); }
