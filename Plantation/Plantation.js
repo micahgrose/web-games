@@ -46,7 +46,7 @@ const CFG = {
     legThick:    3.4,   // sprite px
 
     // tools
-    hoeReach: 72,       // world px in front of the farmer where the hoe lands
+    hoeReach: 72,       // fixed world-px distance from the farmer; mouse aims direction
 
     // hotbar
     slot:      58,      // slot size px
@@ -216,16 +216,23 @@ class Teleporter extends Item {
     use() { farmer.x = this.x; farmer.y = this.y; }
 }
 
-// The hoe is in the farmer's hands: it tills the tile a fixed reach in front
-// of him (his 8-way facing), so you walk/run/teleport him where the work is.
+// The hoe is in the farmer's hands: it tills a tile a FIXED reach away from
+// him, aimed with the MOUSE. So position (walk/run/teleport) sets how far you
+// can reach; the cursor picks which tile in that ring you swing at.
 class Hoe extends Item {
     farmerTool = true;
-    constructor() { super(); this.c = 0; this.r = 0; }
+    constructor() { super(); this.c = 0; this.r = 0; this.wx = 0; this.wy = 0; }
     update() {
-        // target tile = farmer + facing * reach, snapped to the grid
-        this.c = Math.floor((farmer.x + farmer.dirX * CFG.hoeReach) / CFG.tile);
-        this.r = Math.floor((farmer.y + farmer.dirY * CFG.hoeReach) / CFG.tile);
-        // holding the button tills as he walks — sweeping rows feels right
+        // aim = unit vector from the farmer toward the cursor (world space)
+        let dx = mouse.wx - farmer.x, dy = mouse.wy - farmer.y;
+        const d = Math.hypot(dx, dy);
+        if (d > 0.001) { dx /= d; dy /= d; } else { dx = farmer.dirX; dy = farmer.dirY; }
+        // reach point at the fixed distance, then snap to the grid
+        this.wx = farmer.x + dx * CFG.hoeReach;
+        this.wy = farmer.y + dy * CFG.hoeReach;
+        this.c = Math.floor(this.wx / CFG.tile);
+        this.r = Math.floor(this.wy / CFG.tile);
+        // holding the button tills as you sweep the cursor / walk
         if (farmerMode && mouse.down) this.till();
     }
     use() { this.till(); }
@@ -334,7 +341,7 @@ Teleporter.prototype.drawIcon = function (cx, cy, size) {
 };
 
 
-// ---- Hoe: target-tile highlight in front of the farmer (world) ----
+// ---- Hoe: aim line from the farmer + target-tile highlight (world) ----
 Hoe.prototype.draw = function () {
     const T = CFG.tile;
     const px = sx(this.c * T), py = sy(this.r * T);
@@ -342,6 +349,18 @@ Hoe.prototype.draw = function () {
     const tillable = !getTile(this.c, this.r);
     const t = performance.now() / 1000;
     const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+
+    // faint reach line from the farmer's hands to the aimed tile, so the
+    // fixed-distance / mouse-aim relationship is legible
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 220, 150, 0.28)';
+    ctx.lineWidth = Math.max(1, 1.5 * zoom);
+    ctx.setLineDash([4 * zoom, 4 * zoom]);
+    ctx.beginPath();
+    ctx.moveTo(sx(farmer.x), sy(farmer.y));
+    ctx.lineTo(sx(this.wx), sy(this.wy));
+    ctx.stroke();
+    ctx.restore();
 
     ctx.save();
     if (tillable) {
