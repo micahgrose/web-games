@@ -45,6 +45,9 @@ const CFG = {
     legLen:      2,     // sprite px
     legThick:    3.4,   // sprite px
 
+    // tools
+    hoeReach: 72,       // world px in front of the farmer where the hoe lands
+
     // hotbar
     slot:      58,      // slot size px
     slotGap:   8,
@@ -71,7 +74,7 @@ const cam = { x: 0, y: 0, vx: 0, vy: 0 };   // top-left of viewport, world px
 let zoom = 1;
 let farmerMode = false;                      // false = Free cam, true = Farmer
 
-const mouse = { x: 0, y: 0, wx: 0, wy: 0 }; // screen px + world px (wx/wy)
+const mouse = { x: 0, y: 0, wx: 0, wy: 0, down: false }; // screen + world px
 const keys = Object.create(null);           // keys[e.code] = held?
 let shiftHeld = false;
 
@@ -81,6 +84,7 @@ const farmer = {
     walkAmt: 0,         // 0..1 eased "how much to animate"
     facing: 'front',    // front / back / side / front34 / back34
     mirror: false,      // true = flip horizontally (walking left-ish)
+    dirX: 0, dirY: 1,   // unit vector of his 8-way facing (sticky, like facing)
 };
 
 const inventory = {
@@ -125,9 +129,14 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mousedown', (e) => {
     if (e.button === 0) {
+        mouse.down = true;
         const held = inventory.hotBar[inventory.selected];
-        if (held) held.use();
+        // farmer tools only work as the farmer; free tools only as the eyes
+        if (held && held.farmerTool === farmerMode) held.use();
     }
+});
+window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) mouse.down = false;
 });
 
 canvas.addEventListener('wheel', (e) => {
@@ -170,6 +179,7 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => {
     for (const k in keys) keys[k] = false;
     shiftHeld = false;
+    mouse.down = false;
 });
 
 function setMode(toFarmer) {
@@ -187,10 +197,13 @@ function setMode(toFarmer) {
 
 // ================================ ITEMS ====================================
 // Logic only — the draw()/drawIcon() visuals live in ITEM VISUALS below.
+// farmerTool decides who wields it: true = only works/draws in Farmer mode
+// (the farmer is holding it), false = only in Free mode (a god-view tool).
 class Item {
+    farmerTool = false;
     update() {}                 // runs every frame while selected
-    use() {}                    // left click while selected
-    draw() {}                   // world-space visual while selected (Free mode only)
+    use() {}                    // left click while selected (mode-gated centrally)
+    draw() {}                   // world-space visual while selected (mode-gated)
     drawIcon(cx, cy, size) {}   // icon inside its hotbar slot
 }
 
@@ -200,13 +213,32 @@ class Teleporter extends Item {
         this.x = mouse.wx;      // follows the cursor in world space
         this.y = mouse.wy;
     }
-    use() {
-        if (!farmerMode) { farmer.x = this.x; farmer.y = this.y; }
+    use() { farmer.x = this.x; farmer.y = this.y; }
+}
+
+// The hoe is in the farmer's hands: it tills the tile a fixed reach in front
+// of him (his 8-way facing), so you walk/run/teleport him where the work is.
+class Hoe extends Item {
+    farmerTool = true;
+    constructor() { super(); this.c = 0; this.r = 0; }
+    update() {
+        // target tile = farmer + facing * reach, snapped to the grid
+        this.c = Math.floor((farmer.x + farmer.dirX * CFG.hoeReach) / CFG.tile);
+        this.r = Math.floor((farmer.y + farmer.dirY * CFG.hoeReach) / CFG.tile);
+        // holding the button tills as he walks — sweeping rows feels right
+        if (farmerMode && mouse.down) this.till();
+    }
+    use() { this.till(); }
+    till() {
+        if (getTile(this.c, this.r)) return; // already worked soil
+        setTile(this.c, this.r, { kind: 'tilled', v: (hash2(this.c, this.r) * 4) | 0 });
     }
 }
 
 const teleporter = new Teleporter();
+const hoe = new Hoe();
 inventory.hotBar[0] = teleporter;
+inventory.hotBar[1] = hoe;
 
 
 // ============================ ITEM VISUALS =================================
@@ -302,6 +334,74 @@ Teleporter.prototype.drawIcon = function (cx, cy, size) {
 };
 
 
+// ---- Hoe: target-tile highlight in front of the farmer (world) ----
+Hoe.prototype.draw = function () {
+    const T = CFG.tile;
+    const px = sx(this.c * T), py = sy(this.r * T);
+    const size = T * zoom;
+    const tillable = !getTile(this.c, this.r);
+    const t = performance.now() / 1000;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+
+    ctx.save();
+    if (tillable) {
+        // warm earthy glow: this dirt is ready to turn
+        ctx.fillStyle = `rgba(230, 190, 110, ${0.10 + pulse * 0.08})`;
+        ctx.fillRect(px, py, size, size);
+        ctx.strokeStyle = `rgba(255, 214, 130, ${0.65 + pulse * 0.3})`;
+        ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
+    } else {
+        // already worked — quiet grey frame, no invitation
+        ctx.strokeStyle = 'rgba(220, 220, 220, 0.28)';
+        ctx.lineWidth = Math.max(1, 1.5 * zoom);
+    }
+    // corner brackets read as "target" better than a full box
+    const L = size * 0.26;
+    ctx.beginPath();
+    for (const [cx2, cy2, dx, dy] of [
+        [px, py, 1, 1], [px + size, py, -1, 1],
+        [px + size, py + size, -1, -1], [px, py + size, 1, -1],
+    ]) {
+        ctx.moveTo(cx2 + dx * L, cy2);
+        ctx.lineTo(cx2, cy2);
+        ctx.lineTo(cx2, cy2 + dy * L);
+    }
+    ctx.stroke();
+    ctx.restore();
+};
+
+// ---- Hoe: pixel hoe icon (hotbar slot) ----
+Hoe.prototype.drawIcon = function (cx, cy, size) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-Math.PI / 5);   // lean the handle like it's ready to swing
+
+    // wooden handle
+    ctx.strokeStyle = '#8a5a2e';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.22, size * 0.26);
+    ctx.lineTo(size * 0.14, -size * 0.22);
+    ctx.stroke();
+
+    // steel blade hanging off the top end
+    ctx.fillStyle = '#b9c2c9';
+    ctx.strokeStyle = '#6f7a82';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(size * 0.10, -size * 0.26);
+    ctx.lineTo(size * 0.30, -size * 0.16);
+    ctx.lineTo(size * 0.24, size * 0.02);
+    ctx.lineTo(size * 0.13, -size * 0.06);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
+};
+
+
 // ================================ WORLD ====================================
 // Pre-baked flat soil variants with grit/pebbles; hash picks one per world
 // cell so the field is infinite and never flickers or slides.
@@ -353,9 +453,63 @@ function buildGroundTiles() {
     }
 }
 
-// future: tilled soil, planted crops, watered ground etc. render here
+// Tilled soil: darker turned earth with horizontal furrow ridges. Baked in a
+// few variants (picked per tile) so a field doesn't look rubber-stamped.
+const tilledTiles = [];
+
+function buildTilledTiles() {
+    const T = CFG.tile;
+    tilledTiles.length = 0;
+    for (let i = 0; i < 4; i++) {
+        const off = document.createElement('canvas');
+        off.width = T;
+        off.height = T;
+        const c = off.getContext('2d');
+
+        let s = (i * 96534123 + 7777) >>> 0;
+        const rnd = () => {
+            s = (s * 1664525 + 1013904223) >>> 0;
+            return s / 4294967296;
+        };
+
+        // turned earth base — darker and richer than untouched ground
+        const tint = 0.92 + rnd() * 0.16;
+        c.fillStyle = `rgb(${Math.floor(74 * tint)},${Math.floor(48 * tint)},${Math.floor(30 * tint)})`;
+        c.fillRect(0, 0, T, T);
+
+        // four furrows: dark trench with a lit ridge line above each
+        for (let f = 0; f < 4; f++) {
+            const y = 4 + f * 16 + rnd() * 2;
+            c.fillStyle = `rgba(26,15,8,${0.42 + rnd() * 0.12})`;   // trench
+            c.fillRect(0, y + 3, T, 7);
+            c.fillStyle = `rgba(158,116,74,${0.30 + rnd() * 0.12})`; // sunlit ridge
+            c.fillRect(0, y, T, 2.5);
+        }
+
+        // crumbs of turned soil
+        for (let k = 0; k < 26; k++) {
+            c.fillStyle = rnd() < 0.5
+                ? `rgba(20,11,6,${0.25 + rnd() * 0.25})`
+                : `rgba(150,110,70,${0.15 + rnd() * 0.2})`;
+            c.beginPath();
+            c.arc(rnd() * T, rnd() * T, 0.5 + rnd() * 1.4, 0, Math.PI * 2);
+            c.fill();
+        }
+
+        // soft darkened edge so a lone tilled plot reads as a dug patch
+        c.strokeStyle = 'rgba(20,12,6,0.35)';
+        c.lineWidth = 2;
+        c.strokeRect(1, 1, T - 2, T - 2);
+
+        tilledTiles.push(off);
+    }
+}
+
+// per-tile state renderer (crops/watering will hang off this too)
 function drawTileState(tile, px, py, size) {
-    // switch (tile.kind) { case 'tilled': ... }
+    if (tile.kind === 'tilled') {
+        ctx.drawImage(tilledTiles[tile.v & 3], px, py, size, size);
+    }
 }
 
 
@@ -660,17 +814,18 @@ function updateWalkAnim(dt) {
     if (!moving && farmer.walkAmt < 0.02) { farmer.walkAmt = 0; farmer.walkPhase = 0; }
 
     if (moving) {
+        const D = 0.70710678; // diagonal component
         const oct = Math.round(Math.atan2(farmer.vy, farmer.vx) / (Math.PI / 4)); // -4..4, 0 = east
         switch (oct) {
-            case  0: farmer.facing = 'side';    farmer.mirror = false; break; // right
-            case  1: farmer.facing = 'front34'; farmer.mirror = false; break; // down-right
-            case  2: farmer.facing = 'front';   farmer.mirror = false; break; // down
-            case  3: farmer.facing = 'front34'; farmer.mirror = true;  break; // down-left
+            case  0: farmer.facing = 'side';    farmer.mirror = false; farmer.dirX =  1; farmer.dirY =  0; break; // right
+            case  1: farmer.facing = 'front34'; farmer.mirror = false; farmer.dirX =  D; farmer.dirY =  D; break; // down-right
+            case  2: farmer.facing = 'front';   farmer.mirror = false; farmer.dirX =  0; farmer.dirY =  1; break; // down
+            case  3: farmer.facing = 'front34'; farmer.mirror = true;  farmer.dirX = -D; farmer.dirY =  D; break; // down-left
             case  4:
-            case -4: farmer.facing = 'side';    farmer.mirror = true;  break; // left
-            case -3: farmer.facing = 'back34';  farmer.mirror = true;  break; // up-left
-            case -2: farmer.facing = 'back';    farmer.mirror = false; break; // up
-            case -1: farmer.facing = 'back34';  farmer.mirror = false; break; // up-right
+            case -4: farmer.facing = 'side';    farmer.mirror = true;  farmer.dirX = -1; farmer.dirY =  0; break; // left
+            case -3: farmer.facing = 'back34';  farmer.mirror = true;  farmer.dirX = -D; farmer.dirY = -D; break; // up-left
+            case -2: farmer.facing = 'back';    farmer.mirror = false; farmer.dirX =  0; farmer.dirY = -1; break; // up
+            case -1: farmer.facing = 'back34';  farmer.mirror = false; farmer.dirX =  D; farmer.dirY = -D; break; // up-right
         }
     }
 }
@@ -727,9 +882,10 @@ function draw() {
 
     ctx.drawImage(vignette, 0, 0);
 
-    // selected item's world visual (hidden in Farmer mode; icons still show)
+    // selected item's world visual — only in the mode that wields it
+    // (free tools with the eyes, farmer tools in the farmer's hands)
     const held = inventory.hotBar[inventory.selected];
-    if (held && !farmerMode) held.draw();
+    if (held && held.farmerTool === farmerMode) held.draw();
 
     coordsEl.textContent = `${Math.round(cam.x)}, ${Math.round(cam.y)}`;
     zoomEl.textContent = `× ${zoom.toFixed(2)}`;
@@ -798,6 +954,7 @@ function drawHotbar() {
 // ================================= BOOT ====================================
 resize();
 buildGroundTiles();
+buildTilledTiles();
 setMode(false);
 
 // start with the farmer centred on screen
