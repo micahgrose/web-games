@@ -1,122 +1,231 @@
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+// ============================================================================
+// PLANTATION — bird's-eye farming game
+//
+// File map (in order):
+//   CONFIG        — every tunable number, grouped. Tweak here, not inline.
+//   CANVAS & DOM  — canvas, HUD elements, resize.
+//   STATE         — camera, zoom, mode, mouse, keys, farmer, inventory, world.
+//   UTILS         — clamp/hash/world<->screen helpers.
+//   INPUT         — keyboard, mouse, wheel. All listeners live here.
+//   ITEMS         — Item base + concrete items (logic only; visuals below).
+//   ITEM VISUALS  — draw()/drawIcon() on prototypes, out of the class bodies.
+//   WORLD         — procedural dirt tiles + sparse per-tile state (tilling etc).
+//   FARMER        — pixel-art bodies, walk rigs, drawFarmer().
+//   UPDATE        — per-frame simulation (movement, camera, animation, items).
+//   RENDER        — draw() pipeline: ground → farmer → vignette → item → UI.
+//   UI            — hotbar + mode pill.
+//   BOOT          — initial state + main loop.
+// ============================================================================
+
+
+// ============================== CONFIG =====================================
+const CFG = {
+    // free camera
+    camSpeed:   560,    // px/s pan speed
+    camBoost:   2.1,    // Shift multiplier (free cam)
+    camEase:    9,      // higher = snappier start/stop
+
+    // farmer
+    farmerSpeed: 210,   // walk px/s — deliberately slower than the free cam
+    farmerRun:   1.9,   // Shift multiplier while walking
+    camFollow:   8,     // how fast the camera eases to re-centre on him
+
+    // zoom
+    zoomMin:  0.40,     // pulled back — survey the field
+    zoomMax:  1.75,     // pushed in — inspect a single plot
+    zoomRate: 0.0015,   // wheel sensitivity (exponential)
+
+    // world
+    tile:         64,   // world px per ground tile
+    tileVariants: 16,   // baked soil variations
+
+    // walk animation
+    walkCadence: 0.05,  // phase advance per world-px moved (legs sync to speed)
+    walkFade:    12,    // how fast the cycle blends in/out on start/stop
+    legLen:      2,     // sprite px
+    legThick:    3.4,   // sprite px
+
+    // hotbar
+    slot:      58,      // slot size px
+    slotGap:   8,
+    hotbarPad: 22,      // distance from bottom of screen
+};
+
+
+// =========================== CANVAS & DOM ==================================
+const canvas   = document.getElementById('c');
+const ctx      = canvas.getContext('2d');
 const coordsEl = document.getElementById('coords');
-const zoomEl = document.getElementById('zoomlabel');
+const zoomEl   = document.getElementById('zoomlabel');
+const modeEl   = document.getElementById('mode');
 
 function resize() {
-    canvas.width = window.innerWidth;
+    canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
+    buildVignette();
 }
-resize();
 
-let mouse = { x: 0, y: 0 };
 
+// ================================ STATE ====================================
+const cam = { x: 0, y: 0, vx: 0, vy: 0 };   // top-left of viewport, world px
+let zoom = 1;
+let farmerMode = false;                      // false = Free cam, true = Farmer
+
+const mouse = { x: 0, y: 0, wx: 0, wy: 0 }; // screen px + world px (wx/wy)
+const keys = Object.create(null);           // keys[e.code] = held?
+let shiftHeld = false;
+
+const farmer = {
+    x: 0, y: 0, vx: 0, vy: 0,
+    walkPhase: 0,       // advances while moving; drives the leg cycle
+    walkAmt: 0,         // 0..1 eased "how much to animate"
+    facing: 'front',    // front / back / side / front34 / back34
+    mirror: false,      // true = flip horizontally (walking left-ish)
+};
+
+const inventory = {
+    hotBar: [null, null, null, null, null, null, null, null, null],
+    selected: 0,
+    items: {},          // future: counts of seeds/crops/etc by name
+};
+
+// sparse per-tile state over the infinite procedural ground.
+// A tile with no entry is plain dirt. Future: {kind:'tilled'|'planted', ...}
+const worldTiles = new Map();
+const tileKey = (c, r) => c + ',' + r;
+const getTile = (c, r) => worldTiles.get(tileKey(c, r)) || null;
+const setTile = (c, r, t) => { worldTiles.set(tileKey(c, r), t); };
+
+
+// ================================ UTILS ====================================
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+// world <-> screen
+const sx = (wx) => (wx - cam.x) * zoom;
+const sy = (wy) => (wy - cam.y) * zoom;
+const wx = (px) => cam.x + px / zoom;
+const wy = (py) => cam.y + py / zoom;
+
+// deterministic 2D hash — pins ground detail to world coords (no flicker)
+function hash2(x, y) {
+    let h = (x | 0) * 374761393 + (y | 0) * 668265263;
+    h = (h ^ (h >>> 13)) >>> 0;
+    h = (h * 1274126177) >>> 0;
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+
+// ================================ INPUT ====================================
 window.addEventListener('resize', resize);
+
 window.addEventListener('mousemove', (e) => {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
 });
+
 window.addEventListener('mousedown', (e) => {
-    if (e.button === 0) { // left click
-        const held = inventory.hotBar[inventory.selectedHotBar];
-        if(held) held.use();
+    if (e.button === 0) {
+        const held = inventory.hotBar[inventory.selected];
+        if (held) held.use();
     }
 });
 
-//---- Classes ----
-class Farmer {
-    constructor(){
-        this.x = 0;
-        this.y = 0;
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.shiftKey || e.ctrlKey) {
+        // Shift/Ctrl + scroll — zoom toward the cursor
+        const ax = wx(e.clientX), ay = wy(e.clientY);   // anchor world point
+        zoom = clamp(zoom * Math.exp(-e.deltaY * CFG.zoomRate), CFG.zoomMin, CFG.zoomMax);
+        cam.x = ax - e.clientX / zoom;                  // keep anchor under cursor
+        cam.y = ay - e.clientY / zoom;
+    } else {
+        // plain scroll — cycle the hotbar selection
+        const n = inventory.hotBar.length;
+        const dir = e.deltaY > 0 ? 1 : -1;
+        inventory.selected = (inventory.selected + dir + n) % n;
     }
-}
+}, { passive: false });
 
-class Inventory {
-    constructor(){
-        this.items = {};
-        this.hotBar = [teleporter, null, null, null, null, null, null, null, null];
-        this.selectedHotBar = 0;
+// Key off e.code (physical key) so Shift's uppercasing of e.key can't strand
+// a held direction — 'w' down / 'W' up would never cancel each other.
+const PAN_KEYS = ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'ArrowLeft', 'KeyA', 'ArrowRight', 'KeyD'];
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift') shiftHeld = true;
+    if (e.code === 'Tab' && !e.repeat) {    // Tab flips Free <-> Farmer
+        e.preventDefault();
+        setMode(!farmerMode);
     }
+    if (e.code.startsWith('Digit')) {       // 1-9 select hotbar slots
+        const n = +e.code[5];
+        if (n >= 1 && n <= inventory.hotBar.length) inventory.selected = n - 1;
+    }
+    keys[e.code] = true;                    // single source of truth for held keys
+    if (PAN_KEYS.includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') shiftHeld = false;
+    keys[e.code] = false;
+});
+// don't leave anything drifting if focus is lost mid-press
+window.addEventListener('blur', () => {
+    for (const k in keys) keys[k] = false;
+    shiftHeld = false;
+});
+
+function setMode(toFarmer) {
+    farmerMode = toFarmer;
+    if (!modeEl) return;
+    modeEl.textContent = farmerMode ? 'Farmer' : 'Free';
+    // green pill in Free, amber pill in Farmer
+    modeEl.style.borderColor = farmerMode ? 'rgba(240,200,110,0.85)' : 'rgba(120,200,130,0.7)';
+    modeEl.style.color       = farmerMode ? 'rgba(255,236,182,0.95)' : 'rgba(200,245,200,0.95)';
+    modeEl.style.boxShadow   = farmerMode
+        ? '0 0 14px rgba(240,200,110,0.3)'
+        : '0 0 14px rgba(120,200,130,0.25)';
 }
 
-class Item{
-    update() {}
-    use() {}
-    draw() {}                     // world-space visual while selected
-    drawIcon(cx, cy, size) {}     // icon inside its hotbar slot (centre cx,cy)
+
+// ================================ ITEMS ====================================
+// Logic only — the draw()/drawIcon() visuals live in ITEM VISUALS below.
+class Item {
+    update() {}                 // runs every frame while selected
+    use() {}                    // left click while selected
+    draw() {}                   // world-space visual while selected (Free mode only)
+    drawIcon(cx, cy, size) {}   // icon inside its hotbar slot
 }
 
-class Teleporter extends Item{
-    constructor(){super(); this.x = 0; this.y = 0;}
+class Teleporter extends Item {
+    constructor() { super(); this.x = 0; this.y = 0; }
     update() {
-        // follow the cursor in WORLD space, so use() drops the farmer here correctly
-        this.x = cam.x + mouse.x / zoom;
-        this.y = cam.y + mouse.y / zoom;
+        this.x = mouse.wx;      // follows the cursor in world space
+        this.y = mouse.wy;
     }
-
-    use(){if(!farmerMode) {farmer.x = this.x; farmer.y = this.y;}}
+    use() {
+        if (!farmerMode) { farmer.x = this.x; farmer.y = this.y; }
+    }
 }
 
 const teleporter = new Teleporter();
-let items = [teleporter];
-const inventory = new Inventory();
-const farmer = new Farmer();
-
-// ---- Loop ----
-let then = performance.now();
-function gameLoop(now) {
-    let dt = (now - then) / 1000;
-    then = now;
-    if (dt > 0.05) dt = 0.05; // clamp after tab-outs
-
-    updateMovement(dt);
-    selectHotBar();
-    updateSelectedItem();
-
-    draw();
-
-    requestAnimationFrame(gameLoop);
-}
-requestAnimationFrame(gameLoop);
-
-function selectHotBar() {
-    if(keys['Digit1']) inventory.selectedHotBar = 0;
-    if(keys['Digit2']) inventory.selectedHotBar = 1;
-    if(keys['Digit3']) inventory.selectedHotBar = 2;
-    if(keys['Digit4']) inventory.selectedHotBar = 3;
-    if(keys['Digit5']) inventory.selectedHotBar = 4;
-    if(keys['Digit6']) inventory.selectedHotBar = 5;
-    if(keys['Digit7']) inventory.selectedHotBar = 6;
-    if(keys['Digit8']) inventory.selectedHotBar = 7;
-    if(keys['Digit9']) inventory.selectedHotBar = 8;
-}
-
-function updateSelectedItem() {
-    const held = inventory.hotBar[inventory.selectedHotBar];
-    if(held) held.update();
-}
+inventory.hotBar[0] = teleporter;
 
 
-// ============================================================
-//  ITEM VISUALS
+// ============================ ITEM VISUALS =================================
 //  draw() = world visual while the item is selected.
 //  drawIcon(cx, cy, size) = the icon inside its hotbar slot.
-//  Defined on each class's prototype so the class bodies up top
-//  stay focused on logic. `this` is the item instance, exactly
-//  like a normal method. Add a new item's visuals under its own
-//  header here — no need to touch the class.
-// ============================================================
+//  Defined on prototypes so the class bodies above stay focused on logic.
+//  `this` is the item instance, exactly like a normal method. Add a new
+//  item's visuals under its own header here — no need to touch the class.
+// ===========================================================================
 
 // ---- Teleporter: glowing sci-fi teleport reticle (world) ----
 Teleporter.prototype.draw = function () {
-    const sx = (this.x - cam.x) * zoom; // world -> screen (sits under the cursor)
-    const sy = (this.y - cam.y) * zoom;
+    const px = sx(this.x), py = sy(this.y);
     const t = performance.now() / 1000;
     const pulse = 0.5 + 0.5 * Math.sin(t * 4);
     const R = (24 + pulse * 4) * zoom;   // radius breathes, and scales with zoom
 
     ctx.save();
-    ctx.translate(sx, sy);
+    ctx.translate(px, py);
     ctx.shadowColor = 'rgba(120, 220, 255, 0.9)';
     ctx.shadowBlur = 16;
 
@@ -164,21 +273,18 @@ Teleporter.prototype.drawIcon = function (cx, cy, size) {
     ctx.shadowColor = 'rgba(120, 220, 255, 0.8)';
     ctx.shadowBlur = 7;
 
-    // outer ring
     ctx.strokeStyle = 'rgba(140, 230, 255, 0.95)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, R, 0, Math.PI * 2);
     ctx.stroke();
 
-    // inner ring
     ctx.strokeStyle = 'rgba(205, 245, 255, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2);
     ctx.stroke();
 
-    // crosshair ticks
     ctx.beginPath();
     for (const a of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
         const ca = Math.cos(a), sa = Math.sin(a);
@@ -187,7 +293,6 @@ Teleporter.prototype.drawIcon = function (cx, cy, size) {
     }
     ctx.stroke();
 
-    // core
     ctx.fillStyle = 'rgba(235, 250, 255, 0.95)';
     ctx.beginPath();
     ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
@@ -197,122 +302,18 @@ Teleporter.prototype.drawIcon = function (cx, cy, size) {
 };
 
 
+// ================================ WORLD ====================================
+// Pre-baked flat soil variants with grit/pebbles; hash picks one per world
+// cell so the field is infinite and never flickers or slides.
+const groundTiles = [];
 
-
-
-
-
-// ---- Claude's portion ----  
-
-
-// ---- Camera (top-left of the viewport, in world space) ----
-// Pressing an arrow moves the "floating eyes" that way, so the ground
-// scrolls the opposite direction underneath.
-const cam = { x: 0, y: 0, vx: 0, vy: 0 };
-const MAX_SPEED = 560;   // px / second
-const EASE = 9;          // higher = snappier start/stop
-const SHIFT_BOOST = 2.1; // hold Shift to sweep across the field faster
-let shiftHeld = false;
-
-// Start with the farmer (world 0,0) centered so he's on-screen at load.
-cam.x = farmer.x - canvas.width / 2;
-cam.y = farmer.y - canvas.height / 2;
-
-// ---- Mode: Free (roam the camera) <-> Farmer (walk the farmer). Tab toggles. ----
-const modeEl = document.getElementById('mode');
-let farmerMode = false;
-const FARMER_SPEED = 210;   // walk speed (px/s) — deliberately slower than the free cam
-const FARMER_RUN   = 1.9;   // Shift multiplier while walking
-const CAM_FOLLOW   = 8;     // how fast the camera eases to re-centre on the farmer
-
-let farmerVX = 0, farmerVY = 0; // farmer velocity, kept out of the user's class
-let walkPhase = 0;              // advances while moving; drives the leg cycle
-let walkAmt = 0;                // 0..1 eased "how much to animate" (fades on start/stop)
-let facing = 'front';           // which baked body he shows: front/back/side/front34/back34
-let facingMirror = false;       // true = flip horizontally (walking left-ish)
-
-function setMode(toFarmer) {
-    farmerMode = toFarmer;
-    if (!modeEl) return;
-    modeEl.textContent = farmerMode ? 'Farmer' : 'Free';
-    // green pill in Free, amber pill in Farmer
-    modeEl.style.borderColor = farmerMode ? 'rgba(240,200,110,0.85)' : 'rgba(120,200,130,0.7)';
-    modeEl.style.color       = farmerMode ? 'rgba(255,236,182,0.95)' : 'rgba(200,245,200,0.95)';
-    modeEl.style.boxShadow   = farmerMode
-        ? '0 0 14px rgba(240,200,110,0.3)'
-        : '0 0 14px rgba(120,200,130,0.25)';
-}
-
-// ---- Zoom (mouse wheel) ----
-let zoom = 1;
-const MIN_ZOOM = 0.40;   // pulled back — survey the whole field
-const MAX_ZOOM = 1.75;    // pushed in — inspect a single plot
-const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-
-canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-
-    if (e.shiftKey || e.ctrlKey) {
-        // Shift/Ctrl + scroll — zoom toward the cursor
-        const worldX = cam.x + e.clientX / zoom;
-        const worldY = cam.y + e.clientY / zoom;
-        // exponential step feels smooth across trackpads and mice
-        zoom = clamp(zoom * Math.exp(-e.deltaY * 0.0015), MIN_ZOOM, MAX_ZOOM);
-        // re-anchor so that same world point stays under the cursor
-        cam.x = worldX - e.clientX / zoom;
-        cam.y = worldY - e.clientY / zoom;
-    } else {
-        // plain scroll — cycle the hotbar selection
-        const slots = inventory.hotBar.length;
-        const dir = e.deltaY > 0 ? 1 : -1;
-        inventory.selectedHotBar = (inventory.selectedHotBar + dir + slots) % slots;
-    }
-}, { passive: false });
-
-const keys = Object.create(null);
-// Key off e.code (physical key) so Shift's uppercasing of e.key can't strand
-// a held direction — otherwise 'w' down / 'W' up never cancel each other.
-const PAN_KEYS = ['ArrowUp', 'KeyW', 'ArrowDown', 'KeyS', 'ArrowLeft', 'KeyA', 'ArrowRight', 'KeyD'];
-window.addEventListener('keydown', (e) => {
-    if (e.key === 'Shift') shiftHeld = true;
-    if (e.code === 'Tab' && !e.repeat) {       // Tab flips Free <-> Farmer (once per press)
-        e.preventDefault();
-        setMode(!farmerMode);
-    }
-    keys[e.code] = true;                       // single source of truth for held keys
-    if (PAN_KEYS.includes(e.code)) e.preventDefault();
-});
-window.addEventListener('keyup', (e) => {
-    if (e.key === 'Shift') shiftHeld = false;
-    keys[e.code] = false;
-});
-// Don't leave the camera drifting if focus is lost mid-press.
-window.addEventListener('blur', () => {
-    for (const k in keys) keys[k] = false;
-    shiftHeld = false;
-});
-
-// ---- Deterministic hash so ground detail stays pinned to the soil ----
-function hash2(x, y) {
-    let h = (x | 0) * 374761393 + (y | 0) * 668265263;
-    h = (h ^ (h >>> 13)) >>> 0;
-    h = (h * 1274126177) >>> 0;
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-// ---- Pre-baked dirt tiles ----
-// A handful of flat soil variants, each with baked-in grit/pebbles. We pick a
-// variant per world cell from the hash, so the field never flickers or slides.
-const TILE = 64;
-const VARIANTS = 16;
-const tiles = [];
-
-function buildTiles() {
-    tiles.length = 0;
-    for (let i = 0; i < VARIANTS; i++) {
+function buildGroundTiles() {
+    const T = CFG.tile;
+    groundTiles.length = 0;
+    for (let i = 0; i < CFG.tileVariants; i++) {
         const off = document.createElement('canvas');
-        off.width = TILE;
-        off.height = TILE;
+        off.width = T;
+        off.height = T;
         const c = off.getContext('2d');
 
         // seeded PRNG for this variant
@@ -324,56 +325,46 @@ function buildTiles() {
 
         // base soil colour, gently varied per variant
         const tint = 0.9 + rnd() * 0.22;
-        const r = Math.floor(104 * tint);
-        const g = Math.floor(72 * tint);
-        const b = Math.floor(46 * tint);
-        c.fillStyle = `rgb(${r},${g},${b})`;
-        c.fillRect(0, 0, TILE, TILE);
+        c.fillStyle = `rgb(${Math.floor(104 * tint)},${Math.floor(72 * tint)},${Math.floor(46 * tint)})`;
+        c.fillRect(0, 0, T, T);
 
         // soft mottling blobs so the flat fill reads as earth, not paint
         for (let k = 0; k < 10; k++) {
-            const px = rnd() * TILE, py = rnd() * TILE;
-            const rad = 6 + rnd() * 16;
-            const darker = rnd() < 0.5;
             const a = 0.05 + rnd() * 0.08;
-            c.fillStyle = darker
-                ? `rgba(40,24,12,${a})`
-                : `rgba(170,140,100,${a})`;
+            c.fillStyle = rnd() < 0.5 ? `rgba(40,24,12,${a})` : `rgba(170,140,100,${a})`;
             c.beginPath();
-            c.arc(px, py, rad, 0, Math.PI * 2);
+            c.arc(rnd() * T, rnd() * T, 6 + rnd() * 16, 0, Math.PI * 2);
             c.fill();
         }
 
         // grit: pebbles and little clods
         const grit = 26 + Math.floor(rnd() * 18);
         for (let k = 0; k < grit; k++) {
-            const px = rnd() * TILE, py = rnd() * TILE;
-            const rad = 0.5 + rnd() * 1.7;
             const roll = rnd();
-            if (roll < 0.55) {
-                c.fillStyle = `rgba(28,16,8,${0.22 + rnd() * 0.28})`;      // dark speck
-            } else if (roll < 0.85) {
-                c.fillStyle = `rgba(190,160,120,${0.16 + rnd() * 0.24})`;  // pale pebble
-            } else {
-                c.fillStyle = `rgba(120,150,90,${0.10 + rnd() * 0.14})`;   // stray bit of green
-            }
+            if (roll < 0.55)      c.fillStyle = `rgba(28,16,8,${0.22 + rnd() * 0.28})`;     // dark speck
+            else if (roll < 0.85) c.fillStyle = `rgba(190,160,120,${0.16 + rnd() * 0.24})`; // pale pebble
+            else                  c.fillStyle = `rgba(120,150,90,${0.10 + rnd() * 0.14})`;  // stray green
             c.beginPath();
-            c.arc(px, py, rad, 0, Math.PI * 2);
+            c.arc(rnd() * T, rnd() * T, 0.5 + rnd() * 1.7, 0, Math.PI * 2);
             c.fill();
         }
 
-        tiles.push(off);
+        groundTiles.push(off);
     }
 }
-buildTiles();
 
-// ---- Pixel-art farmer (animated) ----
-// The body (hat -> hips) is baked once; the legs are drawn procedurally every
-// frame so they can walk — and the cycle speeds up when he runs. Pixels stay
-// crisp (imageSmoothingEnabled = false) and everything scales with zoom.
+// future: tilled soil, planted crops, watered ground etc. render here
+function drawTileState(tile, px, py, size) {
+    // switch (tile.kind) { case 'tilled': ... }
+}
+
+
+// ================================ FARMER ===================================
+// Baked body (hat -> hips) per facing + procedural legs drawn every frame.
+// Left-facing = right-facing art mirrored at render time. Legs attach @ row 13.
 const FARMER_PX = 3;   // world px per sprite pixel
-const FARMER_W = 16;   // sprite width in pixels
-const FARMER_H = 18;   // full logical height (body + legs) used for centring
+const FARMER_W  = 16;  // sprite width in pixels
+const FARMER_H  = 18;  // full logical height (body + legs) used for centring
 
 const FARMER_PAL = {
     x: '#241a12', // outline
@@ -389,8 +380,6 @@ const FARMER_PAL = {
     b: '#5a3b22', // boots
 };
 
-// One baked body (hat -> hips) per facing; right-handed versions only — the
-// left-facing ones are drawn mirrored at render time. Legs attach at row 13.
 const FARMER_MAPS = {
     // walking DOWN (towards camera) — the classic front view
     front: [
@@ -483,13 +472,12 @@ const FARMER_BODIES = {};
 for (const name in FARMER_MAPS) FARMER_BODIES[name] = bakeFarmerMap(FARMER_MAPS[name]);
 
 function bakeFarmerMap(map) {
-    const W = FARMER_W, H = map.length;
     const off = document.createElement('canvas');
-    off.width = W;
-    off.height = H;
+    off.width = FARMER_W;
+    off.height = map.length;
     const c = off.getContext('2d');
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
+    for (let y = 0; y < map.length; y++) {
+        for (let x = 0; x < FARMER_W; x++) {
             const col = FARMER_PAL[map[y][x]];
             if (!col) continue;
             c.fillStyle = col;
@@ -499,41 +487,10 @@ function bakeFarmerMap(map) {
     return off;
 }
 
-// fill a sprite-space rect (cols/rows may be fractional) into screen space
-function fillSpritePx(ox, oy, u, col, row, w, h, color) {
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.round(ox + col * u), Math.round(oy + row * u),
-                 Math.ceil(w * u), Math.ceil(h * u));
-}
-
-// One leg = an overalls-blue limb pivoting at the hip. `th` is signed radians
-// from straight-down (negative = out to the left, positive = right). `lift`
-// bends the knee: it shortens the leg, raising the boot off the ground.
-const FARMER_LEG_LEN = 2; // sprite px
-function drawFarmerLeg(ox, oy, u, hipCol, hipRow, th, lift) {
-    const len = FARMER_LEG_LEN - lift;
-    const footCol = hipCol + len * Math.sin(th);
-    const footRow = hipRow + len * Math.cos(th);
-
-    // limb (overalls) from hip to foot — nice and chunky
-    ctx.strokeStyle = FARMER_PAL.o;
-    ctx.lineWidth = 3.4 * u;
-    ctx.lineCap = 'butt';
-    ctx.beginPath();
-    ctx.moveTo(ox + hipCol * u, oy + hipRow * u);
-    ctx.lineTo(ox + footCol * u, oy + footRow * u);
-    ctx.stroke();
-
-    // boot + dark sole at the foot (axis-aligned block keeps the chunky look)
-    fillSpritePx(ox, oy, u, footCol - 1.5, footRow - 0.8, 3, 1.6, FARMER_PAL.b);
-    fillSpritePx(ox, oy, u, footCol - 1.5, footRow + 0.8, 3, 0.6, FARMER_PAL.x);
-}
-
 // Classic 8-frame walk cycle (contact -> down -> passing -> up, then mirrored).
 // body = sprite-px of vertical offset (+ = sinks, - = rises). Two leg styles:
 // SPLAY for front/back views (feet part sideways, knees tuck on the pass) and
-// SCISSOR for side/diagonal views (one leg swings forward, the other trails —
-// what you actually see when someone walks past you).
+// SCISSOR for side/diagonal views (one leg swings forward, the other trails).
 const FARMER_SPLAY_FRAMES = [
     { l: { th: -0.50, lift: 0   }, r: { th: 0.50, lift: 0   }, body:  0.0 }, // CONTACT 1 (/\)
     { l: { th: -0.34, lift: 0   }, r: { th: 0.34, lift: 0   }, body:  0.7 }, // DOWN (compress)
@@ -557,7 +514,7 @@ const FARMER_SCISSOR_FRAMES = [
 ];
 const FARMER_REST = { l: { th: -0.10, lift: 0 }, r: { th: 0.10, lift: 0 }, body: 0 };
 
-// per-facing rig: which baked body, which leg style, where the hips sit
+// per-facing rig: which leg style, where the hips sit
 const FARMER_RIGS = {
     front:   { frames: FARMER_SPLAY_FRAMES,   hipL: 6.5, hipR: 9.5 },
     back:    { frames: FARMER_SPLAY_FRAMES,   hipL: 6.5, hipR: 9.5 },
@@ -566,17 +523,44 @@ const FARMER_RIGS = {
     back34:  { frames: FARMER_SCISSOR_FRAMES, hipL: 6.8, hipR: 9.2 },
 };
 
+// fill a sprite-space rect (cols/rows may be fractional) into screen space
+function fillSpritePx(ox, oy, u, col, row, w, h, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.round(ox + col * u), Math.round(oy + row * u),
+                 Math.ceil(w * u), Math.ceil(h * u));
+}
+
+// One leg = an overalls-blue limb pivoting at the hip. `th` is signed radians
+// from straight-down. `lift` bends the knee: shortens the leg, raising the boot.
+function drawFarmerLeg(ox, oy, u, hipCol, hipRow, th, lift) {
+    const len = CFG.legLen - lift;
+    const footCol = hipCol + len * Math.sin(th);
+    const footRow = hipRow + len * Math.cos(th);
+
+    ctx.strokeStyle = FARMER_PAL.o;
+    ctx.lineWidth = CFG.legThick * u;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    ctx.moveTo(ox + hipCol * u, oy + hipRow * u);
+    ctx.lineTo(ox + footCol * u, oy + footRow * u);
+    ctx.stroke();
+
+    // boot + dark sole (axis-aligned block keeps the chunky look)
+    fillSpritePx(ox, oy, u, footCol - 1.5, footRow - 0.8, 3, 1.6, FARMER_PAL.b);
+    fillSpritePx(ox, oy, u, footCol - 1.5, footRow + 0.8, 3, 0.6, FARMER_PAL.x);
+}
+
 function drawFarmer() {
     const u = FARMER_PX * zoom;
-    const cxs = (farmer.x - cam.x) * zoom; // screen centre x
-    const cys = (farmer.y - cam.y) * zoom; // screen centre y
+    const cxs = sx(farmer.x);
+    const cys = sy(farmer.y);
 
-    const rig = FARMER_RIGS[facing];
-    const body = FARMER_BODIES[facing];
+    const rig  = FARMER_RIGS[farmer.facing];
+    const body = FARMER_BODIES[farmer.facing];
 
     // current discrete frame (8 per cycle); walkAmt blends toward rest on stop
-    const f = rig.frames[Math.floor(walkPhase / (Math.PI / 4)) % 8];
-    const a = walkAmt, rest = FARMER_REST;
+    const f = rig.frames[Math.floor(farmer.walkPhase / (Math.PI / 4)) % 8];
+    const a = farmer.walkAmt, rest = FARMER_REST;
     const thL   = rest.l.th + (f.l.th - rest.l.th) * a;
     const thR   = rest.r.th + (f.r.th - rest.r.th) * a;
     const liftL = f.l.lift * a;
@@ -587,8 +571,7 @@ function drawFarmer() {
     const ox = cxs - (FARMER_W * u) / 2;
     const oy = baseOy + bodyY * u;           // down/up frames sink/raise the whole guy
 
-    // contact shadow: swells a touch when he's compressed, tightens at the top
-    // (drawn outside the mirror flip — it's symmetric anyway)
+    // contact shadow: swells when compressed, tightens at the top of the step
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
@@ -597,7 +580,7 @@ function drawFarmer() {
     ctx.restore();
 
     ctx.save();
-    if (facingMirror) { // left-facing = the right-facing art flipped about his centre
+    if (farmer.mirror) { // left-facing = right-facing art flipped about his centre
         ctx.translate(cxs, 0);
         ctx.scale(-1, 1);
         ctx.translate(-cxs, 0);
@@ -616,125 +599,136 @@ function drawFarmer() {
     ctx.restore();
 }
 
-// ---- Update ----
-function updateMovement(dt) {
-    // shared input -> direction vector (WASD or arrows)
-    let tx = 0, ty = 0;
-    if (keys.ArrowLeft || keys.KeyA) tx -= 1;
-    if (keys.ArrowRight || keys.KeyD) tx += 1;
-    if (keys.ArrowUp || keys.KeyW) ty -= 1;
-    if (keys.ArrowDown || keys.KeyS) ty += 1;
-    if (tx && ty) { tx *= 0.70710678; ty *= 0.70710678; } // no faster diagonally
 
-    if (farmerMode) updateFarmer(dt, tx, ty);
+// ================================ UPDATE ===================================
+function update(dt) {
+    // input -> direction vector (WASD or arrows), diagonal-normalised
+    let tx = 0, ty = 0;
+    if (keys.ArrowLeft  || keys.KeyA) tx -= 1;
+    if (keys.ArrowRight || keys.KeyD) tx += 1;
+    if (keys.ArrowUp    || keys.KeyW) ty -= 1;
+    if (keys.ArrowDown  || keys.KeyS) ty += 1;
+    if (tx && ty) { tx *= 0.70710678; ty *= 0.70710678; }
+
+    if (farmerMode) updateFarmerMove(dt, tx, ty);
     else            updateFreeCam(dt, tx, ty);
 
     updateWalkAnim(dt);
+
+    // mouse world position, once per frame, for anything that wants it
+    mouse.wx = wx(mouse.x);
+    mouse.wy = wy(mouse.y);
+
+    const held = inventory.hotBar[inventory.selected];
+    if (held) held.update();
 }
 
 // Free mode: the camera itself roams; the farmer stands still.
 function updateFreeCam(dt, tx, ty) {
-    const speed = MAX_SPEED * (shiftHeld ? SHIFT_BOOST : 1);
-    const t = Math.min(1, dt * EASE);
+    const speed = CFG.camSpeed * (shiftHeld ? CFG.camBoost : 1);
+    const t = Math.min(1, dt * CFG.camEase);
     cam.vx += (tx * speed - cam.vx) * t;
     cam.vy += (ty * speed - cam.vy) * t;
     cam.x += cam.vx * dt;
     cam.y += cam.vy * dt;
-    farmerVX = 0; farmerVY = 0;
+    farmer.vx = 0; farmer.vy = 0;
 }
 
 // Farmer mode: input walks the farmer; the camera eases to keep him centred
 // (that ease also produces the lerp-in when you first press Tab).
-function updateFarmer(dt, tx, ty) {
-    const speed = FARMER_SPEED * (shiftHeld ? FARMER_RUN : 1);
-    const t = Math.min(1, dt * EASE);
-    farmerVX += (tx * speed - farmerVX) * t;
-    farmerVY += (ty * speed - farmerVY) * t;
-    farmer.x += farmerVX * dt;
-    farmer.y += farmerVY * dt;
+function updateFarmerMove(dt, tx, ty) {
+    const speed = CFG.farmerSpeed * (shiftHeld ? CFG.farmerRun : 1);
+    const t = Math.min(1, dt * CFG.camEase);
+    farmer.vx += (tx * speed - farmer.vx) * t;
+    farmer.vy += (ty * speed - farmer.vy) * t;
+    farmer.x += farmer.vx * dt;
+    farmer.y += farmer.vy * dt;
 
-    const targetX = farmer.x - (canvas.width  / 2) / zoom;
-    const targetY = farmer.y - (canvas.height / 2) / zoom;
-    const f = Math.min(1, dt * CAM_FOLLOW);
-    cam.x += (targetX - cam.x) * f;
-    cam.y += (targetY - cam.y) * f;
+    const f = Math.min(1, dt * CFG.camFollow);
+    cam.x += (farmer.x - (canvas.width  / 2) / zoom - cam.x) * f;
+    cam.y += (farmer.y - (canvas.height / 2) / zoom - cam.y) * f;
     cam.vx = 0; cam.vy = 0; // don't carry free-cam drift into farmer mode
 }
 
-// Drives the leg cycle: cadence scales with actual speed, so Shift-running
-// speeds the legs up on its own. walkAmt fades the motion in/out smoothly.
+// Leg cycle cadence scales with actual speed (running speeds the legs), and
+// facing tracks the direction of travel — sticky when he stops.
 function updateWalkAnim(dt) {
-    const speed = Math.hypot(farmerVX, farmerVY);
+    const speed = Math.hypot(farmer.vx, farmer.vy);
     const moving = speed > 8;
-    if (moving) walkPhase += dt * speed * 0.05; // faster feet the faster he goes
-    const target = moving ? 1 : 0;
-    walkAmt += (target - walkAmt) * Math.min(1, dt * 12);
-    if (!moving && walkAmt < 0.02) { walkAmt = 0; walkPhase = 0; } // settle to neutral
+    if (moving) farmer.walkPhase += dt * speed * CFG.walkCadence;
+    farmer.walkAmt += ((moving ? 1 : 0) - farmer.walkAmt) * Math.min(1, dt * CFG.walkFade);
+    if (!moving && farmer.walkAmt < 0.02) { farmer.walkAmt = 0; farmer.walkPhase = 0; }
 
-    // face the direction of travel (8-way). Sticky: keeps the last facing
-    // when he stops, so he doesn't snap back to front.
     if (moving) {
-        const oct = Math.round(Math.atan2(farmerVY, farmerVX) / (Math.PI / 4)); // -4..4, 0 = east
+        const oct = Math.round(Math.atan2(farmer.vy, farmer.vx) / (Math.PI / 4)); // -4..4, 0 = east
         switch (oct) {
-            case  0: facing = 'side';    facingMirror = false; break; // right
-            case  1: facing = 'front34'; facingMirror = false; break; // down-right
-            case  2: facing = 'front';   facingMirror = false; break; // down
-            case  3: facing = 'front34'; facingMirror = true;  break; // down-left
+            case  0: farmer.facing = 'side';    farmer.mirror = false; break; // right
+            case  1: farmer.facing = 'front34'; farmer.mirror = false; break; // down-right
+            case  2: farmer.facing = 'front';   farmer.mirror = false; break; // down
+            case  3: farmer.facing = 'front34'; farmer.mirror = true;  break; // down-left
             case  4:
-            case -4: facing = 'side';    facingMirror = true;  break; // left
-            case -3: facing = 'back34';  facingMirror = true;  break; // up-left
-            case -2: facing = 'back';    facingMirror = false; break; // up
-            case -1: facing = 'back34';  facingMirror = false; break; // up-right
+            case -4: farmer.facing = 'side';    farmer.mirror = true;  break; // left
+            case -3: farmer.facing = 'back34';  farmer.mirror = true;  break; // up-left
+            case -2: farmer.facing = 'back';    farmer.mirror = false; break; // up
+            case -1: farmer.facing = 'back34';  farmer.mirror = false; break; // up-right
         }
     }
 }
 
-// ---- Render ----
-function draw() {
-    // world span visible on screen grows as we zoom out
-    const viewW = canvas.width / zoom;
-    const viewH = canvas.height / zoom;
-    const startCol = Math.floor(cam.x / TILE);
-    const startRow = Math.floor(cam.y / TILE);
-    const cols = Math.ceil(viewW / TILE) + 2;
-    const rows = Math.ceil(viewH / TILE) + 2;
-    const drawSize = Math.ceil(TILE * zoom) + 1; // +1 overlaps seams
 
-    for (let ry = 0; ry < rows; ry++) {
-        for (let cx = 0; cx < cols; cx++) {
-            const wc = startCol + cx;   // world cell col
-            const wr = startRow + ry;   // world cell row
-            const sx = Math.floor((wc * TILE - cam.x) * zoom);
-            const sy = Math.floor((wr * TILE - cam.y) * zoom);
+// ================================ RENDER ===================================
+let vignette = null; // cached — rebuilding a gradient every frame is wasted work
 
-            const v = (hash2(wc, wr) * VARIANTS) | 0;
-            ctx.drawImage(tiles[v], sx, sy, drawSize, drawSize);
-
-            // coarse damp patches spanning a few cells for large-scale variety
-            const m = hash2((wc >> 2) * 31 + 7, (wr >> 2) * 31 + 3);
-            if (m < 0.16) {
-                ctx.fillStyle = 'rgba(22,13,6,0.16)';
-                ctx.fillRect(sx, sy, drawSize, drawSize);
-            }
-        }
-    }
-
-    drawFarmer();
-
-    // gentle vignette for depth
-    const g = ctx.createRadialGradient(
+function buildVignette() {
+    vignette = document.createElement('canvas');
+    vignette.width  = canvas.width;
+    vignette.height = canvas.height;
+    const c = vignette.getContext('2d');
+    const g = c.createRadialGradient(
         canvas.width / 2, canvas.height / 2, canvas.height * 0.35,
         canvas.width / 2, canvas.height / 2, canvas.height * 0.8
     );
     g.addColorStop(0, 'rgba(0,0,0,0)');
     g.addColorStop(1, 'rgba(0,0,0,0.28)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    c.fillStyle = g;
+    c.fillRect(0, 0, canvas.width, canvas.height);
+}
 
-    // the selected hotbar item draws its world-space visual on top (e.g. the
-    // teleport reticle). update() already ran this frame, so its pos is current.
-    // Farmer mode hides item visuals entirely (hotbar icons still show).
-    const held = inventory.hotBar[inventory.selectedHotBar];
+function draw() {
+    const T = CFG.tile;
+    const startCol = Math.floor(cam.x / T);
+    const startRow = Math.floor(cam.y / T);
+    const cols = Math.ceil(canvas.width  / zoom / T) + 2;
+    const rows = Math.ceil(canvas.height / zoom / T) + 2;
+    const size = Math.ceil(T * zoom) + 1; // +1 overlaps seams
+
+    // ground
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const wc = startCol + c, wr = startRow + r;
+            const px = Math.floor(sx(wc * T));
+            const py = Math.floor(sy(wr * T));
+
+            ctx.drawImage(groundTiles[(hash2(wc, wr) * CFG.tileVariants) | 0], px, py, size, size);
+
+            // coarse damp patches spanning a few cells for large-scale variety
+            if (hash2((wc >> 2) * 31 + 7, (wr >> 2) * 31 + 3) < 0.16) {
+                ctx.fillStyle = 'rgba(22,13,6,0.16)';
+                ctx.fillRect(px, py, size, size);
+            }
+
+            // per-tile state (tilled/planted/... — future)
+            const tile = getTile(wc, wr);
+            if (tile) drawTileState(tile, px, py, size);
+        }
+    }
+
+    drawFarmer();
+
+    ctx.drawImage(vignette, 0, 0);
+
+    // selected item's world visual (hidden in Farmer mode; icons still show)
+    const held = inventory.hotBar[inventory.selected];
     if (held && !farmerMode) held.draw();
 
     coordsEl.textContent = `${Math.round(cam.x)}, ${Math.round(cam.y)}`;
@@ -743,11 +737,8 @@ function draw() {
     drawHotbar();
 }
 
-// ---- Hotbar (screen-space UI) ----
-const SLOT = 58;      // slot size in px
-const SLOT_GAP = 8;   // gap between slots
-const HOTBAR_PAD = 22;// distance from the bottom of the screen
 
+// ================================== UI =====================================
 function roundRectPath(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -759,28 +750,24 @@ function roundRectPath(x, y, w, h, r) {
 }
 
 function drawHotbar() {
-    const slots = inventory.hotBar.length;
-    const totalW = slots * SLOT + (slots - 1) * SLOT_GAP;
+    const S = CFG.slot, GAP = CFG.slotGap;
+    const n = inventory.hotBar.length;
+    const totalW = n * S + (n - 1) * GAP;
     const startX = (canvas.width - totalW) / 2;
-    const y = canvas.height - SLOT - HOTBAR_PAD;
+    const y = canvas.height - S - CFG.hotbarPad;
 
     ctx.save();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
 
-    for (let i = 0; i < slots; i++) {
-        const x = startX + i * (SLOT + SLOT_GAP);
-        const selected = i === inventory.selectedHotBar;
+    for (let i = 0; i < n; i++) {
+        const x = startX + i * (S + GAP);
+        const selected = i === inventory.selected;
+        const sy2 = y - (selected ? 6 : 0); // selected slot lifts slightly
 
-        // selected slot lifts slightly and glows
-        const lift = selected ? 6 : 0;
-        const sy = y - lift;
-
-        // slot body
-        roundRectPath(x, sy, SLOT, SLOT, 9);
-        ctx.fillStyle = selected
-            ? 'rgba(60, 44, 22, 0.92)'
-            : 'rgba(28, 20, 12, 0.72)';
+        // slot body (selected one glows)
+        roundRectPath(x, sy2, S, S, 9);
+        ctx.fillStyle = selected ? 'rgba(60, 44, 22, 0.92)' : 'rgba(28, 20, 12, 0.72)';
         if (selected) {
             ctx.shadowColor = 'rgba(255, 200, 90, 0.9)';
             ctx.shadowBlur = 22;
@@ -788,27 +775,44 @@ function drawHotbar() {
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // border — bright warm glow ring when selected
-        roundRectPath(x + 1, sy + 1, SLOT - 2, SLOT - 2, 8);
+        // border — bright warm ring when selected
+        roundRectPath(x + 1, sy2 + 1, S - 2, S - 2, 8);
         ctx.lineWidth = selected ? 2.5 : 1.5;
-        ctx.strokeStyle = selected
-            ? 'rgba(255, 216, 120, 0.95)'
-            : 'rgba(120, 96, 64, 0.6)';
+        ctx.strokeStyle = selected ? 'rgba(255, 216, 120, 0.95)' : 'rgba(120, 96, 64, 0.6)';
         ctx.stroke();
 
         // each item paints its own icon in the slot
         const item = inventory.hotBar[i];
-        if (item && item.drawIcon) {
-            item.drawIcon(x + SLOT / 2, sy + SLOT / 2, SLOT);
-        }
+        if (item) item.drawIcon(x + S / 2, sy2 + S / 2, S);
 
-        // slot number (1–9) in the top-left corner
+        // slot number (1-9)
         ctx.font = '11px "Consolas", monospace';
-        ctx.fillStyle = selected
-            ? 'rgba(255, 230, 170, 0.95)'
-            : 'rgba(200, 180, 150, 0.5)';
-        ctx.fillText(String(i + 1), x + 5, sy + 4);
+        ctx.fillStyle = selected ? 'rgba(255, 230, 170, 0.95)' : 'rgba(200, 180, 150, 0.5)';
+        ctx.fillText(String(i + 1), x + 5, sy2 + 4);
     }
 
     ctx.restore();
 }
+
+
+// ================================= BOOT ====================================
+resize();
+buildGroundTiles();
+setMode(false);
+
+// start with the farmer centred on screen
+cam.x = farmer.x - canvas.width / 2;
+cam.y = farmer.y - canvas.height / 2;
+
+let then = performance.now();
+function gameLoop(now) {
+    let dt = (now - then) / 1000;
+    then = now;
+    if (dt > 0.05) dt = 0.05; // clamp after tab-outs
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
