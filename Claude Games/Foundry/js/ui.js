@@ -542,9 +542,14 @@ function showBuildTip(ev, key){
   tt.classList.remove('hidden');
   positionTip(ev.clientX, ev.clientY);
 }
+const iconImgCache = {};
 function iconImg(item, size){
-  const cv = R.itemIcon(item, size * 2);
-  return `<img src="${cv.toDataURL()}" width="${size}" height="${size}" style="vertical-align:-2px">`;
+  const key = item + '_' + size;
+  if (!iconImgCache[key]){
+    const cv = R.itemIcon(item, size * 2);
+    iconImgCache[key] = `<img src="${cv.toDataURL()}" width="${size}" height="${size}" style="vertical-align:-2px">`;
+  }
+  return iconImgCache[key];
 }
 function positionTip(px, py){
   const tt = $('tooltip');
@@ -562,6 +567,8 @@ function hideTip(){ $('tooltip').classList.add('hidden'); }
 /* ==================================================================== */
 function select(e){
   UI.selection = e;
+  UI.selSig = null;          // force a fresh structural build
+  UI._bufsCache = null;
   const p = $('selPanel');
   if (!e){ p.classList.add('hidden'); return; }
   p.classList.remove('hidden');
@@ -569,13 +576,86 @@ function select(e){
   A.sfx.click();
 }
 
-function refreshSelPanel(){
+/* The panel is split in two layers so hover states survive live updates:
+   - buildSelPanel(): full innerHTML render — ONLY when the structure changes
+     (new selection, recipe change, tunnel links, tier unlocks)
+   - updateSelPanel(): 4×/s — pokes numbers/bars into the existing DOM       */
+function refreshSelPanel(force){
   const e = UI.selection;
   if (!e) return;
   const S = UI.S;
   if (S.ents.indexOf(e) < 0){ select(null); return; }
+  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex].join('|');
+  if (force || UI.selSig !== sig){
+    UI.selSig = sig;
+    buildSelPanel(e);
+  }
+  updateSelPanel(e);
+}
+
+/* every value that changes while the panel is open, keyed for in-place updates */
+function dynVals(e){
+  const S = UI.S;
+  const def = F.BUILDINGS[e.key];
+  const d = {};
+  switch (e.kind){
+    case 'miner':
+      d.rate = rateStr(e);
+      break;
+    case 'machine':
+      d.rate = rateStr(e);
+      if (def.fam === 'refinery') d.tank = `${e.tank.toFixed(0)} / ${def.tank}`;
+      break;
+    case 'gen': case 'turbine':
+      d.out = `${Math.round(def.out * F.powerMul(S))} P`;
+      d.load = `${Math.round((e.load || 0) * 100)}%`;
+      break;
+    case 'solar':
+      d.out = `${Math.round(def.out * F.powerMul(S))} P`;
+      break;
+    case 'belt':
+      d.speed = `${(def.speed * F.beltMul(S)).toFixed(2)} tiles/s`;
+      break;
+    case 'ubelt':
+      d.link = e.linkId ? (e.isExit ? 'exit ✓' : 'entrance ✓') : '<span style="color:var(--accent)">unlinked</span>';
+      break;
+    case 'chest':
+      d.stored = `${e.total} / ${F.CHEST_CAP + F.upRank(S, 'capacitors') * 20}`;
+      break;
+    case 'pump':
+      d.tank = `${e.tank.toFixed(1)} / 30`;
+      break;
+    case 'pipe':
+      d.fluid = `${e.fluid.toFixed(1)} / ${def.cap}`;
+      break;
+    case 'pole': {
+      d.links = String(e.links ? e.links.length : 0);
+      if (e.netId){
+        const sup = (S._netSupply && S._netSupply[e.netId]) || 0;
+        const dm = (S._netDemand && S._netDemand[e.netId]) || 0;
+        d.net = '#' + e.netId;
+        d.netpow = `${Math.round(dm)} / ${Math.round(sup)} P`;
+      } else {
+        d.net = '<span style="color:var(--bad)">isolated</span>';
+        d.netpow = '—';
+      }
+      break;
+    }
+  }
+  return d;
+}
+
+function bufsFor(e){
+  if (e.kind === 'machine') return buffers(e);
+  if (e.kind === 'chest') return bufList(e.store);
+  return '';
+}
+
+function buildSelPanel(e){
+  const S = UI.S;
   const def = F.BUILDINGS[e.key];
   const p = $('selPanel');
+  const dv = dynVals(e);
   let html = '';
   html += `<div class="selHead"><canvas data-icon="${e.key}" width="44" height="44"></canvas>
     <div><div class="selTitle">${def.name}</div><div class="selSub">${kindLabel(def)}</div></div></div>`;
@@ -585,48 +665,40 @@ function refreshSelPanel(){
     const t = S.oreType[i];
     const ore = t ? F.ORES[t] : null;
     html += row('Deposit', ore ? `${ore.name} · endless vein` : '—');
-    html += row('Rate', rateStr(e));
+    html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
   }
   if (e.kind === 'machine'){
     html += recipeSection(S, e, def);
-    html += buffers(e);
-    if (def.fam === 'refinery') html += row('Crude tank', `${e.tank.toFixed(0)} / ${def.tank}`);
-    html += row('Rate', rateStr(e));
+    html += `<div data-bufs>${bufsFor(e)}</div>`;
+    if (def.fam === 'refinery') html += row('Crude tank', dv.tank, 'tank');
+    html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
-    if (e.crafting) html += `<div class="progOuter"><div class="progFill" style="width:${(e.prog * 100).toFixed(0)}%"></div></div>`;
+    html += `<div class="progOuter" data-prog-wrap style="display:none"><div class="progFill" data-prog style="width:0%"></div></div>`;
   }
   if (e.kind === 'gen' || e.kind === 'turbine'){
-    html += row('Output', `${Math.round(F.BUILDINGS[e.key].out * F.powerMul(S))} P`);
-    html += row('Load', `${Math.round((e.load || 0) * 100)}%`);
+    html += row('Output', dv.out, 'out');
+    html += row('Load', dv.load, 'load');
   }
-  if (e.kind === 'solar') html += row('Output', `${Math.round(def.out * F.powerMul(S))} P`);
-  if (e.kind === 'belt') html += row('Speed', `${(def.speed * F.beltMul(S)).toFixed(2)} tiles/s`);
+  if (e.kind === 'solar') html += row('Output', dv.out, 'out');
+  if (e.kind === 'belt') html += row('Speed', dv.speed, 'speed');
   if (e.kind === 'ubelt'){
-    html += row('Linked', e.linkId ? (e.isExit ? 'exit ✓' : 'entrance ✓') : '<span style="color:var(--accent)">unlinked</span>');
+    html += row('Linked', dv.link, 'link');
     if (!e.linkId) html += `<div class="ghostNote">Place a matching tunnel within ${def.span} tiles, in the same direction, to link.</div>`;
   }
   if (e.kind === 'chest'){
-    const cap = F.CHEST_CAP + F.upRank(S, 'capacitors') * 20;
-    html += row('Stored', `${e.total} / ${cap}`);
-    html += bufList(e.store);
+    html += row('Stored', dv.stored, 'stored');
+    html += `<div data-bufs>${bufsFor(e)}</div>`;
   }
   if (e.kind === 'pump'){
-    html += row('Tank', `${e.tank.toFixed(1)} / 30`);
+    html += row('Tank', dv.tank, 'tank');
     html += row('Power draw', def.power + ' P');
   }
-  if (e.kind === 'pipe') html += row('Crude', `${e.fluid.toFixed(1)} / ${def.cap}`);
+  if (e.kind === 'pipe') html += row('Crude', dv.fluid, 'fluid');
   if (e.kind === 'pole'){
-    const S2 = UI.S;
-    html += row('Linked poles', e.links ? e.links.length : 0);
-    if (e.netId){
-      const sup = (S2._netSupply && S2._netSupply[e.netId]) || 0;
-      const dm = (S2._netDemand && S2._netDemand[e.netId]) || 0;
-      html += row('Network', '#' + e.netId);
-      html += row('Net power', `${Math.round(dm)} / ${Math.round(sup)} P`);
-    } else {
-      html += row('Network', '<span style="color:var(--bad)">isolated</span>');
-    }
+    html += row('Linked poles', dv.links, 'links');
+    html += row('Network', dv.net, 'net');
+    html += row('Net power', dv.netpow, 'netpow');
     html += `<div class="ghostNote">Powers everything in the ${def.cover * 2 + 1}×${def.cover * 2 + 1} area around it; links to poles within ${def.reach} tiles.</div>`;
   }
 
@@ -634,20 +706,19 @@ function refreshSelPanel(){
   if (def.fuel || e.kind === 'gen' || e.kind === 'turbine'){
     const isT = e.kind === 'turbine';
     const item = isT ? 'fuelCell' : 'coal';
-    const frac = clamp(e.fuelT / (isT ? def.burn : F.COAL_BURN), 0, 1);
     html += `<div class="selDivider"></div><div class="selSection">Fuel — ${isT ? 'fuel cells' : 'coal'}</div>
       <div class="bufRow">${iconImg(item, 16)}
-        <div class="fuelBarOuter"><div class="fuelBarFill" style="width:${frac * 100}%"></div></div></div>
+        <div class="fuelBarOuter"><div class="fuelBarFill" data-fbar style="width:0%"></div></div></div>
       <div class="slotRow">
         <div class="slotBox" data-side="machine">
           ${iconImg(item, 22)}
-          <span class="slotN">${e.fuelBuf} / ${F.FUEL_CAP}</span>
+          <span class="slotN" data-sn="machine">${e.fuelBuf} / ${F.FUEL_CAP}</span>
           <span class="slotLbl">in machine</span>
         </div>
         <div class="slotArrows">⇄</div>
         <div class="slotBox" data-side="inv">
           ${iconImg(item, 22)}
-          <span class="slotN">${F.fmt(F.invCount(S, item))}</span>
+          <span class="slotN" data-sn="inv">${F.fmt(F.invCount(S, item))}</span>
           <span class="slotLbl">your pocket</span>
         </div>
       </div>
@@ -656,8 +727,9 @@ function refreshSelPanel(){
 
   html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
   p.innerHTML = html;
+  UI._bufsCache = bufsFor(e);
 
-  // wire dynamic bits
+  // wire interactive bits (these elements now live until the structure changes)
   const ic = p.querySelector('canvas[data-icon]');
   if (ic){
     const src = R.makeBuildingIcon(e.key, 44);
@@ -668,7 +740,7 @@ function refreshSelPanel(){
       e.recipe = b.dataset.recipe === '_' ? null : b.dataset.recipe;
       e.crafting = false; e.prog = 0;
       A.sfx.click();
-      refreshSelPanel();
+      refreshSelPanel(true);
     });
   });
   p.querySelectorAll('.slotBox').forEach(box => {
@@ -686,12 +758,51 @@ function refreshSelPanel(){
   });
 }
 
+function updateSelPanel(e){
+  const S = UI.S;
+  const def = F.BUILDINGS[e.key];
+  const p = $('selPanel');
+  const dv = dynVals(e);
+  p.querySelectorAll('[data-dyn]').forEach(el2 => {
+    const v = dv[el2.dataset.dyn];
+    if (v != null && el2.innerHTML !== v) el2.innerHTML = v;
+  });
+  // buffer lists (no interactive children → safe to swap when contents change)
+  const bufs = p.querySelector('[data-bufs]');
+  if (bufs){
+    const h = bufsFor(e);
+    if (UI._bufsCache !== h){ UI._bufsCache = h; bufs.innerHTML = h; }
+  }
+  // craft progress
+  const pw = p.querySelector('[data-prog-wrap]');
+  if (pw){
+    pw.style.display = e.crafting ? '' : 'none';
+    if (e.crafting){
+      const pf = pw.querySelector('[data-prog]');
+      if (pf) pf.style.width = (clamp(e.prog, 0, 1) * 100).toFixed(0) + '%';
+    }
+  }
+  // fuel bar + slot counts
+  const fb = p.querySelector('[data-fbar]');
+  if (fb){
+    const isT = e.kind === 'turbine';
+    fb.style.width = (clamp(e.fuelT / (isT ? def.burn : F.COAL_BURN), 0, 1) * 100).toFixed(1) + '%';
+    const item = isT ? 'fuelCell' : 'coal';
+    const snM = p.querySelector('[data-sn="machine"]');
+    const tM = `${e.fuelBuf} / ${F.FUEL_CAP}`;
+    if (snM && snM.textContent !== tM) snM.textContent = tM;
+    const snI = p.querySelector('[data-sn="inv"]');
+    const tI = F.fmt(F.invCount(S, item));
+    if (snI && snI.textContent !== tI) snI.textContent = tI;
+  }
+}
+
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
     miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery'}[def.fam] || 'machine',
     gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction' }[def.kind] || def.kind;
 }
-function row(k, v){ return `<div class="selRow"><span>${k}</span><b>${v}</b></div>`; }
+function row(k, v, dyn){ return `<div class="selRow"><span>${k}</span><b${dyn ? ` data-dyn="${dyn}"` : ''}>${v}</b></div>`; }
 function rateStr(e){
   return e.ema > 0.001 ? (e.ema * 60).toFixed(1) + ' /min' : '—';
 }
@@ -751,7 +862,8 @@ function refreshObjective(){
   if (!ms){
     $('objTier').textContent = '✦';
     $('objName').textContent = 'The Engine turns';
-    $('objBody').innerHTML = '<div class="objFlavor">Freeplay — the world is yours to pave.</div>';
+    const h = '<div class="objFlavor">Freeplay — the world is yours to pave.</div>';
+    if (UI._objCache !== h){ UI._objCache = h; $('objBody').innerHTML = h; }
     return;
   }
   $('objTier').textContent = 'T' + S.msIndex;
@@ -781,7 +893,7 @@ function refreshObjective(){
   if (grants.length){
     html += `<div class="objReward">reward: ${grants.map(([k, n]) => `${n} ${iconImg(k, 13)}`).join(' ')}</div>`;
   }
-  $('objBody').innerHTML = html;
+  if (UI._objCache !== html){ UI._objCache = html; $('objBody').innerHTML = html; }
 }
 
 /* ==================================================================== */
@@ -847,10 +959,22 @@ function renderBig(){
   switch (UI.bigTab){
     case 'inventory': {
       const keys = F.ITEM_ORDER.filter(k => (S.inv[k] || 0) > 0);
-      if (!keys.length){ body.innerHTML = '<div class="ghostNote">Nothing yet — mine some ore.</div>'; break; }
-      body.innerHTML = '<div class="invGrid">' + keys.map(k =>
-        `<div class="invCell"><img src="${R.itemIcon(k, 52).toDataURL()}" width="26" height="26">
-         <span class="cnt">${F.fmt(S.inv[k])}</span><span class="nm">${F.ITEMS[k].name}</span></div>`).join('') + '</div>';
+      if (!keys.length){ body.innerHTML = '<div class="ghostNote">Nothing yet — mine some ore.</div>'; UI._invSig = ''; break; }
+      const sig = keys.join(',');
+      if (UI._invSig !== sig || !body.querySelector('.invGrid')){
+        // item set changed → rebuild the grid
+        UI._invSig = sig;
+        body.innerHTML = '<div class="invGrid">' + keys.map(k =>
+          `<div class="invCell" data-item="${k}"><img src="${R.itemIcon(k, 52).toDataURL()}" width="26" height="26">
+           <span class="cnt">${F.fmt(S.inv[k])}</span><span class="nm">${F.ITEMS[k].name}</span></div>`).join('') + '</div>';
+      } else {
+        // same items → update counts in place (keeps hover states alive)
+        body.querySelectorAll('.invCell').forEach(c => {
+          const t = F.fmt(S.inv[c.dataset.item] || 0);
+          const el2 = c.querySelector('.cnt');
+          if (el2 && el2.textContent !== t) el2.textContent = t;
+        });
+      }
       break;
     }
     case 'milestones': {
