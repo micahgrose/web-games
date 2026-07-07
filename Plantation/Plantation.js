@@ -353,9 +353,9 @@ Hoe.prototype.draw = function () {
     // faint reach line from the farmer's hands to the aimed tile, so the
     // fixed-distance / mouse-aim relationship is legible
     ctx.save();
-    ctx.strokeStyle = 'rgba(255, 220, 150, 0.28)';
-    ctx.lineWidth = Math.max(1, 1.5 * zoom);
-    ctx.setLineDash([4 * zoom, 4 * zoom]);
+    ctx.strokeStyle = 'rgba(255, 220, 150, 0.5)';
+    ctx.lineWidth = Math.max(1.5, 2 * zoom);
+    ctx.setLineDash([5 * zoom, 5 * zoom]);
     ctx.beginPath();
     ctx.moveTo(sx(farmer.x), sy(farmer.y));
     ctx.lineTo(sx(this.wx), sy(this.wy));
@@ -390,34 +390,52 @@ Hoe.prototype.draw = function () {
 };
 
 // ---- Hoe: pixel hoe icon (hotbar slot) ----
+// Baked pixel map, same style as the farmer: a long diagonal handle coming
+// down into a wide flat steel blade biting the ground (bottom-left).
+const HOE_ICON = (() => {
+    const map = [
+        '............Ww',
+        '...........Ww.',
+        '..........Ww..',
+        '.........Ww...',
+        '........Ww....',
+        '.......Ww.....',
+        '..xxxxWw......',
+        '.xmmmmx.......',
+        '.xMMmmmx......',
+        '..xxxxx.......',
+    ];
+    const pal = {
+        x: '#241a12', // outline
+        m: '#9aa7b0', // steel
+        M: '#cfd8dd', // steel highlight (worn edge)
+        w: '#7a4e26', // wood
+        W: '#a9713a', // wood highlight
+    };
+    const W = 14, H = map.length;
+    const off = document.createElement('canvas');
+    off.width = W;
+    off.height = H;
+    const c = off.getContext('2d');
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const col = pal[map[y][x]];
+            if (!col) continue;
+            c.fillStyle = col;
+            c.fillRect(x, y, 1, 1);
+        }
+    }
+    return off;
+})();
+
 Hoe.prototype.drawIcon = function (cx, cy, size) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(-Math.PI / 5);   // lean the handle like it's ready to swing
-
-    // wooden handle
-    ctx.strokeStyle = '#8a5a2e';
-    ctx.lineWidth = 3.5;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-size * 0.22, size * 0.26);
-    ctx.lineTo(size * 0.14, -size * 0.22);
-    ctx.stroke();
-
-    // steel blade hanging off the top end
-    ctx.fillStyle = '#b9c2c9';
-    ctx.strokeStyle = '#6f7a82';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(size * 0.10, -size * 0.26);
-    ctx.lineTo(size * 0.30, -size * 0.16);
-    ctx.lineTo(size * 0.24, size * 0.02);
-    ctx.lineTo(size * 0.13, -size * 0.06);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.restore();
+    const scale = (size * 0.78) / 14;
+    const w = HOE_ICON.width * scale, h = HOE_ICON.height * scale;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(HOE_ICON, Math.round(cx - w / 2), Math.round(cy - h / 2),
+                  Math.round(w), Math.round(h));
+    ctx.imageSmoothingEnabled = prev;
 };
 
 
@@ -491,34 +509,53 @@ function buildTilledTiles() {
             return s / 4294967296;
         };
 
-        // turned earth base — darker and richer than untouched ground
-        const tint = 0.92 + rnd() * 0.16;
-        c.fillStyle = `rgb(${Math.floor(74 * tint)},${Math.floor(48 * tint)},${Math.floor(30 * tint)})`;
+        // turned earth base — a shade darker/richer than the untouched ground,
+        // but nowhere near plank-dark
+        const tint = 0.94 + rnd() * 0.12;
+        c.fillStyle = `rgb(${Math.floor(88 * tint)},${Math.floor(60 * tint)},${Math.floor(38 * tint)})`;
         c.fillRect(0, 0, T, T);
 
-        // four furrows: dark trench with a lit ridge line above each
-        for (let f = 0; f < 4; f++) {
-            const y = 4 + f * 16 + rnd() * 2;
-            c.fillStyle = `rgba(26,15,8,${0.42 + rnd() * 0.12})`;   // trench
-            c.fillRect(0, y + 3, T, 7);
-            c.fillStyle = `rgba(158,116,74,${0.30 + rnd() * 0.12})`; // sunlit ridge
-            c.fillRect(0, y, T, 2.5);
-        }
-
-        // crumbs of turned soil
-        for (let k = 0; k < 26; k++) {
-            c.fillStyle = rnd() < 0.5
-                ? `rgba(20,11,6,${0.25 + rnd() * 0.25})`
-                : `rgba(150,110,70,${0.15 + rnd() * 0.2})`;
+        // soft mottling so the base isn't a flat paint fill
+        for (let k = 0; k < 6; k++) {
+            const a = 0.04 + rnd() * 0.05;
+            c.fillStyle = rnd() < 0.5 ? `rgba(40,24,12,${a})` : `rgba(160,124,84,${a})`;
             c.beginPath();
-            c.arc(rnd() * T, rnd() * T, 0.5 + rnd() * 1.4, 0, Math.PI * 2);
+            c.arc(rnd() * T, rnd() * T, 5 + rnd() * 11, 0, Math.PI * 2);
             c.fill();
         }
 
-        // soft darkened edge so a lone tilled plot reads as a dug patch
-        c.strokeStyle = 'rgba(20,12,6,0.35)';
-        c.lineWidth = 2;
-        c.strokeRect(1, 1, T - 2, T - 2);
+        // three furrows, drawn as broken wobbly groove segments inset from the
+        // tile edges — no edge-to-edge rails, so a row of tilled tiles reads as
+        // dug soil rather than decking
+        for (let f = 0; f < 3; f++) {
+            const cy = 11 + f * 21 + rnd() * 3;
+            let x = 3 + rnd() * 4;
+            while (x < T - 8) {
+                const seg = 9 + rnd() * 13;             // groove piece
+                const y = cy + (rnd() - 0.5) * 3;        // slight wobble
+                c.fillStyle = `rgba(34,19,10,${0.26 + rnd() * 0.14})`; // shadowed groove
+                c.fillRect(x, y, Math.min(seg, T - 5 - x), 4.5);
+                c.fillStyle = `rgba(176,134,90,${0.16 + rnd() * 0.12})`; // lit crumb ridge
+                c.fillRect(x + 1, y - 2, Math.min(seg - 2, T - 7 - x), 1.8);
+                x += seg + 2 + rnd() * 4;                // small gap breaks the line
+            }
+        }
+
+        // clods and crumbs of freshly turned soil
+        for (let k = 0; k < 9; k++) {
+            c.fillStyle = `rgba(30,17,9,${0.10 + rnd() * 0.12})`;
+            c.beginPath();
+            c.arc(rnd() * T, rnd() * T, 1.6 + rnd() * 2.2, 0, Math.PI * 2);
+            c.fill();
+        }
+        for (let k = 0; k < 16; k++) {
+            c.fillStyle = rnd() < 0.5
+                ? `rgba(24,13,7,${0.2 + rnd() * 0.2})`
+                : `rgba(168,128,86,${0.14 + rnd() * 0.16})`;
+            c.beginPath();
+            c.arc(rnd() * T, rnd() * T, 0.5 + rnd() * 1.1, 0, Math.PI * 2);
+            c.fill();
+        }
 
         tilledTiles.push(off);
     }
