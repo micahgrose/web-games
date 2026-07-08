@@ -459,7 +459,7 @@ function captureBlueprint(b){
   const list = entsInBox(b);
   if (!list.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
   const parts = list.map(e => ({ key: e.key, dx: e.x - b.x0, dy: e.y - b.y0, dir: e.dir,
-    recipe: e.recipe || null }));
+    recipe: e.recipe || null, filterItem: e.filterItem || null, prioOut: e.prioOut || null }));
   UI.blueprint = { w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1, parts };
   UI.bpDir = 0;
   setMode('stamp');
@@ -482,7 +482,8 @@ function bpParts(anchorX, anchorY){
   const rot = UI.bpDir;
   return bp.parts.map(p => {
     const [ox, oy] = bpTransform(p.dx, p.dy, bp.w, bp.h, rot);
-    return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3, recipe: p.recipe };
+    return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3,
+             recipe: p.recipe, filterItem: p.filterItem, prioOut: p.prioOut };
   });
 }
 
@@ -496,7 +497,12 @@ function stampBlueprint(t){
     const chk = F.canPlace(S, p.key, p.x, p.y, p.dir);
     if (!chk.ok){ if (chk.why === 'cost') poor++; else skip++; continue; }
     const e = F.place(S, p.key, p.x, p.y, p.dir, false);
-    if (e){ placed++; if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe; }
+    if (e){
+      placed++;
+      if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe;
+      if (p.filterItem) e.filterItem = p.filterItem;
+      if (p.prioOut) e.prioOut = p.prioOut;
+    }
     else poor++;
   }
   if (placed) A.sfx.place(); else A.sfx.error();
@@ -763,7 +769,7 @@ function refreshSelPanel(force){
   if (!e) return;
   const S = UI.S;
   if (S.ents.indexOf(e) < 0){ select(null); return; }
-  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex].join('|');
+  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex, e.filterItem || '', e.prioOut || ''].join('|');
   if (force || UI.selSig !== sig){
     UI.selSig = sig;
     buildSelPanel(e);
@@ -860,6 +866,24 @@ function buildSelPanel(e){
   }
   if (e.kind === 'solar') html += row('Output', dv.out, 'out');
   if (e.kind === 'belt') html += row('Speed', dv.speed, 'speed');
+  if (e.kind === 'splitter'){
+    // filter: matched items always exit LEFT; everything else shares the rest
+    const seen = F.ITEM_ORDER.filter(k =>
+      F.oreTypeByItem[k] || S.inv[k] || S.delivered[k] || S.stats.made[k]);
+    html += `<div class="selSection">Filter → left exit</div><div class="recipeGrid">`;
+    html += `<button class="recipeBtn${!e.filterItem ? ' on' : ''}" data-filter="_" title="No filter">✕</button>`;
+    for (const k of seen)
+      html += `<button class="recipeBtn${e.filterItem === k ? ' on' : ''}" data-filter="${k}" title="${F.ITEMS[k].name}">${iconImg(k, 22)}</button>`;
+    html += `</div>`;
+    html += `<div class="selSection">Priority exit</div><div class="recipeGrid">`;
+    for (const [val, lbl] of [['_', 'None'], ['left', '◀'], ['front', '▲'], ['right', '▶']])
+      html += `<button class="recipeBtn prioBtn${(e.prioOut || '_') === val ? ' on' : ''}" data-prio="${val}" title="${val === '_' ? 'Even split' : 'Prefer ' + val + ' exit'}">${lbl}</button>`;
+    html += `</div>`;
+    if (e.filterItem)
+      html += `<div class="ghostNote">${F.ITEMS[e.filterItem].name} always exits left; other items use front/right.</div>`;
+    else
+      html += `<div class="ghostNote">Exits are relative to the arrow: ◀ left · ▲ front · ▶ right.</div>`;
+  }
   if (e.kind === 'ubelt'){
     html += row('Linked', dv.link, 'link');
     if (!e.linkId) html += `<div class="ghostNote">Place a matching tunnel within ${def.span} tiles, in the same direction, to link.</div>`;
@@ -917,6 +941,20 @@ function buildSelPanel(e){
     b.addEventListener('click', () => {
       e.recipe = b.dataset.recipe === '_' ? null : b.dataset.recipe;
       e.crafting = false; e.prog = 0;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-filter]').forEach(b => {
+    b.addEventListener('click', () => {
+      e.filterItem = b.dataset.filter === '_' ? null : b.dataset.filter;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-prio]').forEach(b => {
+    b.addEventListener('click', () => {
+      e.prioOut = b.dataset.prio === '_' ? null : b.dataset.prio;
       A.sfx.click();
       refreshSelPanel(true);
     });
@@ -1403,7 +1441,9 @@ function renderHowTo(){
   <p class="howP"><b>Drag</b> to lay a belt line — it follows your pointer and turns corners automatically.
   ${kb('R')} rotates before placing. Belts push items into whatever they point at: a machine, the Core,
   or another belt (side entries merge; head-on is refused). The <b>splitter</b> deals items evenly to
-  every open exit — ideal for feeding rows of machines. <b>Tunnels</b> dive under up to 4 tiles
+  every open exit — and click one to configure it: set a <b>filter</b> (that item always exits left —
+  perfect for pulling coal out of a mixed line) and a <b>priority exit</b> that fills first with
+  overflow spilling to the others. <b>Tunnels</b> dive under up to 4 tiles
   (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
   buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
   Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.</p>

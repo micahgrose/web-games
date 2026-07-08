@@ -583,11 +583,15 @@ function drawSplitter(x, e, s, time, S){
   x.fillStyle = '#242b37';
   rrect(x, -s * .3, -s * .3, s * .6, s * .6, s * .08);
   x.fill();
-  // three-way fan arrows
-  x.strokeStyle = 'rgba(255,214,138,.65)';
+  // three-way fan arrows (0=front, -90°=left, +90°=right in local space)
+  const prioA = e.prioOut === 'front' ? 0 : e.prioOut === 'left' ? -Math.PI / 2 : e.prioOut === 'right' ? Math.PI / 2 : null;
   x.lineWidth = Math.max(1, s * .05);
   x.lineCap = 'round';
   for (const a of [0, -Math.PI / 2, Math.PI / 2]){
+    const isFilterLane = e.filterItem && a === -Math.PI / 2;
+    x.strokeStyle = isFilterLane ? 'rgba(120,220,255,.9)'
+      : a === prioA ? 'rgba(255,214,138,1)'
+      : 'rgba(255,214,138,.55)';
     x.save(); x.rotate(a);
     x.beginPath();
     x.moveTo(0, 0); x.lineTo(s * .22, 0);
@@ -596,6 +600,13 @@ function drawSplitter(x, e, s, time, S){
     x.restore();
   }
   x.restore();
+  // filter item badge, drawn upright over the left lane
+  if (e.filterItem){
+    const LEFT = (e.dir + 3) & 3;
+    const bx = c + DX[LEFT] * s * .3, by = c + DY[LEFT] * s * .3;
+    const ic = R.itemIcon(e.filterItem, Math.max(8, Math.round(s * .4)));
+    x.drawImage(ic, bx - ic.width / 2, by - ic.height / 2);
+  }
 }
 
 /* ---- chest ---- */

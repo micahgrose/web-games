@@ -197,7 +197,8 @@ function initEnt(S, e, def){
   switch (def.kind){
     case 'belt':     e.item = null; e.t = 0; e.srcDir = e.dir; break;
     case 'ubelt':    e.item = null; e.t = 0; e.srcDir = e.dir; e.linkId = 0; e.isExit = false; e.transit = []; break;
-    case 'splitter': e.item = null; e.t = 0; e.srcDir = e.dir; e.outIdx = 0; break;
+    case 'splitter': e.item = null; e.t = 0; e.srcDir = e.dir; e.outIdx = 0;
+                     e.filterItem = null; e.prioOut = null; break;
     case 'chest':    e.store = {}; e.total = 0; break;
     case 'pipe':     e.fluid = 0; break;
     case 'miner':    e.prog = 0; e.outBuf = {}; e.outTotal = 0; e.fuelT = 0; e.fuelBuf = 0; e.ema = 0; e.lastOut = -1; break;
@@ -755,14 +756,29 @@ function tickSplitter(S, e, dt){
   if (!e.item) return;
   e.t += beltSpeed(S, e) * dt;
   if (e.t >= 1){
-    // try up to 3 exits (front, left, right of dir) round-robin
-    const dirs = [e.dir, (e.dir + 3) & 3, (e.dir + 1) & 3];
-    for (let n = 0; n < 3; n++){
-      const d = dirs[(e.outIdx + n) % 3];
+    const FRONT = e.dir, LEFT = (e.dir + 3) & 3, RIGHT = (e.dir + 1) & 3;
+    const tryOut = (d) => {
       const tgt = F.entAt(S, e.x + DX[d], e.y + DY[d]);
-      if (tgt && F.tryInsert(S, tgt, e.item, d, 0)){
-        e.item = null; e.t = 0;
-        e.outIdx = (e.outIdx + n + 1) % 3;
+      if (tgt && F.tryInsert(S, tgt, e.item, d, 0)){ e.item = null; e.t = 0; return true; }
+      return false;
+    };
+    // filtered items go strictly LEFT; they wait if that lane is blocked
+    if (e.filterItem && e.item === e.filterItem){
+      if (!tryOut(LEFT)) e.t = 1;
+      return;
+    }
+    // everything else: optional priority side first, then round-robin the rest
+    let dirs = [FRONT, LEFT, RIGHT];
+    if (e.filterItem) dirs = [FRONT, RIGHT];          // left lane is reserved for the filter
+    const prioDir = e.prioOut ? { front: FRONT, left: LEFT, right: RIGHT }[e.prioOut] : null;
+    if (prioDir != null && dirs.includes(prioDir)){
+      if (tryOut(prioDir)) return;
+      dirs = dirs.filter(d => d !== prioDir);         // overflow to the others
+    }
+    for (let n = 0; n < dirs.length; n++){
+      const d = dirs[(e.outIdx + n) % dirs.length];
+      if (tryOut(d)){
+        e.outIdx = (e.outIdx + n + 1) % dirs.length;
         return;
       }
     }
@@ -910,6 +926,8 @@ F.serialize = function(S){
     if (e.isExit) o.ex = 1;
     if (e.prog && !o.pg) o.p2 = e.prog;
     if (e.outIdx) o.oi = e.outIdx;
+    if (e.filterItem) o.fi = e.filterItem;
+    if (e.prioOut) o.po = e.prioOut;
     ents.push(o);
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
@@ -957,6 +975,8 @@ F.deserialize = function(data){
     if (o.ex) e.isExit = true;
     if (o.p2) e.prog = o.p2;
     if (o.oi) e.outIdx = o.oi;
+    if (o.fi) e.filterItem = o.fi;
+    if (o.po) e.prioOut = o.po;
     S.ents.push(e);
     stamp(S, e);
   }
