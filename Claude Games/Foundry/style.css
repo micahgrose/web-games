@@ -259,6 +259,16 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 #tooltip .tt-stat{ color:var(--accent2); font-size:11.5px; margin-top:4px; }
 #tooltip .tt-lock{ color:var(--accent); font-size:11.5px; margin-top:5px; }
 
+/* Build-mode hint banner */
+#modeHint{
+  position:absolute; top:60px; left:50%; transform:translateX(-50%);
+  padding:7px 16px; border-radius:8px; font-size:12px; letter-spacing:.03em;
+  background:rgba(12,16,23,.94); border:1px solid var(--line-bright);
+  box-shadow:var(--shadow); color:var(--accent2); white-space:nowrap;
+  pointer-events:none;
+}
+.iconBtn.on{ color:var(--accent); border-color:rgba(255,180,84,.5); background:rgba(255,180,84,.1); }
+
 /* Toasts */
 #toasts{
   position:absolute; left:50%; bottom:96px; transform:translateX(-50%);

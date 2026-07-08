@@ -1682,6 +1682,33 @@ R.draw = function(S, dt, U){
       }
     }
     if (U.ghost) drawGhost(x, S, U.ghost, time);
+    // blueprint stamp preview
+    if (U.bpGhost){
+      for (const g of U.bpGhost){
+        const def = F.BUILDINGS[g.key];
+        const [px, py] = R.worldToScreen(g.x, g.y);
+        x.fillStyle = g.ok ? 'rgba(89,214,255,.14)' : 'rgba(255,118,118,.18)';
+        rrect(x, px + 1, py + 1, def.w * s - 2, def.h * s - 2, s * .1);
+        x.fill();
+        x.strokeStyle = g.ok ? 'rgba(89,214,255,.6)' : 'rgba(255,118,118,.7)';
+        x.lineWidth = 1.4;
+        rrect(x, px + 1, py + 1, def.w * s - 2, def.h * s - 2, s * .1);
+        x.stroke();
+      }
+    }
+    // deconstruct / copy marquee
+    if (U.marquee){
+      const mq = U.marquee;
+      const [px0, py0] = R.worldToScreen(mq.x0, mq.y0);
+      const w = (mq.x1 - mq.x0 + 1) * s, h = (mq.y1 - mq.y0 + 1) * s;
+      const red = mq.mode === 'decon';
+      x.fillStyle = red ? 'rgba(255,118,118,.14)' : 'rgba(89,214,255,.12)';
+      x.fillRect(px0, py0, w, h);
+      x.strokeStyle = red ? 'rgba(255,118,118,.85)' : 'rgba(89,214,255,.8)';
+      x.lineWidth = 2; x.setLineDash([s * .2, s * .14]);
+      x.strokeRect(px0, py0, w, h);
+      x.setLineDash([]);
+    }
     if (U.hover && !U.ghost){
       const e = F.entAt(S, U.hover[0], U.hover[1]);
       if (e && e.kind !== 'core'){

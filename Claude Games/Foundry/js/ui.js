@@ -17,6 +17,12 @@ const UI = F.ui = {
              lastTile: null, mining: false, sx: 0, sy: 0, camx: 0, camy: 0 },
   mouse: { x: 0, y: 0 },
   holdStack: null,
+  speed: 1, lastSpeed: 1,
+  mode: null,            // null | 'decon' | 'copy' | 'stamp'
+  marquee: null,         // {sx,sy,ex,ey} in tile coords while dragging a box
+  blueprint: null,       // {w,h,parts:[{key,dx,dy,dir,recipe}]}
+  bpDir: 0,              // blueprint rotation (0..3)
+  recipeClip: null,      // last-copied machine recipe (pipette)
   keys: {},
   toastSeen: {},
   autosaveT: 0,
@@ -109,6 +115,7 @@ function startTitleFx(){
 
 function quitToTitle(){
   returnHeld();
+  setMode(null);
   UI.save();
   closeMenu();
   if (UI.bigTab) closeBig();
@@ -155,6 +162,10 @@ function startGame(S){
   $('hud').classList.remove('hidden');
   if (titleRaf) cancelAnimationFrame(titleRaf);
   UI.started = true;
+  setSpeed(1);
+  UI.mode = null; UI.marquee = null; UI.blueprint = null; UI.bpDir = 0;
+  $('btnDecon').classList.remove('on'); $('btnBlueprint').classList.remove('on');
+  $('modeHint').classList.add('hidden');
   buildTabs();
   buildBar();
   refreshObjective();
@@ -183,10 +194,13 @@ function bindPointer(){
     P.lastTile = tileUnder(e.clientX, e.clientY);
     P.panning = (e.button === 1);
     if (e.button === 0){
-      if (UI.tool) placeAt(P.lastTile, true);
+      if (UI.mode === 'decon' || UI.mode === 'copy'){ beginMarquee(P.lastTile); P.marqueeing = true; }
+      else if (UI.mode === 'stamp'){ stampBlueprint(P.lastTile); }
+      else if (UI.tool) placeAt(P.lastTile, true);
       // selection / mining resolved on up (if not dragged) or per-frame (mining)
     } else if (e.button === 2){
-      if (UI.tool){ setTool(null); }
+      if (UI.mode){ clearBuildMode(); }
+      else if (UI.tool){ setTool(null); }
       else removeAt(P.lastTile);
     }
     // always capture: guarantees we see pointerup even if released off-window,
@@ -206,12 +220,15 @@ function bindPointer(){
       clampCam();
       return;
     }
-    if (P.down && P.btn === 0 && UI.tool){
+    if (P.down && P.marqueeing){
+      const t = tileUnder(px, py);
+      if (t) updateMarquee(t);
+    } else if (P.down && P.btn === 0 && UI.tool){
       dragPlace(px, py);
-    } else if (P.down && P.btn === 2 && !UI.tool){
+    } else if (P.down && P.btn === 2 && !UI.tool && !UI.mode){
       const t = tileUnder(px, py);
       if (t) removeAt(t);
-    } else if (P.down && P.btn === 0 && !UI.tool){
+    } else if (P.down && P.btn === 0 && !UI.tool && !UI.mode){
       // drag-pan with left on empty ground (after small threshold, not while mining)
       if (P.moved > 8 && !P.mining){
         const s = R.tilePx();
@@ -224,7 +241,8 @@ function bindPointer(){
 
   const endPointer = (e) => {
     if (P.id !== null && e.pointerId !== P.id) return;
-    if (P.down && P.btn === 0 && !UI.tool && P.moved <= 8 && !P.mining){
+    if (P.marqueeing){ finishMarquee(); P.marqueeing = false; }
+    else if (P.down && P.btn === 0 && !UI.tool && !UI.mode && P.moved <= 8 && !P.mining){
       // a clean click: select
       const t = tileUnder(e.clientX, e.clientY);
       const ent = t && F.entAt(UI.S, t[0], t[1]);
@@ -281,6 +299,10 @@ function placeAt(t, first){
   const [gx, gy] = ghostOrigin(t, def);
   const chk = F.canPlace(S, UI.tool, gx, gy, UI.dir);
   if (!chk.ok){
+    // occupied by a lower-tier line of the same kind → upgrade it in place
+    if (chk.why === 'occupied' && (def.kind === 'belt' || def.kind === 'pipe')){
+      if (tryUpgradeLine(gx, gy, def)) return;
+    }
     if (first){
       if (chk.why === 'cost'){ A.sfx.error(); toastCost(def); }
       else if (chk.why !== 'occupied'){ A.sfx.error(); toast(cap(chk.why), 'warn', 2600); }
@@ -290,11 +312,39 @@ function placeAt(t, first){
   const e = F.place(S, UI.tool, gx, gy, UI.dir, false);
   if (e){
     A.sfx.place();
+    UI.pointer.lastPlaced = [t[0], t[1]];   // anchor for spaced drag-lines
     if (e.kind === 'belt') tipOnce('firstBelt');
     if (e.kind === 'splitter') tipOnce('firstSplitter');
     if (e.kind === 'pump') tipOnce('firstPipe');
+    if (e.kind === 'machine' && UI.recipeClip && F.recipeUnlocked(S, UI.recipeClip)){
+      const r = F.RECIPES[UI.recipeClip];
+      if (r && r.machine === def.fam){ e.recipe = UI.recipeClip; }
+    }
     buildBarAfford();
   }
+}
+
+/* replace an existing belt/pipe with a different tier, preserving flow */
+function tryUpgradeLine(x, y, def){
+  const S = UI.S;
+  const old = F.entAt(S, x, y);
+  if (!old || old.kind !== def.kind) return false;
+  if (old.key === UI.tool) return false;                 // same tier — nothing to do
+  if (!F.canAfford(S, def.cost)){ return false; }
+  // capture flow state
+  const carry = { dir: old.dir, item: old.item, t: old.t, srcDir: old.srcDir,
+                  fluid: old.fluid, isExit: old.isExit };
+  F.remove(S, old.x, old.y);                             // refunds the old one (incl. its item)
+  const e = F.place(S, UI.tool, x, y, carry.dir, false);
+  if (!e){ return false; }
+  if (def.kind === 'belt' && carry.item){
+    e.item = carry.item; e.t = carry.t || 0; e.srcDir = carry.srcDir != null ? carry.srcDir : e.dir;
+    F.invAdd(S, carry.item, -1);   // it was refunded by remove(); it's back on the belt now
+  }
+  if (def.kind === 'pipe' && carry.fluid) e.fluid = carry.fluid;
+  A.sfx.place();
+  buildBarAfford();
+  return true;
 }
 
 /* drag-lay 1x1 lines (belts, pipes) with auto-rotation; fills gaps */
@@ -308,7 +358,14 @@ function dragPlace(px, py){
   const last = P.lastTile;
   if (!last || (t[0] === last[0] && t[1] === last[1])) return;
   if (def.kind !== 'belt' && def.kind !== 'pipe'){
-    P.lastTile = t;   // machines, tunnels, splitters: click to place, no drag-spam
+    // machines/poles: drag lays a spaced line (tunnels stay click-only)
+    P.lastTile = t;
+    if (def.kind === 'ubelt') return;
+    const spacing = def.kind === 'pole' ? Math.max(1, def.reach - 1) : Math.max(def.w, def.h);
+    const lp = P.lastPlaced;
+    if (!lp || Math.max(Math.abs(t[0] - lp[0]), Math.abs(t[1] - lp[1])) >= spacing){
+      placeAt(t, false);
+    }
     return;
   }
   // walk axis-major from last to current
@@ -341,6 +398,113 @@ function removeAt(t){
   buildBarAfford();
 }
 
+/* ==================================================================== */
+/* BUILD MODES: box-deconstruct + blueprint copy/stamp                  */
+/* ==================================================================== */
+function setMode(m){
+  UI.mode = m;
+  if (m){ setTool(null); select(null); }
+  if (m !== 'stamp'){ UI.blueprint = null; UI.bpDir = 0; }
+  const bd = $('btnDecon'), bc = $('btnBlueprint');
+  if (bd) bd.classList.toggle('on', m === 'decon');
+  if (bc) bc.classList.toggle('on', m === 'copy' || m === 'stamp');
+  hudModeHint();
+}
+function clearBuildMode(){ setMode(null); }
+
+function hudModeHint(){
+  const h = $('modeHint');
+  if (!h) return;
+  if (UI.mode === 'decon') h.textContent = 'DECONSTRUCT — drag a box to remove (full refund). Esc to exit.';
+  else if (UI.mode === 'copy') h.textContent = 'COPY — drag a box over buildings to capture a blueprint.';
+  else if (UI.mode === 'stamp') h.textContent = 'BLUEPRINT — click to stamp · R rotate · Esc to put away.';
+  else { h.classList.add('hidden'); return; }
+  h.classList.remove('hidden');
+}
+
+function boxOf(m){
+  return { x0: Math.min(m.sx, m.ex), y0: Math.min(m.sy, m.ey),
+           x1: Math.max(m.sx, m.ex), y1: Math.max(m.sy, m.ey) };
+}
+
+function beginMarquee(t){ UI.marquee = { sx: t[0], sy: t[1], ex: t[0], ey: t[1] }; }
+function updateMarquee(t){ if (UI.marquee){ UI.marquee.ex = t[0]; UI.marquee.ey = t[1]; } }
+function finishMarquee(){
+  const m = UI.marquee; UI.marquee = null;
+  if (!m) return;
+  const b = boxOf(m);
+  if (UI.mode === 'decon') applyDecon(b);
+  else if (UI.mode === 'copy') captureBlueprint(b);
+}
+
+function entsInBox(b){
+  const S = UI.S, seen = new Set(), out = [];
+  for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++){
+    const e = F.entAt(S, x, y);
+    if (e && e.kind !== 'core' && !seen.has(e.id)){ seen.add(e.id); out.push(e); }
+  }
+  return out;
+}
+
+function applyDecon(b){
+  const list = entsInBox(b);
+  if (!list.length){ A.sfx.error(); return; }
+  for (const e of list){ if (UI.selection === e) select(null); F.remove(UI.S, e.x, e.y); }
+  A.sfx.remove();
+  buildBarAfford();
+  toast(`Deconstructed ${list.length} building${list.length > 1 ? 's' : ''} (refunded).`, '', 2200);
+}
+
+function captureBlueprint(b){
+  const list = entsInBox(b);
+  if (!list.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
+  const parts = list.map(e => ({ key: e.key, dx: e.x - b.x0, dy: e.y - b.y0, dir: e.dir,
+    recipe: e.recipe || null }));
+  UI.blueprint = { w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1, parts };
+  UI.bpDir = 0;
+  setMode('stamp');
+  A.sfx.buy();
+  toast(`Blueprint captured — ${parts.length} buildings. Click to stamp, R to rotate.`, 'tip', 5000);
+}
+
+/* rotate an offset within a w×h box by UI.bpDir quarter-turns (CW) */
+function bpTransform(dx, dy, w, h, rot){
+  switch (rot & 3){
+    case 1: return [h - 1 - dy, dx];
+    case 2: return [w - 1 - dx, h - 1 - dy];
+    case 3: return [dy, w - 1 - dx];
+    default: return [dx, dy];
+  }
+}
+function bpParts(anchorX, anchorY){
+  const bp = UI.blueprint;
+  if (!bp) return [];
+  const rot = UI.bpDir;
+  return bp.parts.map(p => {
+    const [ox, oy] = bpTransform(p.dx, p.dy, bp.w, bp.h, rot);
+    return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3, recipe: p.recipe };
+  });
+}
+
+function stampBlueprint(t){
+  const S = UI.S, bp = UI.blueprint;
+  if (!bp || !t) return;
+  const parts = bpParts(t[0], t[1]);
+  let placed = 0, skip = 0, poor = 0;
+  for (const p of parts){
+    if (!S.unlocked[p.key]){ skip++; continue; }
+    const chk = F.canPlace(S, p.key, p.x, p.y, p.dir);
+    if (!chk.ok){ if (chk.why === 'cost') poor++; else skip++; continue; }
+    const e = F.place(S, p.key, p.x, p.y, p.dir, false);
+    if (e){ placed++; if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe; }
+    else poor++;
+  }
+  if (placed) A.sfx.place(); else A.sfx.error();
+  buildBarAfford();
+  if (poor && !placed) toast('Not enough materials to stamp this blueprint.', 'warn', 2400);
+  else if (poor || skip) toast(`Stamped ${placed} · ${poor + skip} unbuilt (materials/blocked).`, '', 2400);
+}
+
 /* multi-tile ghosts centre on the cursor */
 function ghostOrigin(t, def){
   return [t[0] - ((def.w - 1) >> 1), t[1] - ((def.h - 1) >> 1)];
@@ -363,18 +527,25 @@ function bindKeys(){
     }
     switch (e.code){
       case 'KeyR': {
+        if (UI.mode === 'stamp'){ UI.bpDir = (UI.bpDir + 1) & 3; A.sfx.rotate(); break; }
         UI.dir = (UI.dir + 1) & 3;
         if (!UI.tool && UI.selection && UI.selection.kind !== 'core'){
           UI.selection.dir = (UI.selection.dir + 1) & 3;
-          refreshSelPanel();
+          UI.S.powerDirty = true;
+          refreshSelPanel(true);
         }
         A.sfx.rotate();
         break;
       }
+      case 'KeyX': setMode(UI.mode === 'decon' ? null : 'decon'); break;
+      case 'KeyC': setMode(UI.mode === 'copy' || UI.mode === 'stamp' ? null : 'copy'); break;
       case 'KeyQ': {
         const t = UI.hover;
         const ent = t && F.entAt(UI.S, t[0], t[1]);
-        if (ent && ent.kind !== 'core' && UI.S.unlocked[ent.key]) setTool(ent.key);
+        if (ent && ent.kind !== 'core' && UI.S.unlocked[ent.key]){
+          UI.recipeClip = ent.recipe || null;   // copy its recipe too
+          setTool(ent.key);
+        }
         break;
       }
       case 'KeyE': toggleBig('inventory'); break;
@@ -383,6 +554,7 @@ function bindKeys(){
       case 'KeyF': R.cam.x = UI.S.core.x + 2; R.cam.y = UI.S.core.y + 2; break;
       case 'Escape':
         if (UI.holdStack) returnHeld();
+        else if (UI.mode) clearBuildMode();
         else if (!$('menuPop').classList.contains('hidden')) closeMenu();
         else if (UI.bigTab) closeBig();
         else if (UI.tool) setTool(null);
@@ -390,6 +562,9 @@ function bindKeys(){
         else openMenu();
         break;
       case 'KeyH': toggleBig('howto'); break;
+      case 'Space': e.preventDefault(); togglePause(); break;
+      case 'Equal': case 'NumpadAdd': setSpeed(clamp(UI.speed + 1, 1, 3)); break;
+      case 'Minus': case 'NumpadSubtract': setSpeed(clamp(UI.speed - 1, 1, 3)); break;
       default: {
         if (e.code.startsWith('Digit')){
           const n = +e.code.slice(5) - 1;
@@ -417,6 +592,9 @@ function bindHud(){
     A.setOn(!A.on);
     $('btnSound').style.opacity = A.on ? 1 : .4;
   });
+  $('btnSpeed').addEventListener('click', cycleSpeed);
+  $('btnDecon').addEventListener('click', () => setMode(UI.mode === 'decon' ? null : 'decon'));
+  $('btnBlueprint').addEventListener('click', () => setMode(UI.mode === 'copy' || UI.mode === 'stamp' ? null : 'copy'));
   $('btnMenu').addEventListener('click', toggleMenu);
   $('mResume').addEventListener('click', closeMenu);
   $('mHowto').addEventListener('click', () => { closeMenu(); openBig('howto'); });
@@ -506,10 +684,10 @@ function buildBarAfford(){
 function setTool(key){
   UI.tool = key;
   if (key){
+    if (UI.mode){ UI.mode = null; UI.blueprint = null;
+      $('btnDecon').classList.remove('on'); $('btnBlueprint').classList.remove('on'); hudModeHint(); }
     select(null);
     tipOnce('firstSelect');
-    const def = F.BUILDINGS[key];
-    if (def.kind === 'belt' || def.kind === 'pipe') { /* keep dir */ }
   }
   for (const b of $('buildBar').children)
     b.classList.toggle('on', b.dataset.key === key);
@@ -1269,6 +1447,9 @@ function renderHowTo(){
     <tr><td>Lay belt lines</td><td>${kb('Left drag')} with a belt selected</td></tr>
     <tr><td>Remove (full refund)</td><td>${kb('Right click')} / drag</td></tr>
     <tr><td>Rotate</td><td>${kb('R')}</td></tr>
+    <tr><td>Blueprint (copy area → stamp)</td><td>${kb('C')}</td></tr>
+    <tr><td>Deconstruct box</td><td>${kb('X')}</td></tr>
+    <tr><td>Pause / game speed</td><td>${kb('Space')} · ${kb('+')} ${kb('−')}</td></tr>
     <tr><td>Pan</td><td>${kb('W A S D')} · ${kb('Middle drag')} · ${kb('Left drag')} on empty ground</td></tr>
     <tr><td>Zoom</td><td>${kb('Wheel')}</td></tr>
     <tr><td>Copy hovered building</td><td>${kb('Q')}</td></tr>
@@ -1316,6 +1497,19 @@ function toastCost(def){
 }
 
 function cap(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/* ---------- game speed ---------- */
+const SPEED_GLYPH = { 0: '⏸', 1: '▶', 2: '⏩', 3: '⏭' };
+function setSpeed(s){
+  UI.speed = s;
+  if (s > 0) UI.lastSpeed = s;
+  const b = $('btnSpeed');
+  b.textContent = SPEED_GLYPH[s];
+  b.style.color = s === 0 ? 'var(--accent)' : (s > 1 ? 'var(--accent2)' : '');
+  b.title = s === 0 ? 'Paused — click or Space to resume' : `Speed ${s}× — click to change, Space to pause`;
+}
+function cycleSpeed(){ setSpeed(UI.speed >= 3 ? 1 : (UI.speed === 0 ? 1 : UI.speed + 1)); A.sfx.click(); }
+function togglePause(){ setSpeed(UI.speed === 0 ? UI.lastSpeed : 0); A.sfx.click(); }
 
 /* ---------- menu popup ---------- */
 function openMenu(){ $('menuPop').classList.remove('hidden'); A.sfx.open(); }
@@ -1546,8 +1740,8 @@ UI.update = function(dt){
   /* hover tile from last-known pointer (robust to missing move events) */
   UI.hover = tileUnder(P.x, P.y);
 
-  /* hand mining: hold LMB on ore with no tool */
-  if (P.down && P.btn === 0 && !UI.tool && !P.panning && !R.cine){
+  /* hand mining: hold LMB on ore with no tool and no build mode active */
+  if (P.down && P.btn === 0 && !UI.tool && !UI.mode && !P.panning && !R.cine){
     const t = UI.hover;
     if (t && P.moved <= 8){
       const i = F.tileIdx(S, t[0], t[1]);
@@ -1608,15 +1802,24 @@ UI.update = function(dt){
 UI.viewState = function(){
   const S = UI.S;
   let ghost = null;
-  if (UI.tool && UI.hover && !R.cine){
+  if (UI.tool && UI.hover && !R.cine && !UI.mode){
     const def = F.BUILDINGS[UI.tool];
     const [gx, gy] = ghostOrigin(UI.hover, def);
     const chk = F.canPlace(S, UI.tool, gx, gy, UI.dir);
     ghost = { key: UI.tool, x: gx, y: gy, dir: UI.dir, ok: chk.ok };
   }
+  // blueprint stamp preview
+  let bpGhost = null;
+  if (UI.mode === 'stamp' && UI.blueprint && UI.hover && !R.cine){
+    bpGhost = bpParts(UI.hover[0], UI.hover[1]).map(p => {
+      const chk = F.canPlace(S, p.key, p.x, p.y, p.dir);
+      return { key: p.key, x: p.x, y: p.y, dir: p.dir, ok: chk.ok || chk.why === 'cost' };
+    });
+  }
   return {
-    ghost,
-    hover: UI.hover,
+    ghost, bpGhost,
+    marquee: UI.marquee ? Object.assign(boxOf(UI.marquee), { mode: UI.mode }) : null,
+    hover: (UI.mode || UI.holdStack) ? null : UI.hover,
     selection: UI.selection,
     arrow: UI.arrow,
     beltPath: null,
