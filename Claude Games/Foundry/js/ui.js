@@ -142,6 +142,7 @@ function startTestWorld(){
   for (const k in F.BUILDINGS) S.unlocked[k] = true;
   for (const k in F.RECIPES) S.unlocked['r:' + k] = true;
   for (const k in F.ITEMS) S.inv[k] = 1000;
+  for (const id in F.TECHS) S.research.done[id] = true;   // tree fully researched
   S.msIndex = F.MILESTONES.length - 1;   // sit at Ignition with all prior tiers done
   S.flags.welcomed = true;
   startGame(S);
@@ -593,6 +594,7 @@ function bindHud(){
   });
   $('btnFoundry').addEventListener('click', () => toggleBig('milestones'));
   $('btnInv').addEventListener('click', () => toggleBig('inventory'));
+  $('techChip').addEventListener('click', () => { toggleBig('research'); });
   $('btnSound').addEventListener('click', () => {
     A.init(); A.resume();
     A.setOn(!A.on);
@@ -635,7 +637,14 @@ function bindHud(){
 /* BUILD BAR                                                            */
 /* ==================================================================== */
 function catBuildings(cat){
-  return F.BUILD_ORDER.filter(k => F.BUILDINGS[k].cat === cat);
+  // tech-gated buildings stay hidden until researched (the Research tab is their teaser)
+  const S = UI.S;
+  return F.BUILD_ORDER.filter(k => {
+    const d = F.BUILDINGS[k];
+    if (d.cat !== cat) return false;
+    if (d.tech && !(S && S.unlocked[k])) return false;
+    return true;
+  });
 }
 
 function buildTabs(){
@@ -667,7 +676,12 @@ function buildBar(){
     b.appendChild(ic);
     b.appendChild(el('span', 'bname', def.name));
     b.addEventListener('click', () => {
-      if (!S.unlocked[key]){ A.sfx.error(); toast('Locked — reach <b>' + F.MILESTONES[def.unlock].name + '</b>', 'warn', 3000); return; }
+      if (!S.unlocked[key]){
+        A.sfx.error();
+        toast(def.tech ? 'Locked — research <b>' + F.TECHS[def.tech].name + '</b>'
+          : 'Locked — reach <b>' + (F.MILESTONES[def.unlock] ? F.MILESTONES[def.unlock].name : '?') + '</b>', 'warn', 3000);
+        return;
+      }
       setTool(UI.tool === key ? null : key);
     });
     b.addEventListener('pointerenter', (ev) => showBuildTip(ev, key));
@@ -721,7 +735,7 @@ function showBuildTip(ev, key){
     const have = F.invCount(S, k);
     return `<span class="${have < n ? 'lack' : ''}">${iconImg(k, 14)} ${n} <span class="have">(${F.fmt(have)})</span></span>`;
   }).join('') + '</div>';
-  if (!S.unlocked[key]) html += `<div class="tt-lock">Unlocks at: ${F.MILESTONES[def.unlock] ? F.MILESTONES[def.unlock].name : '—'}</div>`;
+  if (!S.unlocked[key]) html += `<div class="tt-lock">${def.tech ? 'Research: ' + F.TECHS[def.tech].name : 'Unlocks at: ' + (F.MILESTONES[def.unlock] ? F.MILESTONES[def.unlock].name : '—')}</div>`;
   tt.innerHTML = html;
   tt.classList.remove('hidden');
   positionTip(ev.clientX, ev.clientY);
@@ -804,7 +818,7 @@ function dynVals(e){
       d.link = e.linkId ? (e.isExit ? 'exit ✓' : 'entrance ✓') : '<span style="color:var(--accent)">unlinked</span>';
       break;
     case 'chest':
-      d.stored = `${e.total} / ${F.CHEST_CAP + F.upRank(S, 'capacitors') * 20}`;
+      d.stored = `${e.total} / ${(def.cap || F.CHEST_CAP) + F.upRank(S, 'capacitors') * 20}`;
       break;
     case 'pump':
       d.tank = `${e.tank.toFixed(1)} / 30`;
@@ -812,6 +826,12 @@ function dynVals(e){
     case 'pipe':
       d.fluid = `${e.fluid.toFixed(1)} / ${def.cap}`;
       break;
+    case 'lab': {
+      const RS = S.research;
+      d.res = RS.cur ? F.TECHS[RS.cur].name : '<span class="ghostTxt">none — open Research</span>';
+      d.read = e.workItem ? F.ITEMS[e.workItem].name : 'idle';
+      break;
+    }
     case 'pole': {
       d.links = String(e.links ? e.links.length : 0);
       if (e.netId){
@@ -830,7 +850,7 @@ function dynVals(e){
 }
 
 function bufsFor(e){
-  if (e.kind === 'machine') return buffers(e);
+  if (e.kind === 'machine' || e.kind === 'lab') return buffers(e);
   if (e.kind === 'chest') return bufList(e.store);
   return '';
 }
@@ -883,6 +903,14 @@ function buildSelPanel(e){
       html += `<div class="ghostNote">${F.ITEMS[e.filterItem].name} always exits left; other items use front/right.</div>`;
     else
       html += `<div class="ghostNote">Exits are relative to the arrow: ◀ left · ▲ front · ▶ right.</div>`;
+  }
+  if (e.kind === 'lab'){
+    html += row('Project', dv.res, 'res');
+    html += row('Reading', dv.read, 'read');
+    html += `<div data-bufs>${bufsFor(e)}</div>`;
+    html += `<div class="progOuter" data-prog-wrap style="display:none"><div class="progFill" data-prog style="width:0%"></div></div>`;
+    html += `<button class="menuBtn" data-openres style="margin-top:8px">⚗ Open research</button>`;
+    html += `<div class="ghostNote">Belt science packs into any side — all labs feed one shared project.</div>`;
   }
   if (e.kind === 'ubelt'){
     html += row('Linked', dv.link, 'link');
@@ -966,6 +994,8 @@ function buildSelPanel(e){
     box.addEventListener('wheel', ev => slotWheel(ev, box, box.dataset.side, e, item), { passive: false });
     box.addEventListener('contextmenu', ev => ev.preventDefault());
   });
+  const orb = p.querySelector('[data-openres]');
+  if (orb) orb.addEventListener('click', () => { openBig('research'); });
   p.querySelector('[data-del]').addEventListener('click', () => {
     F.remove(S, e.x, e.y);
     A.sfx.remove();
@@ -989,11 +1019,12 @@ function updateSelPanel(e){
     const h = bufsFor(e);
     if (UI._bufsCache !== h){ UI._bufsCache = h; bufs.innerHTML = h; }
   }
-  // craft progress
+  // craft / read progress
   const pw = p.querySelector('[data-prog-wrap]');
   if (pw){
-    pw.style.display = e.crafting ? '' : 'none';
-    if (e.crafting){
+    const busy = e.crafting || (e.kind === 'lab' && e.workItem);
+    pw.style.display = busy ? '' : 'none';
+    if (busy){
       const pf = pw.querySelector('[data-prog]');
       if (pf) pf.style.width = (clamp(e.prog, 0, 1) * 100).toFixed(0) + '%';
     }
@@ -1015,8 +1046,8 @@ function updateSelPanel(e){
 
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
-    miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery'}[def.fam] || 'machine',
-    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction' }[def.kind] || def.kind;
+    miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
+    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction', lab:'research' }[def.kind] || def.kind;
 }
 function row(k, v, dyn){ return `<div class="selRow"><span>${k}</span><b${dyn ? ` data-dyn="${dyn}"` : ''}>${v}</b></div>`; }
 function rateStr(e){
@@ -1042,9 +1073,9 @@ function bufList(o){
 }
 
 function recipeSection(S, e, def){
-  if (def.fam === 'smelter' || def.fam === 'alloy'){
+  if (F.AUTO_RECIPES[def.fam]){
     const opts = F.AUTO_RECIPES[def.fam].filter(k => F.recipeUnlocked(S, k));
-    return `<div class="selSection">Smelts automatically</div>
+    return `<div class="selSection">${def.fam === 'crusher' ? 'Crushes automatically' : 'Smelts automatically'}</div>
       <div class="compChain">${opts.map(k => `<span>${iconImg(F.RECIPES[k].out, 15)}</span>`).join('')}</div>`;
   }
   const opts = Object.keys(F.RECIPES).filter(k => {
@@ -1113,6 +1144,35 @@ function refreshObjective(){
 }
 
 /* ==================================================================== */
+/* RESEARCH CHIP (under the objective card)                             */
+/* ==================================================================== */
+function refreshTechChip(){
+  const S = UI.S;
+  const chip = $('techChip');
+  if (!chip) return;
+  const RS = S && S.research;
+  if (!S || !RS || !RS.cur){
+    chip.classList.add('hidden');
+    UI._chipSig = '';
+    return;
+  }
+  const tk = F.TECHS[RS.cur];
+  const sp = RS.prog[RS.cur] || {};
+  let tot = 0, got = 0;
+  for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
+  const pct = Math.floor(got / tot * 100);
+  chip.classList.remove('hidden');
+  // ride just below the objective card, whatever its current height
+  chip.style.top = ($('objCard').getBoundingClientRect().bottom + 8) + 'px';
+  const sig = tk.name + '|' + pct;
+  if (UI._chipSig !== sig){
+    UI._chipSig = sig;
+    chip.querySelector('span').textContent = `⚗ ${tk.name} · ${pct}%`;
+    chip.querySelector('#techChipFill').style.width = pct + '%';
+  }
+}
+
+/* ==================================================================== */
 /* POWER BAR                                                            */
 /* ==================================================================== */
 function refreshPower(){
@@ -1140,6 +1200,7 @@ function refreshPower(){
 const BIG_TABS = [
   { id:'inventory', name:'Inventory' },
   { id:'milestones', name:'Milestones' },
+  { id:'research', name:'Research' },
   { id:'upgrades', name:'Upgrades' },
   { id:'compendium', name:'Recipes' },
   { id:'howto', name:'How to play' },
@@ -1250,6 +1311,10 @@ function renderBig(){
       });
       break;
     }
+    case 'research': {
+      renderResearchTab(body);
+      break;
+    }
     case 'compendium': {
       body.innerHTML = renderRecipeBook(S);
       break;
@@ -1287,9 +1352,101 @@ function renderBig(){
 }
 
 /* ==================================================================== */
+/* RESEARCH TAB                                                         */
+/* Built once per structural change (project switch / tech completed /  */
+/* new packs unlocked), then progress numbers are poked in place so     */
+/* buttons stay hoverable while labs chew through packs.                */
+/* ==================================================================== */
+function techCostChip(id, pk, sp, n, done){
+  return `${iconImg(pk, 14)} <span data-tcost="${id}:${pk}">${done ? n : Math.min(sp, n)} / ${n}</span>`;
+}
+
+function renderResearchTab(body){
+  const S = UI.S;
+  const RS = S.research;
+  const sig = [RS.cur || '', Object.keys(RS.done).sort().join(','),
+    F.PACKS.filter(p => F.recipeUnlocked(S, p)).join(',')].join('|');
+  if (UI._resSig !== sig || !body.querySelector('.techGrid')){
+    UI._resSig = sig;
+    let h = '<div class="resHead">';
+    if (RS.cur){
+      const tk = F.TECHS[RS.cur];
+      h += `<div class="resCurName">⚗ Researching: <b>${tk.name}</b> <span class="resLabs" data-reslabs></span></div>
+        <div class="resBarOuter"><div class="resBarFill" data-resbar style="width:0%"></div></div>
+        <div class="resCurPacks" data-respacks></div>
+        <button class="resStop" data-stop>Pause project</button>`;
+    } else {
+      h += `<div class="ghostNote">No active project. Craft science packs in a fabricator, belt them into
+        <b>laboratories</b>, and pick a technology below — every tech is an optional bonus, never a gate.
+        Switching projects keeps all progress.</div>`;
+    }
+    h += '</div><div class="techGrid">';
+    for (const id of F.TECH_ORDER){
+      const tk = F.TECHS[id];
+      const done = !!RS.done[id];
+      const cur = RS.cur === id;
+      const reqMet = (tk.req || []).every(r => RS.done[r]);
+      const started = !!RS.prog[id];
+      h += `<div class="techCard${done ? ' done' : cur ? ' cur' : !reqMet ? ' tlocked' : ''}">
+        <div class="techHead">${iconImg(tk.icon, 18)}<span class="techName">${tk.name}</span>
+          ${done ? '<span class="techState tsDone">✓ researched</span>' : cur ? '<span class="techState tsCur">in progress</span>' : ''}</div>
+        <div class="techDesc">${tk.desc}</div>`;
+      if (!reqMet && !done)
+        h += `<div class="techReq">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
+      const sp = RS.prog[id] || {};
+      h += `<div class="techCost">` + Object.entries(tk.cost).map(([pk, n]) =>
+        `<span class="techPack">${techCostChip(id, pk, sp[pk] || 0, n, done)}</span>`).join('') + `</div>`;
+      if (!done)
+        h += `<button class="techBtn" data-tech="${id}" ${reqMet && !cur ? '' : 'disabled'}>${cur ? 'Researching…' : started ? 'Resume' : 'Research'}</button>`;
+      h += '</div>';
+    }
+    h += '</div>';
+    body.innerHTML = h;
+    body.querySelectorAll('[data-tech]').forEach(b => {
+      b.addEventListener('click', () => {
+        if (F.setResearch(S, b.dataset.tech)){ A.sfx.click(); UI._resSig = null; renderResearchTab(body); }
+        else A.sfx.error();
+      });
+    });
+    const stop = body.querySelector('[data-stop]');
+    if (stop) stop.addEventListener('click', () => {
+      F.setResearch(S, null); A.sfx.click(); UI._resSig = null; renderResearchTab(body);
+    });
+  }
+  /* in-place pokes */
+  if (RS.cur){
+    const tk = F.TECHS[RS.cur];
+    const sp = RS.prog[RS.cur] || {};
+    let tot = 0, got = 0;
+    for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
+    const bar = body.querySelector('[data-resbar]');
+    if (bar) bar.style.width = (got / tot * 100).toFixed(1) + '%';
+    const pkEl = body.querySelector('[data-respacks]');
+    if (pkEl){
+      const t = Object.entries(tk.cost).map(([pk, n]) =>
+        `${iconImg(pk, 13)} ${Math.min(sp[pk] || 0, n)} / ${n}`).join('<span class="arrow">·</span>');
+      if (pkEl.innerHTML !== t) pkEl.innerHTML = t;
+    }
+    const lb = body.querySelector('[data-reslabs]');
+    if (lb){
+      const working = S.ents.filter(e => e.kind === 'lab' && e.workItem).length;
+      const labs = S.ents.filter(e => e.kind === 'lab').length;
+      const t = labs ? `· ${working} / ${labs} labs reading` : '· no labs built!';
+      if (lb.textContent !== t) lb.textContent = t;
+    }
+    body.querySelectorAll('[data-tcost]').forEach(el2 => {
+      const [id, pk] = el2.dataset.tcost.split(':');
+      if (id !== RS.cur || !tk.cost[pk]) return;
+      const t = `${Math.min(sp[pk] || 0, tk.cost[pk])} / ${tk.cost[pk]}`;
+      if (el2.textContent !== t) el2.textContent = t;
+    });
+  }
+}
+
+/* ==================================================================== */
 /* RECIPE BOOK                                                          */
 /* ==================================================================== */
-const MACHINE_NAMES = { smelter:'Furnace', alloy:'Alloy furnace', asm:'Assembler', refinery:'Refinery' };
+const MACHINE_NAMES = { smelter:'Furnace', alloy:'Alloy furnace', asm:'Assembler', refinery:'Refinery', crusher:'Crusher' };
 
 function recipeRevealed(S, k){
   const r = F.RECIPES[k];
@@ -1307,6 +1464,12 @@ function unlockMsOf(recipeKey){
 /* everything that consumes `item`: revealed recipes + unlocked buildings */
 function usedInHtml(S, item){
   const uses = [];
+  if (F.PACKS.includes(item)){
+    // packs are consumed by laboratories, not recipes
+    let h2 = `<div class="compUse">used in: <span class="compUseB">laboratory research (${
+      F.TECH_ORDER.filter(id => F.TECHS[id].cost[item]).length} technologies)</span></div>`;
+    return h2;
+  }
   for (const k in F.RECIPES){
     const r = F.RECIPES[k];
     if (r.in[item] && recipeRevealed(S, k))
@@ -1371,10 +1534,11 @@ function renderRecipeBook(S){
       if (!recipeRevealed(S, k)){ hidden++; continue; }
       const locked = !F.recipeUnlocked(S, k);
       const msu = locked ? unlockMsOf(k) : null;
+      const tkid = locked && !msu ? F.techOf('r:' + k) : null;
       group += `<div class="compRow${locked ? ' compLocked' : ''}">
         <img src="${R.itemIcon(r.out, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
-          <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}${needed[r.out] ? neededBadge() : ''}${locked && msu ? `<span class="lockBadge">unlocks: ${msu.name}</span>` : ''}</div>
+          <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}${needed[r.out] ? neededBadge() : ''}${locked && msu ? `<span class="lockBadge">unlocks: ${msu.name}</span>` : tkid ? `<span class="lockBadge">research: ${F.TECHS[tkid].name}</span>` : ''}</div>
           <div class="compChain">${Object.entries(r.in).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)} ${F.ITEMS[ik].name}</span>`).join('<span class="arrow">+</span>')}${r.fluid ? `<span class="arrow">+</span><span>${r.fluid} crude</span>` : ''}</div>
           ${usedInHtml(S, r.out)}
         </div>
@@ -1401,6 +1565,8 @@ function renderRecipeBook(S){
       if (d.fuel) stats.push('coal-fired');
       if (d.kind === 'pole') stats.push(`links ${d.reach} · powers ${d.cover * 2 + 1}×${d.cover * 2 + 1}`);
       if (d.span) stats.push(`spans ${d.span}`);
+      if (d.kind === 'lab') stats.push(`reads a pack every ${d.packTime}s`);
+      if (d.kind === 'chest' && d.cap) stats.push(`holds ${d.cap}`);
       h += `<div class="compRow">
         <img src="${R.makeBuildingIcon(k, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
@@ -1466,6 +1632,15 @@ function renderHowTo(){
   turns red). Generators idle when nothing draws power, so fuel is never wasted. Later:
   <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn ${ic('fuelCell')} fuel cells
   for serious output; the <b>pylon</b> spans 14 tiles.</p>
+
+  <div class="selSection">Research</div>
+  <p class="howP">From tier 3 the <b>laboratory</b> opens an optional <b>tech tree</b> beside the milestone
+  campaign. Craft ${ic('pack1')} <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
+  belt them into any side of a lab, and pick a project in the <b>Research</b> tab (${kb('U')}). Every
+  technology is a bonus you choose — ${ic('ironDust')} ore-doubling <b>crushers</b>, the 240-item
+  <b>vault</b>, area-powering <b>substations</b>, <b>grav-belts</b>, <b>solar towers</b> — never a gate on
+  the campaign. Later milestones unlock richer packs (${ic('pack2')} volt, ${ic('pack3')} polymer,
+  ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.</p>
 
   <div class="selSection">Oil</div>
   <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws
@@ -1690,6 +1865,23 @@ function drainEvents(){
         UI.save();
         break;
       }
+      case 'place':
+        if (ev.key === 'lab') tipOnce('firstLab');
+        break;
+      case 'research': {
+        A.sfx.milestone();
+        const tk = F.TECHS[ev.id];
+        const names = (tk.unlocks || []).map(u => u.startsWith('r:')
+          ? F.ITEMS[F.RECIPES[u.slice(2)].out].name
+          : F.BUILDINGS[u].name);
+        toast(`<b style="color:#c07ae8">⚗ ${ev.name} — researched</b>` +
+          (names.length ? `<br>unlocked: ${[...new Set(names)].join(', ')}` : ''), '', 9000);
+        buildBar();
+        UI._resSig = null;
+        if (UI.bigTab === 'research') renderBig();
+        UI.save();
+        break;
+      }
       case 'win': startWin(); break;
     }
   }
@@ -1818,7 +2010,8 @@ UI.update = function(dt){
     refreshPower();
     if (UI.selection) refreshSelPanel();
     buildBarAfford();
-    if (UI.bigTab === 'stats' || UI.bigTab === 'inventory') renderBig();
+    if (UI.bigTab === 'stats' || UI.bigTab === 'inventory' || UI.bigTab === 'research') renderBig();
+    refreshTechChip();
     updateArrow();
   }
 

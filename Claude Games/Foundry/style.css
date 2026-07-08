@@ -226,6 +226,19 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 }
 .dangerBtn:hover{ background:rgba(255,118,118,.14); }
 .ghostNote{ font-size:11px; color:var(--ink-faint); line-height:1.5; margin-top:6px; }
+.ghostTxt{ color:var(--ink-faint); }
+
+/* Active-research chip (rides under the objective card) */
+#techChip{
+  position:absolute; left:12px; top:70px;
+  width:min(320px, calc(100vw - 24px));
+  padding:7px 11px 8px; cursor:pointer;
+  transition:border-color .15s;
+}
+#techChip:hover{ border-color:rgba(192,122,232,.55); }
+#techChip span{ font-size:11.5px; color:#d9b8ef; letter-spacing:.02em; }
+#techChipBar{ height:4px; border-radius:2px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:5px; }
+#techChipFill{ height:100%; width:0%; border-radius:2px; background:linear-gradient(90deg, #c07ae8, #e6c8f5); transition:width .3s; }
 
 /* Menu popup */
 #menuPop{
@@ -372,6 +385,43 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .upBuy:disabled{ cursor:default; opacity:.75; }
 .upBuy .lack{ color:var(--bad); }
 .upBuy span{ display:inline-flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums; }
+
+/* Research tab */
+.resHead{ margin-bottom:14px; padding:12px; border:1px solid rgba(192,122,232,.3); border-radius:10px; background:rgba(192,122,232,.05); }
+.resCurName{ font-size:13px; }
+.resCurName b{ color:#d9b8ef; }
+.resLabs{ font-size:11px; color:var(--ink-faint); }
+.resBarOuter{ height:6px; border-radius:3px; background:rgba(255,255,255,.08); overflow:hidden; margin:8px 0 6px; }
+.resBarFill{ height:100%; border-radius:3px; background:linear-gradient(90deg, #c07ae8, #e6c8f5); transition:width .3s; }
+.resCurPacks{ font-size:11.5px; color:var(--ink-dim); display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+.resStop{
+  margin-top:9px; padding:5px 12px; border-radius:7px; font-size:11.5px;
+  color:var(--ink-dim); border:1px solid var(--line); background:rgba(255,255,255,.03);
+  transition:border-color .12s, color .12s;
+}
+.resStop:hover{ color:var(--ink); border-color:var(--line-bright); }
+.techGrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
+.techCard{ border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column; }
+.techCard.done{ border-color:rgba(111,227,160,.35); }
+.techCard.cur{ border-color:rgba(192,122,232,.55); background:rgba(192,122,232,.05); }
+.techCard.tlocked{ opacity:.55; }
+.techHead{ display:flex; align-items:center; gap:8px; }
+.techName{ font-family:var(--font-d); font-weight:600; font-size:13px; flex:1; }
+.techState{ font-size:10.5px; }
+.techState.tsDone{ color:#6fe3a0; }
+.techState.tsCur{ color:#d9b8ef; }
+.techDesc{ font-size:11.5px; color:var(--ink-dim); margin-top:5px; line-height:1.45; flex:1; }
+.techReq{ font-size:11px; color:var(--accent); margin-top:5px; }
+.techCost{ display:flex; align-items:center; gap:5px 12px; flex-wrap:wrap; margin-top:8px; }
+.techPack{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink-dim); font-variant-numeric:tabular-nums; }
+.techBtn{
+  width:100%; padding:7px; border-radius:7px; margin-top:9px;
+  border:1px solid var(--line-bright); background:rgba(255,255,255,.04);
+  font-size:12px; color:var(--ink);
+  transition:border-color .12s, background .12s;
+}
+.techBtn:not(:disabled):hover{ border-color:#c07ae8; background:rgba(192,122,232,.1); }
+.techBtn:disabled{ cursor:default; opacity:.7; }
 
 /* Inventory + compendium */
 .invGrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(76px, 1fr)); gap:7px; }

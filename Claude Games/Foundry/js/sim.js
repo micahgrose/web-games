@@ -206,6 +206,7 @@ function initEnt(S, e, def){
                      e.fuelT = 0; e.fuelBuf = 0; e.tank = 0; e.ema = 0; e.lastOut = -1;
                      if (def.fam === 'refinery') e.recipe = null;
                      break;
+    case 'lab':      e.inBuf = {}; e.outBuf = {}; e.outTotal = 0; e.prog = 0; e.workItem = null; break;
     case 'gen':      e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'solar':    break;
@@ -244,7 +245,12 @@ F.remove = function(S, x, y){
   if (e.outBuf) give(e.outBuf);
   if (e.store) give(e.store);
   if (e.item) F.invAdd(S, e.item, 1);
-  if (e.fuelBuf) F.invAdd(S, 'coal', e.fuelBuf);
+  if (e.workItem){
+    // a lab mid-consume: hand the pack back and release its reservation
+    F.invAdd(S, e.workItem, 1);
+    if (S.research.resv[e.workItem]) S.research.resv[e.workItem]--;
+  }
+  if (e.fuelBuf) F.invAdd(S, e.kind === 'turbine' ? 'fuelCell' : 'coal', e.fuelBuf);
   if (e.transit) for (const tr of e.transit) F.invAdd(S, tr.item, 1);
   if (e.kind === 'ubelt' && e.linkId){
     const other = F.entById(S, e.linkId);
@@ -341,7 +347,7 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       target.item = item; target.t = t0 || 0; target.srcDir = fromDir;
       return true;
     case 'chest': {
-      const cap = F.CHEST_CAP + F.upRank(S, 'capacitors') * 20;
+      const cap = (F.BUILDINGS[target.key].cap || F.CHEST_CAP) + F.upRank(S, 'capacitors') * 20;
       if (target.total >= cap) return false;
       target.store[item] = (target.store[item] || 0) + 1; target.total++;
       return true;
@@ -357,6 +363,10 @@ F.tryInsert = function(S, target, item, fromDir, t0){
     case 'turbine':
       if (item !== 'fuelCell' || target.fuelBuf >= F.FUEL_CAP) return false;
       target.fuelBuf++; return true;
+    case 'lab':
+      if (!F.PACKS.includes(item)) return false;
+      if ((target.inBuf[item] || 0) >= F.LAB_BUF) return false;
+      target.inBuf[item] = (target.inBuf[item] || 0) + 1; return true;
     case 'machine':
       return machineAccept(S, target, item);
     default:
@@ -371,7 +381,7 @@ function machineAccept(S, m, item){
     m.fuelBuf++; return true;
   }
   const cap = 2; // buffer holds cap × recipe need (+capacitor bonus)
-  if (def.fam === 'smelter' || def.fam === 'alloy'){
+  if (F.AUTO_RECIPES[def.fam]){
     // accept anything belonging to an unlocked auto recipe
     let need = 0;
     for (const rk of F.AUTO_RECIPES[def.fam]){
@@ -486,7 +496,7 @@ function tryEject(S, e){
 function machineCanStart(S, m, def){
   if (m.outTotal >= 6 + F.bufBonus(S)) return false;
   let r = null;
-  if (def.fam === 'smelter' || def.fam === 'alloy'){
+  if (F.AUTO_RECIPES[def.fam]){
     for (const rk of F.AUTO_RECIPES[def.fam]){
       if (!F.recipeUnlocked(S, rk)) continue;
       const rc = F.RECIPES[rk];
@@ -508,7 +518,7 @@ function machineCanStart(S, m, def){
 }
 
 function famMul(S, fam){
-  if (fam === 'smelter' || fam === 'alloy') return F.smeltMul(S);
+  if (fam === 'smelter' || fam === 'alloy' || fam === 'crusher') return F.smeltMul(S);
   return F.asmMul(S);
 }
 
@@ -569,7 +579,7 @@ F.tick = function(S, dt){
     if (e.load > 0){
       e.fuelT -= dt * e.load;
       if (e.fuelT <= 0){
-        if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += def.burn; }
+        if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += def.burn * F.burnMul(S); }
         else e.fuelT = 0;
       }
     }
@@ -585,6 +595,7 @@ F.tick = function(S, dt){
       case 'machine': tickMachine(S, e, def, dt, pr(e, def)); break;
       case 'pump': tickPump(S, e, def, dt, pr(e, def)); break;
       case 'chest': tickChest(S, e, dt); break;
+      case 'lab': tickLab(S, e, def, dt); break;
     }
   }
 
@@ -628,7 +639,7 @@ function tickMiner(S, e, def, dt, ratio){
   else {
     // burner
     if (e.fuelT <= 0){
-      if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN; }
+      if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN * F.burnMul(S); }
       else {
         e.active = false;
         if (!S.flags.fuelLow && S.time > 30){ S.flags.fuelLow = true; F.emit(S, { type:'tip', id:'firstFuelLow' }); }
@@ -674,7 +685,7 @@ function tickMachine(S, e, def, dt, ratio){
   if (def.power) mul *= ratio;
   else {
     if (e.fuelT <= 0){
-      if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN; }
+      if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN * F.burnMul(S); }
       else {
         e.active = false;
         if (!S.flags.fuelLow && S.time > 30){ S.flags.fuelLow = true; F.emit(S, { type:'tip', id:'firstFuelLow' }); }
@@ -718,6 +729,92 @@ function tickPump(S, e, def, dt, ratio){
     });
   }
 }
+
+/* ---- laboratories & research ----
+   One global research project (S.research.cur). Each lab pulls a still-needed
+   pack from its buffer, "reads" it for def.packTime seconds, then books it as
+   spent. resv[] counts packs inside working labs so parallel labs never
+   over-consume; prog[] keeps per-tech progress so switching projects is free. */
+function tickLab(S, e, def, dt){
+  const RS = S.research;
+  const tk = RS.cur && F.TECHS[RS.cur];
+  e.active = false;
+  if (!tk){
+    // no project: put any half-read pack back in the buffer
+    if (e.workItem){
+      e.inBuf[e.workItem] = (e.inBuf[e.workItem] || 0) + 1;
+      if (RS.resv[e.workItem]) RS.resv[e.workItem]--;
+      e.workItem = null; e.prog = 0;
+    }
+    return;
+  }
+  if (!e.workItem){
+    const sp = RS.prog[RS.cur] || {};
+    for (const pk in tk.cost){
+      const need = tk.cost[pk] - (sp[pk] || 0) - (RS.resv[pk] || 0);
+      if (need > 0 && (e.inBuf[pk] || 0) > 0){
+        e.inBuf[pk]--;
+        if (e.inBuf[pk] <= 0) delete e.inBuf[pk];
+        e.workItem = pk; e.prog = 0;
+        RS.resv[pk] = (RS.resv[pk] || 0) + 1;
+        break;
+      }
+    }
+    if (!e.workItem) return;
+  }
+  e.active = true;
+  e.prog += dt / def.packTime;
+  if (e.prog >= 1){
+    const pk = e.workItem;
+    e.workItem = null; e.prog = 0;
+    if (RS.resv[pk]) RS.resv[pk]--;
+    const sp = RS.prog[RS.cur] || (RS.prog[RS.cur] = {});
+    sp[pk] = (sp[pk] || 0) + 1;
+    let doneAll = true;
+    for (const k in tk.cost) if ((sp[k] || 0) < tk.cost[k]){ doneAll = false; break; }
+    if (doneAll) completeResearch(S);
+  }
+}
+
+function completeResearch(S){
+  const RS = S.research;
+  const id = RS.cur, tk = F.TECHS[id];
+  RS.done[id] = true;
+  RS.cur = null;
+  delete RS.prog[id];
+  RS.resv = {};
+  if (tk.unlocks) for (const u of tk.unlocks) S.unlocked[u] = true;
+  F.emit(S, { type:'research', id, name: tk.name });
+}
+
+/* start / switch the global research project. Progress on the old project
+   is kept; labs drop their half-read pack back into their buffers. */
+F.setResearch = function(S, id){
+  const RS = S.research;
+  if (id === null){ dropLabWork(S); RS.cur = null; return true; }
+  const tk = F.TECHS[id];
+  if (!tk || RS.done[id]) return false;
+  for (const rq of (tk.req || [])) if (!RS.done[rq]) return false;
+  if (RS.cur === id) return true;
+  dropLabWork(S);
+  RS.cur = id;
+  return true;
+};
+function dropLabWork(S){
+  for (const e of S.ents){
+    if (e.kind === 'lab' && e.workItem){
+      e.inBuf[e.workItem] = (e.inBuf[e.workItem] || 0) + 1;
+      e.workItem = null; e.prog = 0;
+    }
+  }
+  S.research.resv = {};
+}
+F.techAvailable = function(S, id){
+  const tk = F.TECHS[id];
+  if (!tk || S.research.done[id]) return false;
+  for (const rq of (tk.req || [])) if (!S.research.done[rq]) return false;
+  return true;
+};
 
 function tickChest(S, e, dt){
   // release out the front, one at a time
@@ -928,13 +1025,15 @@ F.serialize = function(S){
     if (e.outIdx) o.oi = e.outIdx;
     if (e.filterItem) o.fi = e.filterItem;
     if (e.prioOut) o.po = e.prioOut;
+    if (e.workItem) o.wk = e.workItem;
     ents.push(o);
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
   return {
-    v: 2, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
+    v: 3, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     msIndex: S.msIndex, msProg: S.msProg,
+    research: { cur: S.research.cur, done: S.research.done, prog: S.research.prog },
     upgrades: S.upgrades, unlocked: S.unlocked, flags: S.flags,
     won: S.won, freeplay: S.freeplay, made: S.stats.made,
     nextId: S.nextId, ents,
@@ -955,6 +1054,9 @@ F.deserialize = function(data){
   S.flags = data.flags || {};
   S.won = !!data.won; S.freeplay = !!data.freeplay;
   S.stats.made = data.made || {};
+  const rs = data.research || {};
+  S.research = { cur: rs.cur || null, done: rs.done || {}, prog: rs.prog || {}, resv: {} };
+  if (S.research.cur && !F.TECHS[S.research.cur]) S.research.cur = null;
   for (const o of data.ents){
     const def = F.BUILDINGS[o.k];
     if (!def) continue;
@@ -977,14 +1079,27 @@ F.deserialize = function(data){
     if (o.oi) e.outIdx = o.oi;
     if (o.fi) e.filterItem = o.fi;
     if (o.po) e.prioOut = o.po;
+    if (o.wk) e.workItem = o.wk;
     S.ents.push(e);
     stamp(S, e);
   }
   S.nextId = data.nextId || (Math.max(0, ...S.ents.map(e => e.id)) + 1);
+  // rebuild pack reservations from labs that were saved mid-read
+  for (const e of S.ents){
+    if (e.kind === 'lab' && e.workItem){
+      if (S.research.cur) S.research.resv[e.workItem] = (S.research.resv[e.workItem] || 0) + 1;
+      else { e.inBuf[e.workItem] = (e.inBuf[e.workItem] || 0) + 1; e.workItem = null; e.prog = 0; }
+    }
+  }
   // migration: content added after this save was made (e.g. power poles)
   // must still unlock — re-apply every completed milestone's unlock list
   for (let i = 0; i < S.msIndex && i < F.MILESTONES.length; i++)
     for (const u of F.MILESTONES[i].unlocks) S.unlocked[u] = true;
+  // …and every finished tech's unlock list
+  for (const id in S.research.done){
+    const tk = F.TECHS[id];
+    if (tk && tk.unlocks) for (const u of tk.unlocks) S.unlocked[u] = true;
+  }
   S.powerDirty = true;
   return S;
 };

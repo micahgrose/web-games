@@ -34,6 +34,10 @@ F.ITEMS = {
   titanIngot: { name:'Titanium ingot', tier:3, icon:{kind:'ingot', c1:'#cdbdf5', c2:'#8672c4'} },
   steel:      { name:'Steel bar',      tier:2, icon:{kind:'ingot', c1:'#8f9dad', c2:'#4d5866'} },
   silicon:    { name:'Silicon',        tier:2, icon:{kind:'chip0', c1:'#3f4c5c', c2:'#93aac2'} },
+  /* crushed grit (1 ore → 2 grit → 2 ingots) */
+  ironDust:   { name:'Iron grit',      tier:1, icon:{kind:'dust',  c1:'#a8b4c4', c2:'#5f6e84'} },
+  copperDust: { name:'Copper grit',    tier:1, icon:{kind:'dust',  c1:'#e8965a', c2:'#8f5028'} },
+  titanDust:  { name:'Titanium grit',  tier:3, icon:{kind:'dust',  c1:'#b9a7e8', c2:'#655397'} },
   /* parts */
   gear:       { name:'Gear',           tier:1, icon:{kind:'gear',  c1:'#c8cfda', c2:'#8892a2'} },
   wire:       { name:'Copper wire',    tier:1, icon:{kind:'coil',  c1:'#f2a86c', c2:'#b06a3a'} },
@@ -45,6 +49,11 @@ F.ITEMS = {
   advCircuit: { name:'Adv. circuit',   tier:3, icon:{kind:'chip',  c1:'#7f3f4f', c2:'#f09ab4'} },
   frame:      { name:'Titan frame',    tier:3, icon:{kind:'frame', c1:'#cdbdf5', c2:'#7a68b0'} },
   processor:  { name:'Processor',      tier:3, icon:{kind:'chip2', c1:'#2f4560', c2:'#6ec6ff'} },
+  /* science packs (consumed by laboratories) */
+  pack1:      { name:'Cog science',     tier:1, icon:{kind:'flask', c1:'#f0a26a', c2:'#a86038'} },
+  pack2:      { name:'Volt science',    tier:2, icon:{kind:'flask', c1:'#6ec6ff', c2:'#2f6a94'} },
+  pack3:      { name:'Polymer science', tier:3, icon:{kind:'flask', c1:'#8fe0b0', c2:'#3f7f5f'} },
+  pack4:      { name:'Quantum science', tier:3, icon:{kind:'flask', c1:'#cdbdf5', c2:'#7a68b0'} },
   /* world-engine components */
   logicMatrix:{ name:'Logic matrix',   tier:4, icon:{kind:'matrix',c1:'#63d4ff', c2:'#1c5f80'} },
   powerCore:  { name:'Power core',     tier:4, icon:{kind:'corep', c1:'#ffd76e', c2:'#b06a20'} },
@@ -62,6 +71,14 @@ F.RECIPES = {
   brick:      { out:'brick',      outN:1, in:{stone:1},     time:1.6, machine:'smelter', unlock:1 },
   glass:      { out:'glass',      outN:1, in:{quartz:1},    time:2.6, machine:'smelter', unlock:1 },
   titanIngot: { out:'titanIngot', outN:1, in:{titanOre:1},  time:3.6, machine:'smelter', unlock:7 },
+  /* grit smelting (tech: ore crushing — 1 grit → 1 ingot, so ore counts double) */
+  ironIngotD: { out:'ironIngot',  outN:1, in:{ironDust:1},   time:2.0, machine:'smelter', tech:'crushing' },
+  copperIngotD:{out:'copperIngot',outN:1, in:{copperDust:1}, time:2.0, machine:'smelter', tech:'crushing' },
+  titanIngotD:{ out:'titanIngot', outN:1, in:{titanDust:1},  time:3.6, machine:'smelter', tech:'crushing2' },
+  /* crusher (auto) — 1 ore → 2 grit */
+  ironDust:   { out:'ironDust',   outN:2, in:{ironOre:1},   time:1.8, machine:'crusher', tech:'crushing' },
+  copperDust: { out:'copperDust', outN:2, in:{copperOre:1}, time:1.8, machine:'crusher', tech:'crushing' },
+  titanDust:  { out:'titanDust',  outN:2, in:{titanOre:1},  time:2.8, machine:'crusher', tech:'crushing2' },
   /* alloy furnace (auto) */
   steel:      { out:'steel',      outN:1, in:{ironIngot:2, coal:1},  time:3.2, machine:'alloy', unlock:4 },
   silicon:    { out:'silicon',    outN:1, in:{quartz:1, coal:1},     time:2.6, machine:'alloy', unlock:4 },
@@ -77,18 +94,26 @@ F.RECIPES = {
   logicMatrix:{ out:'logicMatrix', outN:1, in:{processor:2, circuit:2, glass:1}, time:6.0, machine:'asm', unlock:8 },
   powerCore:  { out:'powerCore',   outN:1, in:{fuelCell:2, frame:1, motor:1},    time:6.0, machine:'asm', unlock:8 },
   hullPlate:  { out:'hullPlate',   outN:1, in:{titanIngot:2, steel:2, glass:1},  time:6.0, machine:'asm', unlock:8 },
+  /* science packs */
+  pack1:      { out:'pack1', outN:1, in:{gear:1, copperIngot:1},    time:4.0, machine:'asm', unlock:2 },
+  pack2:      { out:'pack2', outN:1, in:{circuit:1, glass:1},       time:5.0, machine:'asm', unlock:4 },
+  pack3:      { out:'pack3', outN:1, in:{plastic:1, motor:1},       time:6.0, machine:'asm', unlock:6 },
+  pack4:      { out:'pack4', outN:1, in:{processor:1, titanIngot:1},time:7.0, machine:'asm', unlock:8 },
   /* refinery (fluid) */
   plastic:    { out:'plastic',  outN:2, in:{coal:1}, fluid:8,  time:3.2, machine:'refinery', unlock:6 },
   fuelCell:   { out:'fuelCell', outN:1, in:{steel:1}, fluid:10, time:3.0, machine:'refinery', unlock:6 },
 };
 
-/* what a smelter/alloy can make, for auto-select */
-F.AUTO_RECIPES = { smelter:[], alloy:[] };
+/* what a smelter/alloy/crusher can make, for auto-select */
+F.AUTO_RECIPES = { smelter:[], alloy:[], crusher:[] };
 for (const k in F.RECIPES){
   const r = F.RECIPES[k];
-  if (r.machine === 'smelter') F.AUTO_RECIPES.smelter.push(k);
-  if (r.machine === 'alloy')   F.AUTO_RECIPES.alloy.push(k);
+  if (F.AUTO_RECIPES[r.machine]) F.AUTO_RECIPES[r.machine].push(k);
 }
+
+/* science pack items, in tier order */
+F.PACKS = ['pack1', 'pack2', 'pack3', 'pack4'];
+F.LAB_BUF = 6;   // max of each pack a lab buffers
 
 /* ================= BUILDINGS ================= */
 const B = F.BUILDINGS = {
@@ -99,6 +124,8 @@ const B = F.BUILDINGS = {
              desc:'Twice the throughput of a basic conveyor.' },
   belt3:   { name:'Mag-rail',        cat:'log', kind:'belt', w:1, h:1, speed:4.2,  cost:{steel:1, gear:1},    unlock:7,
              desc:'Frictionless magnetic rail. Very fast.' },
+  belt4:   { name:'Grav-belt',       cat:'log', kind:'belt', w:1, h:1, speed:6.5,  cost:{titanIngot:1, advCircuit:1}, tech:'gravBelts',
+             desc:'Items float above the track on gravity pins. Blinding speed.' },
   ubelt1:  { name:'Tunnel',          cat:'log', kind:'ubelt', w:1, h:1, span:5, speed:1.25, cost:{ironIngot:4, gear:1}, unlock:3,
              desc:'Sends items under 4 tiles. Place entrance, then exit. Lets lines cross.' },
   ubelt2:  { name:'Deep tunnel',     cat:'log', kind:'ubelt', w:1, h:1, span:9, speed:4.2, cost:{steel:4, plastic:2}, unlock:7,
@@ -107,6 +134,8 @@ const B = F.BUILDINGS = {
              desc:'Takes items in from behind and deals them evenly to every open exit.' },
   chest:   { name:'Depot',           cat:'log', kind:'chest', w:1, h:1, cap:60, cost:{plate:4},               unlock:3,
              desc:'Buffers up to 60 items, releases them out the front. Smooths surges.' },
+  chest2:  { name:'Vault',           cat:'log', kind:'chest', w:1, h:1, cap:240, cost:{steel:6, plate:8},     tech:'massStorage',
+             desc:'A reinforced depot holding 240 items. Feeds out the front like a depot.' },
   pipe:    { name:'Pipe',            cat:'log', kind:'pipe', w:1, h:1, cap:40, cost:{plate:1},                unlock:6,
              desc:'Carries crude oil between pumpjacks and refineries.' },
   /* --- extraction --- */
@@ -116,6 +145,8 @@ const B = F.BUILDINGS = {
              desc:'No fuel needed — draws from the power grid.' },
   miner3:  { name:'Plasma bore',     cat:'ext', kind:'miner', w:1, h:1, speed:4.4, mineTime:2.4, power:12, cost:{steel:8, motor:3, advCircuit:2}, unlock:7,
              desc:'Cuts ore with a plasma lance. Extremely fast.' },
+  miner4:  { name:'Quantum drill',   cat:'ext', kind:'miner', w:1, h:1, speed:7, mineTime:2.4, power:24, cost:{frame:2, processor:1, motor:4}, tech:'quantumDrills',
+             desc:'Folds the deposit through itself. Absurd yield, serious power draw.' },
   pump:    { name:'Pumpjack',        cat:'ext', kind:'pump', w:2, h:2, rate:3, power:6, cost:{steel:8, gear:6, motor:2}, unlock:6,
              desc:'Draws crude oil from a seep. Connect pipes to carry it away.' },
   /* --- production --- */
@@ -135,15 +166,27 @@ const B = F.BUILDINGS = {
              desc:'Assembles at the molecular scale.' },
   refinery:{ name:'Refinery',        cat:'pro', kind:'machine', fam:'refinery', w:3, h:3, speed:1.6, power:16, tank:60, cost:{steel:14, brick:10, circuit:6}, unlock:6,
              desc:'Cracks crude oil into plastic and fuel cells. Needs pipe input.' },
+  crusher1:{ name:'Jaw crusher',     cat:'pro', kind:'machine', fam:'crusher', w:2, h:2, speed:1, fuel:true, cost:{brick:8, gear:6, plate:4}, tech:'crushing',
+             desc:'Grinds 1 ore into 2 grit; grit smelts into full ingots — double your yield. Burns coal.' },
+  crusher2:{ name:'Ball mill',       cat:'pro', kind:'machine', fam:'crusher', w:2, h:2, speed:2.4, power:12, cost:{steel:8, motor:3, circuit:4}, tech:'crushing2',
+             desc:'An electric mill — much faster, and hard enough to crack titanium.' },
+  lab:     { name:'Laboratory',      cat:'pro', kind:'lab', w:2, h:2, packTime:2.5, cost:{brick:8, wire:6, gear:4}, unlock:2,
+             desc:'Consumes science packs to research technologies — pick a project in the Research tab (U). Runs on curiosity alone; no fuel, no power.' },
   /* --- power --- */
   pole1:   { name:'Power pole',      cat:'pow', kind:'pole', w:1, h:1, reach:7, cover:2, cost:{ironIngot:2, wire:2}, unlock:3,
              desc:'Carries power. Links to poles within 7 tiles and powers machines in the 5×5 area around it. Generators must be in a pole\'s area too.' },
   pole2:   { name:'Pylon',           cat:'pow', kind:'pole', w:1, h:1, reach:14, cover:3, cost:{steel:4, wire:6}, unlock:7,
              desc:'A steel giant. Links across 14 tiles and powers a 7×7 area.' },
+  pole3:   { name:'Substation',      cat:'pow', kind:'pole', w:1, h:1, reach:9, cover:5, cost:{steel:6, wire:8, circuit:2}, tech:'substations',
+             desc:'A humming grid hub. Powers a huge 11×11 area and links across 9 tiles.' },
   gen1:    { name:'Burner generator',cat:'pow', kind:'gen', w:2, h:2, out:30, burn:6, cost:{brick:10, plate:6}, unlock:3,
              desc:'Burns coal to feed the grid. 30 P at full load. Needs a power pole in range to deliver it.' },
   solar:   { name:'Solar array',     cat:'pow', kind:'solar', w:2, h:2, out:12, cost:{glass:6, circuit:2, plate:4}, unlock:6,
              desc:'Silent, fuel-free power. 12 P, always on.' },
+  solar2:  { name:'Solar tower',     cat:'pow', kind:'solar', w:2, h:2, out:45, cost:{glass:12, circuit:6, steel:6}, tech:'solarTowers',
+             desc:'Concentrated mirrors around a molten-salt core. 45 P, always on.' },
+  solar3:  { name:'Helios array',    cat:'pow', kind:'solar', w:3, h:3, out:130, cost:{glass:20, advCircuit:6, frame:4}, tech:'helios',
+             desc:'A field of sun-tracking mirrors. 130 P of silent power.' },
   turbine: { name:'Fuel turbine',    cat:'pow', kind:'turbine', w:2, h:2, out:150, burn:20, cost:{steel:10, motor:4, plate:8}, unlock:6,
              desc:'Burns fuel cells for serious power. 150 P at full load.' },
 };
@@ -172,9 +215,9 @@ F.MILESTONES = [
   { id:'m2', name:'The Ingot Age',
     flavor:'Raw ore is a promise, not a material. Smelt it.',
     req:{ ironIngot:25, copperIngot:15 },
-    unlocks:['asm1','splitter','r:gear','r:wire','r:plate'],
-    grant:{ ironIngot:10, brick:8 },
-    hint:'Belt ore into a kiln\'s side — ingots come out the marked front. Kilns burn coal too.' },
+    unlocks:['asm1','splitter','lab','r:gear','r:wire','r:plate','r:pack1'],
+    grant:{ ironIngot:10, brick:8, pack1:4 },
+    hint:'Belt ore into a kiln\'s side — ingots come out the marked front. Kilns burn coal too. New: the laboratory researches optional technologies — feed it cog science packs.' },
   { id:'m3', name:'Cogs & Current',
     flavor:'Gears to turn, wire to carry the spark. The grid wakes.',
     req:{ gear:30, wire:40 },
@@ -184,7 +227,7 @@ F.MILESTONES = [
   { id:'m4', name:'Vitreous Earth',
     flavor:'Quartz sleeps in the middle distance. Melt it to glass, fuse it to silicon — the factory must reach outward.',
     req:{ glass:25, plate:40 },
-    unlocks:['alloy','belt2','r:steel','r:silicon','r:circuit'],
+    unlocks:['alloy','belt2','r:steel','r:silicon','r:circuit','r:pack2'],
     grant:{ steel:6 },
     hint:'Quartz deposits lie beyond your starting field. Electric machines need power: place a generator, then string power poles from it — each pole energises the machines around it.' },
   { id:'m5', name:'The First Circuit',
@@ -196,7 +239,7 @@ F.MILESTONES = [
   { id:'m6', name:'Black Blood',
     flavor:'Deep in the waste, the ground weeps oil. Drink it.',
     req:{ motor:25, circuit:30 },
-    unlocks:['pump','pipe','refinery','turbine','solar','r:plastic','r:fuelCell','r:advCircuit'],
+    unlocks:['pump','pipe','refinery','turbine','solar','r:plastic','r:fuelCell','r:advCircuit','r:pack3'],
     grant:{ steel:10 },
     hint:'Pumpjacks sit on oil seeps; pipes carry crude to refineries. Fuel turbines dwarf burner generators.' },
   { id:'m7', name:'Polymer Mind',
@@ -208,7 +251,7 @@ F.MILESTONES = [
   { id:'m8', name:'Star Metal',
     flavor:'Titanium bones for a sleeping god.',
     req:{ titanIngot:40, frame:15 },
-    unlocks:['r:processor','r:logicMatrix','r:powerCore','r:hullPlate'],
+    unlocks:['r:processor','r:logicMatrix','r:powerCore','r:hullPlate','r:pack4'],
     grant:{},
     hint:'Everything you have built converges here: processors, cores, hull. Three final components.' },
   { id:'m9', name:'Ignition',
@@ -218,6 +261,55 @@ F.MILESTONES = [
     grant:{},
     hint:'The dawn you build is the only dawn there is.' },
 ];
+
+/* ================= TECHNOLOGIES =================
+   Optional research, bought with science packs in laboratories.
+   Milestones are the spine; techs are the branches — every tech is a
+   side-grade or shortcut you choose, not a gate on the campaign.
+   cost: packs consumed · req: prerequisite techs · unlocks: buildings/recipes
+   effect: engine-level bonus flag (checked in sim) */
+F.TECHS = {
+  combustion:  { name:'Efficient combustion', icon:'coal',
+    desc:'Refined firebox airflow — coal burns 35% longer in every burner machine and generator.',
+    cost:{ pack1:8 }, req:[], effect:'burn' },
+  crushing:    { name:'Ore crushing', icon:'ironDust',
+    desc:'The jaw crusher grinds 1 ore into 2 grit, and grit smelts into full ingots — double the metal from every deposit.',
+    cost:{ pack1:15 }, req:[], unlocks:['crusher1','r:ironDust','r:copperDust','r:ironIngotD','r:copperIngotD'] },
+  massStorage: { name:'Mass storage', icon:'plate',
+    desc:'The vault: a reinforced depot that holds 240 items.',
+    cost:{ pack1:12 }, req:[], unlocks:['chest2'] },
+  substations: { name:'Substations', icon:'wire',
+    desc:'A humming grid hub that powers a huge 11×11 area — far fewer poles in dense factory blocks.',
+    cost:{ pack1:10, pack2:12 }, req:[], unlocks:['pole3'] },
+  crushing2:   { name:'Ball mills', icon:'titanDust',
+    desc:'An electric mill that crushes 2.4× faster — and is hard enough to crack titanium.',
+    cost:{ pack1:10, pack2:15 }, req:['crushing'], unlocks:['crusher2','r:titanDust','r:titanIngotD'] },
+  solarTowers: { name:'Solar towers', icon:'glass',
+    desc:'Concentrated mirrors around a molten-salt core: 45 P of silent, fuel-free power.',
+    cost:{ pack2:18 }, req:[], unlocks:['solar2'] },
+  gravBelts:   { name:'Grav-belts', icon:'advCircuit',
+    desc:'Items float above the track on gravity pins — 6.5 tiles/s, the fastest logistics there is.',
+    cost:{ pack2:12, pack3:14 }, req:[], unlocks:['belt4'] },
+  quantumDrills:{ name:'Quantum drills', icon:'processor',
+    desc:'A drill that folds the deposit through itself. 7× base mining speed.',
+    cost:{ pack3:16, pack4:10 }, req:[], unlocks:['miner4'] },
+  helios:      { name:'Helios arrays', icon:'frame',
+    desc:'A 3×3 field of sun-tracking mirrors — 130 P without a whisper of smoke.',
+    cost:{ pack3:10, pack4:16 }, req:['solarTowers'], unlocks:['solar3'] },
+};
+F.TECH_ORDER = Object.keys(F.TECHS);
+
+/* which tech (if any) unlocks a building / 'r:recipe' key */
+F.techOf = function(u){
+  for (const id of F.TECH_ORDER){
+    const tk = F.TECHS[id];
+    if (tk.unlocks && tk.unlocks.includes(u)) return id;
+  }
+  return null;
+};
+
+/* burn-time multiplier from the combustion tech */
+F.burnMul = S => (S.research && S.research.done.combustion) ? 1.35 : 1;
 
 /* ================= UPGRADES ================= */
 F.UPGRADES = {
@@ -260,6 +352,7 @@ F.TIPS = {
   firstBlocked: 'A machine\'s output is jammed — give it an empty belt to push onto.',
   firstUpgrade: 'The Foundry panel (U) sells permanent upgrades for parts. Faster belts, drills, furnaces…',
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',
+  firstLab:     'Belt science packs into any side of the laboratory, then pick a project in the <b>Research</b> tab (U). Research is optional — every tech is a bonus, not a gate.',
   firstPipe:    'Pipes only connect to pumpjacks, refineries and other pipes.',
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
 };
