@@ -554,27 +554,32 @@ SeedBag.prototype.draw = function () {
     ctx.restore();
 };
 
-// ---- SeedBag: pixel seed-pouch icon (hotbar slot) ----
+// ---- SeedBag: seed-packet icon (hotbar slot) ----
+// A paper seed packet with a golden wheat spike printed on it — the classic
+// farming-game read for "seeds".
 const SEED_ICON = (() => {
     const map = [
-        '....xx....',
-        '...xggx...',
-        '...xggx...',
-        '..xssssx..',
-        '.xssssssx.',
-        '.xsBssBsx.',
-        '.xssssssx.',
-        '.xsBssBsx.',
-        '..xssssx..',
-        '...xxxx...',
+        'xxxxxxxxxxx',
+        'xcccccccccx',
+        'xxxxxxxxxxx',
+        'xPPPPPPPPPx',
+        'xPPePePePPx',
+        'xPPPPePPPPx',
+        'xPPePePePPx',
+        'xPPPPePPPPx',
+        'xPPePePePPx',
+        'xPPPPePPPPx',
+        'xPPPPePPPPx',
+        'xPPPPPPPPPx',
+        'xxxxxxxxxxx',
     ];
     const pal = {
         x: '#241a12', // outline
-        g: '#6a8f3f', // tie / sprout green
-        s: '#d9b166', // burlap sack
-        B: '#7a4e26', // seeds showing through
+        c: '#d9c9a8', // folded top flap
+        P: '#efe3c8', // packet paper
+        e: '#c9972e', // printed wheat spike
     };
-    const W = 10, H = map.length;
+    const W = 11, H = map.length;
     const off = document.createElement('canvas');
     off.width = W;
     off.height = H;
@@ -591,7 +596,7 @@ const SEED_ICON = (() => {
 })();
 
 SeedBag.prototype.drawIcon = function (cx, cy, size) {
-    const scale = (size * 0.62) / 10;
+    const scale = (size * 0.72) / 13;
     const w = SEED_ICON.width * scale, h = SEED_ICON.height * scale;
     const prev = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
@@ -725,20 +730,25 @@ function buildTilledTiles() {
 
 // ---- Crops ----
 // Growth-stage art per crop: clumps planted along the furrow lines, baked in
-// 2 variants per stage so fields aren't perfectly rubber-stamped.
-// wheat: seeds -> sprout -> green stalks -> golden mature
-const cropTiles = { wheat: [] }; // [stage][variant] -> canvas
+// 2 variants per stage. Crop canvases have CROP_EXT px of headroom above the
+// tile so tall stalks overhang the tile to their north — rows render top to
+// bottom, so southern wheat naturally layers in front like a real field.
+// wheat: seeds -> sprout -> young -> waist-high -> green-gold -> tall golden
+const CROP_EXT = 46;                    // headroom above the tile, world px
+const CROP_STAGE_MAX = { wheat: 5 };    // last stage index per crop
+const cropTiles = { wheat: [] };        // [stage][variant] -> canvas
 
 function buildCropTiles() {
     const T = CFG.tile;
     cropTiles.wheat = [];
-    for (let stage = 0; stage < 4; stage++) {
+    for (let stage = 0; stage <= CROP_STAGE_MAX.wheat; stage++) {
         const variants = [];
         for (let vv = 0; vv < 2; vv++) {
             const off = document.createElement('canvas');
             off.width = T;
-            off.height = T;
+            off.height = T + CROP_EXT;
             const c = off.getContext('2d');
+            c.translate(0, CROP_EXT);   // keep tile coords; y<0 = the overhang
 
             let s = (stage * 7919 + vv * 104729 + 31) >>> 0;
             const rnd = () => {
@@ -746,58 +756,25 @@ function buildCropTiles() {
                 return s / 4294967296;
             };
 
-            // one clump every ~13px along each furrow line
             for (const fy of [11, 32, 53]) {
-                for (let x = 7 + rnd() * 4; x < T - 5; x += 12 + rnd() * 5) {
-                    const jy = fy + (rnd() - 0.5) * 3;
-                    if (stage === 0) {
-                        // freshly sown: a little dimple with seeds pressed in
-                        c.fillStyle = 'rgba(30,17,9,0.35)';
-                        c.beginPath();
-                        c.ellipse(x, jy, 2.6, 1.7, 0, 0, Math.PI * 2);
-                        c.fill();
-                        c.fillStyle = '#e0c268';
-                        c.fillRect(x - 1, jy - 0.5, 1.2, 1.2);
-                        c.fillRect(x + 0.4, jy, 1.2, 1.2);
-                    } else if (stage === 1) {
-                        // sprout: two tiny blades
-                        c.strokeStyle = '#79b04d';
-                        c.lineWidth = 1.2;
-                        c.beginPath();
-                        c.moveTo(x, jy + 1); c.lineTo(x - 1.2, jy - 3);
-                        c.moveTo(x, jy + 1); c.lineTo(x + 1.4, jy - 2.4);
-                        c.stroke();
-                    } else if (stage === 2) {
-                        // young wheat: a fan of green stalks
-                        c.strokeStyle = '#4f8a33';
-                        c.lineWidth = 1.3;
-                        c.beginPath();
-                        for (let b = -1; b <= 1; b++) {
-                            c.moveTo(x, jy + 1.5);
-                            c.lineTo(x + b * 2.4 + (rnd() - 0.5), jy - 6 - rnd() * 2);
+                if (stage >= 4) {
+                    // late stages: DENSE — a stalk every ~3px so the band reads
+                    // as a solid golden mass, in two layers for depth (darker
+                    // back row first, brighter front row over it)
+                    for (const front of [false, true]) {
+                        for (let x = 2 + rnd() * 3; x < T - 2; x += 2.6 + rnd() * 1.8) {
+                            if (rnd() < 0.05) continue;
+                            const jy = fy + (rnd() - 0.5) * 5 + (front ? 1.5 : -1);
+                            if (stage === 4) drawTurningStalk(c, x, jy, rnd, front);
+                            else             drawMatureStalk(c, x, jy, rnd, front);
                         }
-                        c.stroke();
-                        c.strokeStyle = '#6fa844';
-                        c.beginPath();
-                        c.moveTo(x, jy + 1.5); c.lineTo(x + (rnd() - 0.5) * 2, jy - 4.5);
-                        c.stroke();
-                    } else {
-                        // mature: tall golden stalks with grain heads
-                        c.strokeStyle = '#b89a3e';
-                        c.lineWidth = 1.4;
-                        c.beginPath();
-                        for (let b = -1; b <= 1; b++) {
-                            c.moveTo(x, jy + 1.5);
-                            c.lineTo(x + b * 2.2, jy - 8 - rnd() * 2);
-                        }
-                        c.stroke();
-                        c.fillStyle = '#e3c76a';
-                        for (let b = -1; b <= 1; b++) {
-                            const hx = x + b * 2.2, hy = jy - 8.5 - rnd() * 2;
-                            c.fillRect(hx - 1, hy - 3, 2.2, 4);
-                        }
-                        c.fillStyle = '#f0d98c';
-                        c.fillRect(x - 0.8, jy - 11, 1.6, 2);
+                    }
+                } else {
+                    // young stages: one clump every ~13px, some spots skipped
+                    for (let x = 7 + rnd() * 4; x < T - 5; x += 12 + rnd() * 5) {
+                        if (rnd() < 0.15) continue;  // bare patch
+                        const jy = fy + (rnd() - 0.5) * 4;
+                        drawWheatClump(c, stage, x, jy, rnd);
                     }
                 }
             }
@@ -807,13 +784,131 @@ function buildCropTiles() {
     }
 }
 
+// one clump of wheat at (x, jy) for the given growth stage
+function drawWheatClump(c, stage, x, jy, rnd) {
+    const base = jy + 1.5;
+    if (stage === 0) {
+        // freshly sown: a little dimple with seeds pressed in
+        c.fillStyle = 'rgba(30,17,9,0.35)';
+        c.beginPath();
+        c.ellipse(x, jy, 2.6, 1.7, 0, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = '#e0c268';
+        c.fillRect(x - 1, jy - 0.5, 1.2, 1.2);
+        c.fillRect(x + 0.4, jy, 1.2, 1.2);
+    } else if (stage === 1) {
+        // sprout: two tiny blades
+        c.strokeStyle = '#79b04d';
+        c.lineWidth = 1.2;
+        c.beginPath();
+        c.moveTo(x, base); c.lineTo(x - 1.2, jy - 3.5);
+        c.moveTo(x, base); c.lineTo(x + 1.4, jy - 2.8);
+        c.stroke();
+    } else if (stage === 2) {
+        // young wheat: a fan of short green blades
+        c.strokeStyle = '#4f8a33';
+        c.lineWidth = 1.3;
+        c.beginPath();
+        for (let b = -1; b <= 1; b++) {
+            c.moveTo(x, base);
+            c.lineTo(x + b * 2.6 + (rnd() - 0.5), jy - 7 - rnd() * 3);
+        }
+        c.stroke();
+        c.strokeStyle = '#6fa844';
+        c.beginPath();
+        c.moveTo(x, base); c.lineTo(x + (rnd() - 0.5) * 2, jy - 5.5);
+        c.stroke();
+    } else if (stage === 3) {
+        // waist-high: taller arcing blades, still deep green
+        c.lineWidth = 1.3;
+        for (let b = -1; b <= 2; b++) {
+            const lean = (b - 0.5) * 2.4 + (rnd() - 0.5) * 1.5;
+            const hgt = 14 + rnd() * 6;
+            c.strokeStyle = b % 2 ? '#4f8a33' : '#6fa844';
+            c.beginPath();
+            c.moveTo(x, base);
+            c.quadraticCurveTo(x + lean * 0.4, jy - hgt * 0.6, x + lean, jy - hgt);
+            c.stroke();
+        }
+    }
+    // stages 4/5 are drawn per-stalk by drawTurningStalk / drawMatureStalk
+}
+
+// stage 4: shoulder-high wheat turning from green to gold, heads forming
+function drawTurningStalk(c, x, jy, rnd, front) {
+    const base = jy + 1.5;
+    const lean = (rnd() - 0.5) * 3.5;
+    const hgt = (front ? 26 : 21) + rnd() * 7;
+    const tipX = x + lean, tipY = base - hgt;
+
+    c.strokeStyle = front ? '#8f9a3f' : '#6f7d34';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(x, base);
+    c.quadraticCurveTo(x + lean * 0.35, base - hgt * 0.55, tipX, tipY);
+    c.stroke();
+
+    // small immature head — two green-gold kernel pairs
+    c.fillStyle = front ? '#b4ad52' : '#99944a';
+    c.fillRect(tipX - 1.2, tipY, 1.1, 1.7);
+    c.fillRect(tipX + 0.1, tipY, 1.1, 1.7);
+    c.fillRect(tipX - 1.2, tipY + 1.9, 1.1, 1.7);
+    c.fillRect(tipX + 0.1, tipY + 1.9, 1.1, 1.7);
+}
+
+// stage 5: fully grown — tall stalk crowned with a plump braided grain head
+// (chevron kernel pairs stepping down from a pale tip, thin awn whiskers)
+function drawMatureStalk(c, x, jy, rnd, front) {
+    const base = jy + 1.5;
+    const lean = (rnd() - 0.5) * 4;
+    const hgt = (front ? 38 : 31) + rnd() * 9;
+    const tipX = x + lean, tipY = base - hgt;
+    const nod = (rnd() - 0.5) * 3;   // how far the head bows over
+
+    // slender stem — barely visible under the mass of heads, like the real thing
+    c.strokeStyle = front ? 'rgba(201,166,72,0.9)' : 'rgba(168,134,58,0.75)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(x, base);
+    c.quadraticCurveTo(x + lean * 0.3, base - hgt * 0.55, tipX, tipY);
+    c.stroke();
+
+    // braided head: kernel pairs step down ~9px from the tip, following the nod
+    const kc = front ? ['#e0c168', '#d4b356'] : ['#c9a648', '#b3923d'];
+    for (let k = 0; k < 5; k++) {
+        const hx = tipX + nod * (1 - k / 5) * 0.8;
+        const hy = tipY + k * 1.9;
+        c.fillStyle = kc[k & 1];
+        c.fillRect(hx - 1.4, hy, 1.3, 1.8);   // left kernel
+        c.fillRect(hx + 0.1, hy, 1.3, 1.8);   // right kernel
+    }
+    // pale sunlit tip kernel
+    c.fillStyle = '#edd98d';
+    c.fillRect(tipX + nod * 0.8 - 0.7, tipY - 1.7, 1.4, 1.9);
+
+    // awns: thin whiskers flaring up past the tip (front layer only)
+    if (front) {
+        c.strokeStyle = 'rgba(237, 217, 141, 0.5)';
+        c.lineWidth = 0.6;
+        c.beginPath();
+        for (let a = -1; a <= 1; a++) {
+            c.moveTo(tipX + nod * 0.8, tipY);
+            c.lineTo(tipX + nod * 0.8 + a * 1.8 + nod * 0.5, tipY - 4 - rnd() * 2.5);
+        }
+        c.stroke();
+    }
+}
+
 // per-tile state renderer
 function drawTileState(tile, px, py, size) {
     if (tile.kind === 'tilled') {
         ctx.drawImage(tilledTiles[tile.v & 3], px, py, size, size);
     } else if (tile.kind === 'crop') {
         ctx.drawImage(tilledTiles[tile.v & 3], px, py, size, size);      // soil base
-        ctx.drawImage(cropTiles[tile.crop][tile.stage][tile.v & 1], px, py, size, size);
+        // crop art overhangs upward so tall stalks rise past the tile line
+        const ext = Math.ceil(CROP_EXT * (size / CFG.tile));
+        ctx.drawImage(cropTiles[tile.crop][tile.stage][tile.v & 1],
+                      px, py - ext, size, size + ext);
     }
     // 'shop' tiles draw nothing — the stall sprite covers them
 }
@@ -1168,7 +1263,8 @@ function update(dt) {
     // crops grow on their own, one stage per CFG.growTime seconds
     const now = performance.now();
     for (const tile of worldTiles.values()) {
-        if (tile.kind === 'crop' && tile.stage < 3 && now - tile.t > CFG.growTime * 1000) {
+        if (tile.kind === 'crop' && tile.stage < CROP_STAGE_MAX[tile.crop] &&
+            now - tile.t > CFG.growTime * 1000) {
             tile.stage++;
             tile.t = now;
         }
