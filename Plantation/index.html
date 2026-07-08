@@ -45,6 +45,27 @@
                 background: radial-gradient(circle at 35% 30%, #ffe9a8, #e0a93e 60%, #a8752a);
                 box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
             }
+            #wheat {
+                position: fixed;
+                left: 14px;
+                top: 34px;
+                font: 600 14px "Segoe UI", system-ui, sans-serif;
+                color: rgba(228, 202, 130, 0.95);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+                pointer-events: none;
+                user-select: none;
+            }
+            #wheat::before {
+                content: "";
+                display: inline-block;
+                width: 9px;
+                height: 11px;
+                margin-right: 7px;
+                margin-left: 1px;
+                border-radius: 2px 2px 1px 1px;
+                background: linear-gradient(180deg, #edd98d, #d4b356 55%, #a8863a);
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
             #mode {
                 position: fixed;
                 top: 12px;
@@ -69,6 +90,7 @@
         <div id="coords"></div>
         <div id="zoomlabel"></div>
         <div id="coins"></div>
+        <div id="wheat"></div>
         <div id="mode">Free</div>
 
         <script src="Plantation.js"></script>

@@ -69,6 +69,7 @@ const coordsEl = document.getElementById('coords');
 const zoomEl   = document.getElementById('zoomlabel');
 const modeEl   = document.getElementById('mode');
 const coinsEl  = document.getElementById('coins');
+const wheatEl  = document.getElementById('wheat');
 
 function resize() {
     canvas.width  = window.innerWidth;
@@ -102,8 +103,14 @@ const inventory = {
     items: {},          // future: counts of harvested crops etc by name
 };
 
-let shopOpen = false;   // the seed-stall buy panel
+let shopOpen = null;    // the stall whose panel is open (null = none)
 let coinFlash = 0;      // timestamp: flash coins red until then (can't afford)
+
+// floating pickup text ("+1 wheat", "+5c") — world-anchored, rises and fades
+const floaters = [];
+function addFloater(wx2, wy2, text, color) {
+    floaters.push({ wx: wx2, wy: wy2, text, color, t: performance.now() });
+}
 
 // sparse per-tile state over the infinite procedural ground.
 // A tile with no entry is plain dirt. Future: {kind:'tilled'|'planted', ...}
@@ -189,8 +196,9 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         setMode(!farmerMode);
     }
-    if (e.code === 'KeyE' && !e.repeat && nearShop()) {  // E opens/closes the stall
-        shopOpen = !shopOpen;
+    if (e.code === 'KeyE' && !e.repeat) {   // E opens/closes the stall you're at
+        const st = nearStall();
+        if (st) shopOpen = (shopOpen === st) ? null : st;
     }
     if (e.code.startsWith('Digit')) {       // 1-9 select hotbar slots
         const n = +e.code[5];
@@ -244,9 +252,10 @@ class Teleporter extends Item {
     use() { farmer.x = this.x; farmer.y = this.y; }
 }
 
-// The hoe is in the farmer's hands: it tills a tile a FIXED reach away from
-// him, aimed with the MOUSE. So position (walk/run/teleport) sets how far you
-// can reach; the cursor picks which tile in that ring you swing at.
+// The hoe is in the farmer's hands, aimed with the MOUSE at a fixed reach.
+// It's the all-purpose ground tool: tills bare dirt, and harvests any crop
+// that has reached its final stage (the tile drops back to tilled soil,
+// ready to replant). Growing crops are left alone.
 class Hoe extends Item {
     farmerTool = true;
     constructor() { super(); this.c = 0; this.r = 0; this.wx = 0; this.wy = 0; }
@@ -254,13 +263,21 @@ class Hoe extends Item {
         const aim = aimFromFarmer(CFG.hoeReach);
         this.wx = aim.wx; this.wy = aim.wy;
         this.c = aim.c;   this.r = aim.r;
-        // holding the button tills as you sweep the cursor / walk
-        if (farmerMode && mouse.down && !shopOpen) this.till();
+        // holding the button works tile after tile as you sweep the cursor
+        if (farmerMode && mouse.down && !shopOpen) this.work();
     }
-    use() { this.till(); }
-    till() {
-        if (getTile(this.c, this.r)) return; // already worked soil
-        setTile(this.c, this.r, { kind: 'tilled', v: (hash2(this.c, this.r) * 4) | 0 });
+    use() { this.work(); }
+    work() {
+        const t = getTile(this.c, this.r);
+        if (!t) {
+            // bare dirt -> tilled soil
+            setTile(this.c, this.r, { kind: 'tilled', v: (hash2(this.c, this.r) * 4) | 0 });
+        } else if (t.kind === 'crop' && t.stage === CROP_STAGE_MAX[t.crop]) {
+            // ripe crop -> harvest into the barn, soil stays tilled
+            inventory.items[t.crop] = (inventory.items[t.crop] || 0) + 1;
+            setTile(this.c, this.r, { kind: 'tilled', v: t.v });
+            addFloater((this.c + 0.5) * CFG.tile, this.r * CFG.tile, '+1 wheat', '#e8d07a');
+        }
     }
 }
 
@@ -302,9 +319,14 @@ inventory.hotBar[0] = teleporter;
 inventory.hotBar[1] = hoe;
 inventory.hotBar[2] = wheatSeeds;
 
-// what the stall sells (rows in the shop panel)
+// what the Seed Shop sells (rows in its panel)
 const SHOP_STOCK = [
     { name: 'Wheat Seeds', cost: 2, item: wheatSeeds },
+];
+
+// what the Trading Post buys (rows in its panel)
+const SELL_STOCK = [
+    { name: 'Wheat', price: 5, cropId: 'wheat', icon: (cx, cy, s) => drawWheatIcon(cx, cy, s) },
 ];
 
 function buyStock(entry) {
@@ -314,6 +336,24 @@ function buyStock(entry) {
     }
     inventory.coins -= entry.cost;
     entry.item.count++;
+}
+
+// the Trading Post buys the lot in one go
+function sellValue() {
+    let total = 0;
+    for (const st of SELL_STOCK) total += (inventory.items[st.cropId] || 0) * st.price;
+    return total;
+}
+
+function sellAll() {
+    const total = sellValue();
+    if (total <= 0) {
+        coinFlash = performance.now() + 350;   // nothing in the cart
+        return;
+    }
+    for (const st of SELL_STOCK) inventory.items[st.cropId] = 0;
+    inventory.coins += total;
+    addFloater(farmer.x, farmer.y - 34, `+${total}c`, '#ffd66e');
 }
 
 
@@ -415,7 +455,9 @@ Hoe.prototype.draw = function () {
     const T = CFG.tile;
     const px = sx(this.c * T), py = sy(this.r * T);
     const size = T * zoom;
-    const tillable = !getTile(this.c, this.r);
+    const tile = getTile(this.c, this.r);
+    const tillable = !tile;
+    const ripe = tile && tile.kind === 'crop' && tile.stage === CROP_STAGE_MAX[tile.crop];
     const t = performance.now() / 1000;
     const pulse = 0.5 + 0.5 * Math.sin(t * 5);
 
@@ -432,14 +474,20 @@ Hoe.prototype.draw = function () {
     ctx.restore();
 
     ctx.save();
-    if (tillable) {
+    if (ripe) {
+        // harvest! bright wheat-gold invitation
+        ctx.fillStyle = `rgba(255, 226, 130, ${0.14 + pulse * 0.10})`;
+        ctx.fillRect(px, py, size, size);
+        ctx.strokeStyle = `rgba(255, 236, 160, ${0.75 + pulse * 0.25})`;
+        ctx.lineWidth = Math.max(2, 3 * zoom);
+    } else if (tillable) {
         // warm earthy glow: this dirt is ready to turn
         ctx.fillStyle = `rgba(230, 190, 110, ${0.10 + pulse * 0.08})`;
         ctx.fillRect(px, py, size, size);
         ctx.strokeStyle = `rgba(255, 214, 130, ${0.65 + pulse * 0.3})`;
         ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
     } else {
-        // already worked — quiet grey frame, no invitation
+        // growing crop or blocked ground — quiet grey frame, hands off
         ctx.strokeStyle = 'rgba(220, 220, 220, 0.28)';
         ctx.lineWidth = Math.max(1, 1.5 * zoom);
     }
@@ -604,6 +652,49 @@ SeedBag.prototype.drawIcon = function (cx, cy, size) {
                   Math.round(w), Math.round(h));
     ctx.imageSmoothingEnabled = prev;
 };
+
+// ---- Harvested wheat: a golden spike (Trading Post panel rows) ----
+const WHEAT_ICON = (() => {
+    const map = [
+        '..E..',
+        '.eEe.',
+        '..e..',
+        '.e.e.',
+        '..e..',
+        '.e.e.',
+        '..e..',
+        '..g..',
+        '..g..',
+    ];
+    const pal = {
+        E: '#edd98d', // pale tip
+        e: '#d4b356', // kernels
+        g: '#a8863a', // stem
+    };
+    const off = document.createElement('canvas');
+    off.width = 5;
+    off.height = map.length;
+    const c = off.getContext('2d');
+    for (let y = 0; y < map.length; y++) {
+        for (let x = 0; x < 5; x++) {
+            const col = pal[map[y][x]];
+            if (!col) continue;
+            c.fillStyle = col;
+            c.fillRect(x, y, 1, 1);
+        }
+    }
+    return off;
+})();
+
+function drawWheatIcon(cx, cy, size) {
+    const scale = (size * 0.68) / 9;
+    const w = WHEAT_ICON.width * scale, h = WHEAT_ICON.height * scale;
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(WHEAT_ICON, Math.round(cx - w / 2), Math.round(cy - h / 2),
+                  Math.round(w), Math.round(h));
+    ctx.imageSmoothingEnabled = prev;
+}
 
 
 // ================================ WORLD ====================================
@@ -913,63 +1004,16 @@ function drawTileState(tile, px, py, size) {
     // 'shop' tiles draw nothing — the stall sprite covers them
 }
 
-// ---- The seed stall (an actual place in the world) ----
-// Sits just up-right of spawn. Walk the farmer to the counter and press E.
-const SHOP = {
-    x: 2 * CFG.tile,            // sprite top-left, world px
-    y: -3 * CFG.tile,
-    w: 3 * CFG.tile,            // 24x17 sprite cells at 8 world px each
-    h: 136,
-    baseY: -56,                 // where its feet meet the ground (y-sort line)
-    door: { x: 3.5 * CFG.tile, y: -30 },  // stand near here to shop
-    tiles: [],                  // reserved ground cells (blocked from tilling)
-};
-for (let c = 2; c <= 4; c++) for (let r = -3; r <= -2; r++) SHOP.tiles.push([c, r]);
-
-function nearShop() {
-    return farmerMode &&
-        Math.hypot(farmer.x - SHOP.door.x, farmer.y - SHOP.door.y) < CFG.shopRange;
-}
-
-// wooden stall: striped awning, open counter with seed sacks on display
-const STALL_SPRITE = (() => {
-    const map = [
-        'xxxxxxxxxxxxxxxxxxxxxxxx',
-        'xaaAAaaAAaaAAaaAAaaAAaax',
-        'xaaAAaaAAaaAAaaAAaaAAaax',
-        'xaaAAaaAAaaAAaaAAaaAAaax',
-        'xaaAAaaAAaaAAaaAAaaAAaax',
-        'xxxxxxxxxxxxxxxxxxxxxxxx',
-        'wwiiiiiiiiiiiiiiiiiiiiww',
-        'wwiiiiiiiiiiiiiiiiiiiiww',
-        'wwiissssiissssiissssiiww',
-        'wwiissssiissssiissssiiww',
-        'xPPPPPPPPPPPPPPPPPPPPPPx',
-        'xppppppppppppppppppppppx',
-        'xppppppppppppppppppppppx',
-        'xqqqqqqqqqqqqqqqqqqqqqqx',
-        '.ww..................ww.',
-        '.ww..................ww.',
-        '.xx..................xx.',
-    ];
-    const pal = {
-        x: '#241a12', // outline / dark
-        a: '#c0392b', // awning red
-        A: '#f2e7d5', // awning cream
-        w: '#7a4e26', // wooden post
-        i: '#171009', // shaded interior
-        s: '#d9b166', // seed sacks on display
-        P: '#b98c53', // counter top (lit)
-        p: '#96703f', // counter front
-        q: '#6d4e2a', // counter shadow
-    };
-    const W = 24, H = map.length;
+// ---- Stalls (actual places in the world) ----
+// Walk the farmer to a counter and press E. The Seed Shop (red awning, east)
+// sells; the Trading Post (green awning, west) buys your harvest.
+function bakeSprite(map, pal) {
     const off = document.createElement('canvas');
-    off.width = W;
-    off.height = H;
+    off.width = map[0].length;
+    off.height = map.length;
     const c = off.getContext('2d');
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
+    for (let y = 0; y < map.length; y++) {
+        for (let x = 0; x < map[y].length; x++) {
             const col = pal[map[y][x]];
             if (!col) continue;
             c.fillStyle = col;
@@ -977,22 +1021,96 @@ const STALL_SPRITE = (() => {
         }
     }
     return off;
-})();
+}
 
-function drawStall() {
+// shared stall body: striped awning, open counter with goods on display.
+// 24x17 cells at 8 world px each. The palette decides the stall's character.
+const STALL_MAP = [
+    'xxxxxxxxxxxxxxxxxxxxxxxx',
+    'xaaAAaaAAaaAAaaAAaaAAaax',
+    'xaaAAaaAAaaAAaaAAaaAAaax',
+    'xaaAAaaAAaaAAaaAAaaAAaax',
+    'xaaAAaaAAaaAAaaAAaaAAaax',
+    'xxxxxxxxxxxxxxxxxxxxxxxx',
+    'wwiiiiiiiiiiiiiiiiiiiiww',
+    'wwiiiiiiiiiiiiiiiiiiiiww',
+    'wwiissssiissssiissssiiww',
+    'wwiissssiissssiissssiiww',
+    'xPPPPPPPPPPPPPPPPPPPPPPx',
+    'xpppppppppppOOpppppppppx',
+    'xpppppppppppOOpppppppppx',
+    'xqqqqqqqqqqqqqqqqqqqqqqx',
+    '.ww..................ww.',
+    '.ww..................ww.',
+    '.xx..................xx.',
+];
+const STALL_BASE_PAL = {
+    x: '#241a12', // outline / dark
+    w: '#7a4e26', // wooden post
+    i: '#171009', // shaded interior
+    P: '#b98c53', // counter top (lit)
+    p: '#96703f', // counter front
+    q: '#6d4e2a', // counter shadow
+};
+
+function makeStall(leftCol, opts) {
+    const T = CFG.tile;
+    const st = {
+        x: leftCol * T,
+        y: -3 * T,
+        w: 3 * T,
+        h: 136,
+        baseY: -56,                                   // y-sort line at its feet
+        door: { x: (leftCol + 1.5) * T, y: -30 },     // stand near here
+        tiles: [],                                    // reserved ground cells
+        sprite: bakeSprite(STALL_MAP, { ...STALL_BASE_PAL, ...opts.pal }),
+        title: opts.title,
+        prompt: opts.prompt,
+        mode: opts.mode,        // 'buy' | 'sell'
+        stock: opts.stock,
+    };
+    for (let c = leftCol; c <= leftCol + 2; c++)
+        for (let r = -3; r <= -2; r++) st.tiles.push([c, r]);
+    return st;
+}
+
+// Seed Shop: red awning, seed sacks, plain counter (no coin emblem)
+const SHOP = makeStall(2, {
+    title: 'Seed Shop', prompt: 'E — Seed Shop', mode: 'buy', stock: SHOP_STOCK,
+    pal: { a: '#c0392b', A: '#f2e7d5', s: '#d9b166', O: '#96703f' },
+});
+
+// Trading Post: green awning, produce crates, gold coin emblem on the counter
+const TRADE = makeStall(-6, {
+    title: 'Trading Post', prompt: 'E — Trading Post', mode: 'sell', stock: SELL_STOCK,
+    pal: { a: '#3f7d4a', A: '#eee4cc', s: '#c9972e', O: '#e0c168' },
+});
+
+const STALLS = [SHOP, TRADE];
+
+// the stall whose counter the farmer is standing at (null when roaming)
+function nearStall() {
+    if (!farmerMode) return null;
+    for (const st of STALLS) {
+        if (Math.hypot(farmer.x - st.door.x, farmer.y - st.door.y) < CFG.shopRange) return st;
+    }
+    return null;
+}
+
+function drawStallSprite(st) {
     // soft ground shadow under the stall
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(sx(SHOP.x + SHOP.w / 2), sy(SHOP.baseY - 2),
-                (SHOP.w / 2 + 6) * zoom, 9 * zoom, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx(st.x + st.w / 2), sy(st.baseY - 2),
+                (st.w / 2 + 6) * zoom, 9 * zoom, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
     const prev = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(STALL_SPRITE, Math.round(sx(SHOP.x)), Math.round(sy(SHOP.y)),
-                  Math.round(SHOP.w * zoom), Math.round(SHOP.h * zoom));
+    ctx.drawImage(st.sprite, Math.round(sx(st.x)), Math.round(sy(st.y)),
+                  Math.round(st.w * zoom), Math.round(st.h * zoom));
     ctx.imageSmoothingEnabled = prev;
 }
 
@@ -1271,7 +1389,7 @@ function update(dt) {
     }
 
     // wandering off closes the stall panel
-    if (shopOpen && !nearShop()) shopOpen = false;
+    if (shopOpen && nearStall() !== shopOpen) shopOpen = null;
 }
 
 // Free mode: the camera itself roams; the farmer stands still.
@@ -1376,9 +1494,12 @@ function draw() {
     }
 
     // painter's order: whoever is further south draws in front
-    const farmerFeet = farmer.y + (FARMER_H * FARMER_PX) / 2;
-    if (farmerFeet < SHOP.baseY) { drawFarmer(); drawStall(); }
-    else                         { drawStall(); drawFarmer(); }
+    const drawables = [
+        { y: farmer.y + (FARMER_H * FARMER_PX) / 2, fn: drawFarmer },
+    ];
+    for (const st of STALLS) drawables.push({ y: st.baseY, fn: () => drawStallSprite(st) });
+    drawables.sort((a, b) => a.y - b.y);
+    for (const d of drawables) d.fn();
 
     ctx.drawImage(vignette, 0, 0);
 
@@ -1387,15 +1508,15 @@ function draw() {
     const held = inventory.hotBar[inventory.selected];
     if (held && held.farmerTool === farmerMode && !shopOpen) held.draw();
 
-    // "press E" prompt floating over the stall when in range
-    if (nearShop() && !shopOpen) {
-        const px = sx(SHOP.x + SHOP.w / 2), py = sy(SHOP.y) - 14 * zoom;
+    // "press E" prompt floating over the stall you're standing at
+    const at = nearStall();
+    if (at && !shopOpen) {
+        const px = sx(at.x + at.w / 2), py = sy(at.y) - 14 * zoom;
         ctx.save();
         ctx.font = `600 ${Math.max(11, 13 * zoom)}px "Segoe UI", system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const label = 'E — Seed Shop';
-        const tw = ctx.measureText(label).width;
+        const tw = ctx.measureText(at.prompt).width;
         roundRectPath(px - tw / 2 - 10, py - 12, tw + 20, 24, 12);
         ctx.fillStyle = 'rgba(24, 17, 10, 0.85)';
         ctx.fill();
@@ -1403,15 +1524,36 @@ function draw() {
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.fillStyle = 'rgba(255, 230, 170, 0.95)';
-        ctx.fillText(label, px, py + 1);
+        ctx.fillText(at.prompt, px, py + 1);
         ctx.restore();
     }
+
+    // floating pickup text (world-anchored, rises and fades)
+    const nowMs = performance.now();
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = floaters.length - 1; i >= 0; i--) {
+        const f = floaters[i];
+        const age = (nowMs - f.t) / 900;
+        if (age >= 1) { floaters.splice(i, 1); continue; }
+        ctx.globalAlpha = 1 - age * age;
+        ctx.font = `700 ${Math.max(11, 13 * zoom)}px "Segoe UI", system-ui, sans-serif`;
+        ctx.fillStyle = f.color;
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.lineWidth = 3;
+        const fx = sx(f.wx), fy = sy(f.wy) - age * 26 * zoom;
+        ctx.strokeText(f.text, fx, fy);
+        ctx.fillText(f.text, fx, fy);
+    }
+    ctx.restore();
 
     coordsEl.textContent = `${Math.round(cam.x)}, ${Math.round(cam.y)}`;
     zoomEl.textContent = `× ${zoom.toFixed(2)}`;
     coinsEl.textContent = String(inventory.coins);
     coinsEl.style.color = performance.now() < coinFlash
         ? 'rgba(255, 110, 90, 0.95)' : 'rgba(255, 214, 110, 0.95)';
+    wheatEl.textContent = String(inventory.items.wheat || 0);
 
     drawHotbar();
     if (shopOpen) drawShopPanel();
@@ -1483,15 +1625,19 @@ function drawHotbar() {
     ctx.restore();
 }
 
-// ---- Seed shop panel (open with E at the stall) ----
+// ---- Stall panel (open with E at a counter) — buys or sells by stall mode ----
 const shopRowRects = []; // rebuilt every draw; hit-tested by shopClick
+let shopSellBtn = null;  // "sell everything" button rect (sell stalls only)
 
 function drawShopPanel() {
+    const stall = shopOpen;
+    const buying = stall.mode === 'buy';
     const W = 380, ROW = 58;
-    const H = 92 + SHOP_STOCK.length * (ROW + 8);
+    const H = 92 + stall.stock.length * (ROW + 8) + (buying ? 0 : 54);
     const x = (canvas.width - W) / 2;
     const y = canvas.height * 0.24;
     shopRowRects.length = 0;
+    shopSellBtn = null;
 
     ctx.save();
 
@@ -1515,7 +1661,7 @@ function drawShopPanel() {
     ctx.font = '600 18px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(255, 230, 170, 0.95)';
-    ctx.fillText('Seed Shop', x + 18, y + 26);
+    ctx.fillText(stall.title, x + 18, y + 26);
     ctx.textAlign = 'right';
     ctx.font = '600 15px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = performance.now() < coinFlash
@@ -1523,12 +1669,14 @@ function drawShopPanel() {
     ctx.fillText(`${inventory.coins} coins`, x + W - 18, y + 26);
 
     // stock rows
-    for (let i = 0; i < SHOP_STOCK.length; i++) {
-        const st = SHOP_STOCK[i];
+    for (let i = 0; i < stall.stock.length; i++) {
+        const st = stall.stock[i];
         const ry = y + 50 + i * (ROW + 8);
         const rx = x + 12, rw = W - 24;
-        const hover = mouse.x >= rx && mouse.x <= rx + rw && mouse.y >= ry && mouse.y <= ry + ROW;
-        shopRowRects.push({ x: rx, y: ry, w: rw, h: ROW, entry: st });
+        // buy rows are clickable; sell rows are just the manifest
+        const hover = buying &&
+            mouse.x >= rx && mouse.x <= rx + rw && mouse.y >= ry && mouse.y <= ry + ROW;
+        if (buying) shopRowRects.push({ x: rx, y: ry, w: rw, h: ROW, entry: st });
 
         roundRectPath(rx, ry, rw, ROW, 10);
         ctx.fillStyle = hover ? 'rgba(255, 220, 140, 0.12)' : 'rgba(255, 255, 255, 0.045)';
@@ -1537,32 +1685,76 @@ function drawShopPanel() {
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        st.item.drawIcon(rx + 28, ry + ROW / 2, 44);
+        if (buying) st.item.drawIcon(rx + 28, ry + ROW / 2, 44);
+        else        st.icon(rx + 28, ry + ROW / 2, 44);
 
+        const have = buying ? st.item.count : (inventory.items[st.cropId] || 0);
         ctx.textAlign = 'left';
         ctx.font = '600 15px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = 'rgba(245, 235, 215, 0.95)';
         ctx.fillText(st.name, rx + 54, ry + 20);
         ctx.font = '12px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = 'rgba(200, 185, 160, 0.6)';
-        ctx.fillText(`you have ${st.item.count}`, rx + 54, ry + 39);
+        ctx.fillText(`you have ${have}`, rx + 54, ry + 39);
 
         ctx.textAlign = 'right';
         ctx.font = '600 16px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255, 214, 110, 0.95)';
-        ctx.fillText(`${st.cost}c`, rx + rw - 16, ry + ROW / 2);
+        if (buying) {
+            ctx.fillStyle = 'rgba(255, 214, 110, 0.95)';
+            ctx.fillText(`${st.cost}c`, rx + rw - 16, ry + ROW / 2);
+        } else {
+            ctx.fillStyle = 'rgba(190, 230, 130, 0.95)';   // earnings read green-gold
+            ctx.fillText(`${st.price}c each`, rx + rw - 16, ry + ROW / 2);
+        }
+    }
+
+    // sell stalls: one big button — everything goes at once
+    if (!buying) {
+        const total = sellValue();
+        const bx = x + 12, bw = W - 24, bh = 40;
+        const by = y + H - 58 - 8;
+        const hover = mouse.x >= bx && mouse.x <= bx + bw && mouse.y >= by && mouse.y <= by + bh;
+        shopSellBtn = { x: bx, y: by, w: bw, h: bh };
+
+        roundRectPath(bx, by, bw, bh, 10);
+        if (total > 0) {
+            ctx.fillStyle = hover ? 'rgba(120, 170, 70, 0.5)' : 'rgba(96, 140, 56, 0.38)';
+            ctx.fill();
+            ctx.strokeStyle = hover ? 'rgba(190, 235, 130, 0.9)' : 'rgba(160, 205, 105, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(225, 245, 195, 0.98)';
+        } else {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(120, 110, 95, 0.4)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(200, 190, 170, 0.4)';
+        }
+        ctx.textAlign = 'center';
+        ctx.font = '600 15px "Segoe UI", system-ui, sans-serif';
+        ctx.fillText(total > 0 ? `Sell everything  —  +${total}c` : 'Nothing to sell',
+                     bx + bw / 2, by + bh / 2 + 1);
     }
 
     // hint
     ctx.textAlign = 'center';
     ctx.font = '12px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(200, 185, 160, 0.55)';
-    ctx.fillText('click to buy   ·   E to close', x + W / 2, y + H - 18);
+    ctx.fillText(buying ? 'click to buy   ·   E to close' : 'E to close', x + W / 2, y + H - 18);
 
     ctx.restore();
 }
 
 function shopClick(px, py) {
+    if (shopOpen.mode === 'sell') {
+        if (shopSellBtn && px >= shopSellBtn.x && px <= shopSellBtn.x + shopSellBtn.w &&
+            py >= shopSellBtn.y && py <= shopSellBtn.y + shopSellBtn.h) {
+            sellAll();
+        }
+        return;
+    }
     for (const r of shopRowRects) {
         if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) {
             buyStock(r.entry);
@@ -1577,7 +1769,8 @@ resize();
 buildGroundTiles();
 buildTilledTiles();
 buildCropTiles();
-for (const [c, r] of SHOP.tiles) setTile(c, r, { kind: 'shop' }); // stall ground is off-limits
+for (const st of STALLS)                                          // stall ground is off-limits
+    for (const [c, r] of st.tiles) setTile(c, r, { kind: 'shop' });
 setMode(false);
 
 // start with the farmer centred on screen
