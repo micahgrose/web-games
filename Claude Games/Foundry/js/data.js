@@ -49,6 +49,10 @@ F.ITEMS = {
   advCircuit: { name:'Adv. circuit',   tier:3, icon:{kind:'chip',  c1:'#7f3f4f', c2:'#f09ab4'} },
   frame:      { name:'Titan frame',    tier:3, icon:{kind:'frame', c1:'#cdbdf5', c2:'#7a68b0'} },
   processor:  { name:'Processor',      tier:3, icon:{kind:'chip2', c1:'#2f4560', c2:'#6ec6ff'} },
+  /* machine modules (slotted into drills, machines and beacons) */
+  speedModule:{ name:'Speed module',      tier:2, icon:{kind:'module', c1:'#ffd76e', c2:'#b06a20', g:'speed'} },
+  effModule:  { name:'Efficiency module', tier:2, icon:{kind:'module', c1:'#8fe0b0', c2:'#3f7f5f', g:'eff'} },
+  prodModule: { name:'Productivity module',tier:3, icon:{kind:'module', c1:'#cdbdf5', c2:'#7a68b0', g:'prod'} },
   /* science packs (consumed by laboratories) */
   pack1:      { name:'Cog science',     tier:1, icon:{kind:'flask', c1:'#f0a26a', c2:'#a86038'} },
   pack2:      { name:'Volt science',    tier:2, icon:{kind:'flask', c1:'#6ec6ff', c2:'#2f6a94'} },
@@ -94,6 +98,10 @@ F.RECIPES = {
   logicMatrix:{ out:'logicMatrix', outN:1, in:{processor:2, circuit:2, glass:1}, time:6.0, machine:'asm', unlock:8 },
   powerCore:  { out:'powerCore',   outN:1, in:{fuelCell:2, frame:1, motor:1},    time:6.0, machine:'asm', unlock:8 },
   hullPlate:  { out:'hullPlate',   outN:1, in:{titanIngot:2, steel:2, glass:1},  time:6.0, machine:'asm', unlock:8 },
+  /* modules */
+  speedModule:{ out:'speedModule', outN:1, in:{circuit:2, wire:4},     time:4.0, machine:'asm', tech:'modules' },
+  effModule:  { out:'effModule',   outN:1, in:{circuit:2, glass:2},    time:4.0, machine:'asm', tech:'modules' },
+  prodModule: { out:'prodModule',  outN:1, in:{advCircuit:2, plastic:2},time:6.0, machine:'asm', tech:'prodModules' },
   /* science packs */
   pack1:      { out:'pack1', outN:1, in:{gear:1, copperIngot:1},    time:4.0, machine:'asm', unlock:2 },
   pack2:      { out:'pack2', outN:1, in:{circuit:1, glass:1},       time:5.0, machine:'asm', unlock:4 },
@@ -172,6 +180,8 @@ const B = F.BUILDINGS = {
              desc:'An electric mill — much faster, and hard enough to crack titanium.' },
   lab:     { name:'Laboratory',      cat:'pro', kind:'lab', w:2, h:2, packTime:2.5, cost:{brick:8, wire:6, gear:4}, unlock:2,
              desc:'Consumes science packs to research technologies — pick a project in the Research tab (U). Runs on curiosity alone; no fuel, no power.' },
+  beacon:  { name:'Beacon',          cat:'pro', kind:'beacon', w:2, h:2, power:20, range:4, slots:2, cost:{steel:10, advCircuit:4, glass:6}, tech:'beacons',
+             desc:'Broadcasts its slotted modules at half strength to every machine in its area. Productivity does not transmit.' },
   /* --- power --- */
   pole1:   { name:'Power pole',      cat:'pow', kind:'pole', w:1, h:1, reach:7, cover:2, cost:{ironIngot:2, wire:2}, unlock:3,
              desc:'Carries power. Links to poles within 7 tiles and powers machines in the 5×5 area around it. Generators must be in a pole\'s area too.' },
@@ -296,6 +306,15 @@ F.TECHS = {
   helios:      { name:'Helios arrays', icon:'frame',
     desc:'A 3×3 field of sun-tracking mirrors — 130 P without a whisper of smoke.',
     cost:{ pack3:10, pack4:16 }, req:['solarTowers'], unlocks:['solar3'] },
+  modules:     { name:'Machine modules', icon:'speedModule',
+    desc:'Slottable inserts for drills and machines: speed modules (+35% speed, +40% power) and efficiency modules (−30% power). Two slots per machine.',
+    cost:{ pack2:16 }, req:[], unlocks:['r:speedModule','r:effModule'] },
+  prodModules: { name:'Productivity modules', icon:'prodModule',
+    desc:'A module that skims material off every craft: +12% bonus output per module. Machines only — too delicate to broadcast.',
+    cost:{ pack2:10, pack3:16 }, req:['modules'], unlocks:['r:prodModule'] },
+  beacons:     { name:'Beacons', icon:'glass',
+    desc:'A transmitter that broadcasts its modules at half strength to every machine in a 10×10 area — one beacon, a whole block boosted.',
+    cost:{ pack3:14, pack4:8 }, req:['modules'], unlocks:['beacon'] },
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
@@ -310,6 +329,39 @@ F.techOf = function(u){
 
 /* burn-time multiplier from the combustion tech */
 F.burnMul = S => (S.research && S.research.done.combustion) ? 1.35 : 1;
+
+/* ================= MODULES =================
+   Slotted into drills/machines (F.MOD_SLOTS each) or beacons (def.slots).
+   Beacons rebroadcast speed/efficiency at half strength to machines in range;
+   productivity is machine-only. */
+F.MODULES = {
+  speedModule: { spd:.35, pow:.40 },
+  effModule:   { pow:-.30 },
+  prodModule:  { prod:.12 },
+};
+F.MOD_SLOTS = 2;
+F.BEACON_FACTOR = .5;
+F.MODDABLE = e => e.kind === 'miner' || e.kind === 'machine';
+
+/* combined module effects for an entity: own slots + beacon field.
+   Returns { spd, pow } as multipliers and prod as a bonus fraction. */
+F.modEffects = function(S, e){
+  let spd = 0, pow = 0, prod = 0;
+  if (e.mods) for (const m of e.mods){
+    const d = F.MODULES[m];
+    if (d){ spd += d.spd || 0; pow += d.pow || 0; prod += d.prod || 0; }
+  }
+  if (e._bcn) for (const b of e._bcn){
+    if (!b.mods || !b.mods.length) continue;
+    const r = b.netId ? ((S._netRatio && S._netRatio[b.netId]) || 0) : 0;
+    if (r <= 0) continue;
+    for (const m of b.mods){
+      const d = F.MODULES[m];
+      if (d){ spd += (d.spd || 0) * F.BEACON_FACTOR * r; pow += (d.pow || 0) * F.BEACON_FACTOR * r; }
+    }
+  }
+  return { spd: Math.max(.1, 1 + spd), pow: Math.max(.2, 1 + pow), prod };
+};
 
 /* ================= UPGRADES ================= */
 F.UPGRADES = {
@@ -353,6 +405,7 @@ F.TIPS = {
   firstUpgrade: 'The Foundry panel (U) sells permanent upgrades for parts. Faster belts, drills, furnaces…',
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',
   firstLab:     'Belt science packs into any side of the laboratory, then pick a project in the <b>Research</b> tab (U). Research is optional — every tech is a bonus, not a gate.',
+  firstModule:  'Modules boost the machine they\'re slotted in. Speed costs extra power, efficiency saves it — and a <b>beacon</b> broadcasts its modules to every machine around it.',
   firstPipe:    'Pipes only connect to pumpjacks, refineries and other pipes.',
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
 };

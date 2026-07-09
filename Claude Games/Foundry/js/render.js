@@ -338,6 +338,36 @@ function drawItemIcon(x, id, s){
       }
       break;
     }
+    case 'module': { // slottable machine insert, glyph per flavour
+      x.fillStyle = '#252b36'; x.strokeStyle = outline;
+      rrect(x, -7 * u, -7 * u, 14 * u, 14 * u, 3 * u); x.fill(); x.stroke();
+      x.strokeStyle = hexA(c1, .9); x.lineWidth = 1.1 * u;
+      rrect(x, -5.2 * u, -5.2 * u, 10.4 * u, 10.4 * u, 2 * u); x.stroke();
+      // contact pins
+      x.fillStyle = '#9aa4b2';
+      for (let i = -1; i <= 1; i++) x.fillRect(i * 4 * u - u, 7 * u, 2 * u, 2 * u);
+      const g2 = it.icon.g;
+      x.fillStyle = c1; x.strokeStyle = c1; x.lineWidth = 1.4 * u; x.lineCap = 'round';
+      if (g2 === 'speed'){        // double chevron »
+        for (const ox of [-2.6, 1.4]){
+          x.beginPath();
+          x.moveTo(ox * u, -3.4 * u); x.lineTo((ox + 3) * u, 0); x.lineTo(ox * u, 3.4 * u);
+          x.stroke();
+        }
+      } else if (g2 === 'eff'){   // leaf / droplet
+        x.beginPath();
+        x.moveTo(0, -3.8 * u);
+        x.quadraticCurveTo(4 * u, -1 * u, 0, 3.8 * u);
+        x.quadraticCurveTo(-4 * u, -1 * u, 0, -3.8 * u);
+        x.closePath(); x.fill();
+      } else {                    // prod: plus
+        x.beginPath();
+        x.moveTo(-3.2 * u, 0); x.lineTo(3.2 * u, 0);
+        x.moveTo(0, -3.2 * u); x.lineTo(0, 3.2 * u);
+        x.stroke();
+      }
+      break;
+    }
     case 'dust': { // pile of crushed grit
       x.fillStyle = c2; x.strokeStyle = outline;
       x.beginPath();
@@ -462,7 +492,20 @@ function drawEntBody(x, e, s, time, S){
     case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
     case 'lab': drawLab(x, e, s, time, def); break;
+    case 'beacon': drawBeacon(x, e, s, time, S); break;
     case 'core': drawCore(x, e, s, time, S); break;
+  }
+  // slotted-module pips along the top-right edge
+  if (e.mods && e.mods.length){
+    for (let i = 0; i < e.mods.length; i++){
+      const it = F.ITEMS[e.mods[i]];
+      if (!it) continue;
+      x.fillStyle = it.icon.c1;
+      x.strokeStyle = 'rgba(8,10,14,.8)';
+      x.lineWidth = 1;
+      rrect(x, e.w * s - s * .22 - i * s * .18, s * .1, s * .13, s * .13, s * .03);
+      x.fill(); x.stroke();
+    }
   }
   // disconnected from any pole network → blinking red bolt
   if (S && !e.netId &&
@@ -1374,6 +1417,60 @@ function drawLab(x, e, s, time, def){
   x.globalAlpha = 1;
 }
 
+/* ---- beacon ---- */
+function drawBeacon(x, e, s, time, S){
+  chassis(x, e, s, '#59d6ff', 0);
+  const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
+  const on = !!(e.mods && e.mods.length && e.netId &&
+    S && S._netRatio && (S._netRatio[e.netId] || 0) > 0);
+  // antenna mast + emitter orb
+  x.strokeStyle = '#8b96a6';
+  x.lineWidth = s * .09;
+  x.lineCap = 'round';
+  x.beginPath(); x.moveTo(cx, cy + s * .3); x.lineTo(cx, cy - s * .34); x.stroke();
+  // dish ribs
+  x.strokeStyle = '#5b6674';
+  x.lineWidth = s * .05;
+  for (const a of [-.7, 0, .7]){
+    x.beginPath();
+    x.moveTo(cx, cy - s * .05);
+    x.lineTo(cx + Math.sin(a) * s * .34, cy + s * .28);
+    x.stroke();
+  }
+  const orbC = on ? '#6ec6ff' : '#4a5261';
+  const g = x.createRadialGradient(cx, cy - s * .38, 0, cx, cy - s * .38, s * .18);
+  g.addColorStop(0, on ? '#eaf7ff' : '#6b7686'); g.addColorStop(1, orbC);
+  x.fillStyle = g;
+  x.strokeStyle = 'rgba(0,0,0,.5)';
+  x.beginPath(); x.arc(cx, cy - s * .38, s * .14, 0, 7); x.fill(); x.stroke();
+  // broadcast ripples
+  if (on){
+    const t = (time * .7) % 1;
+    for (const off of [0, .5]){
+      const tt = (t + off) % 1;
+      x.strokeStyle = `rgba(110,198,255,${(1 - tt) * .5})`;
+      x.lineWidth = Math.max(1, s * .04);
+      x.beginPath(); x.arc(cx, cy - s * .38, s * (.16 + tt * .5), 0, 7); x.stroke();
+    }
+  }
+}
+
+/* aura square for a beacon (selection / ghost) */
+R.drawBeaconRange = function(x, S, e, key){
+  const def = F.BUILDINGS[key];
+  const r = def.range;
+  const s = R.tilePx();
+  const [sx, sy] = R.worldToScreen(e.x - r, e.y - r);
+  const size = (def.w + r * 2) * s;
+  x.fillStyle = 'rgba(110,198,255,.06)';
+  x.fillRect(sx, sy, size, size);
+  x.strokeStyle = 'rgba(110,198,255,.5)';
+  x.setLineDash([s * .18, s * .12]);
+  x.lineWidth = 1.5;
+  x.strokeRect(sx, sy, size, size);
+  x.setLineDash([]);
+};
+
 function drawCore(x, e, s, time, S){
   const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
   const pulse = S ? S.core.pulse : 0;
@@ -1637,9 +1734,12 @@ function drawGhost(x, S, ghost, time){
   const s = R.tilePx();
   const [px, py] = R.worldToScreen(ghost.x, ghost.y);
   // pole ghost: coverage square + dashed previews of the links it would form
+  if (def.kind === 'beacon'){
+    R.drawBeaconRange(x, S, { x: ghost.x, y: ghost.y }, ghost.key);
+  }
   if (def.kind === 'pole'){
     R.drawPoleCoverage(x, S, ghost.x, ghost.y, ghost.key);
-    const topA = [ghost.x + .5, ghost.y + .5 - (ghost.key === 'pole2' ? 1.05 : .78)];
+    const topA = [ghost.x + .5, ghost.y + .5 - (ghost.key === 'pole2' ? 1.05 : ghost.key === 'pole3' ? .62 : .78)];
     const [ax, ay] = R.worldToScreen(topA[0], topA[1]);
     x.setLineDash([s * .12, s * .1]);
     x.lineWidth = Math.max(1, s * .04);
@@ -1931,6 +2031,7 @@ R.draw = function(S, dt, U){
     if (U.selection){
       const e = U.selection;
       if (e.kind === 'pole') R.drawPoleCoverage(x, S, e.x, e.y, e.key);
+      if (e.kind === 'beacon') R.drawBeaconRange(x, S, e, e.key);
       const [px, py] = R.worldToScreen(e.x, e.y);
       x.strokeStyle = 'rgba(255,180,84,.9)';
       x.lineWidth = 2;

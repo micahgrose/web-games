@@ -228,6 +228,19 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .ghostNote{ font-size:11px; color:var(--ink-faint); line-height:1.5; margin-top:6px; }
 .ghostTxt{ color:var(--ink-faint); }
 
+/* Module slots */
+.modRow{ display:flex; gap:6px; margin-top:2px; }
+.modSlot{
+  width:36px; height:36px; border-radius:8px;
+  border:1px dashed var(--line-bright); background:rgba(255,255,255,.02);
+  display:flex; align-items:center; justify-content:center;
+  color:var(--ink-faint); font-size:16px;
+  transition:border-color .12s, background .12s;
+}
+.modSlot.filled{ border-style:solid; background:rgba(255,255,255,.05); }
+.modSlot:hover{ border-color:var(--accent2); }
+.modAdd:disabled{ opacity:.35; cursor:default; }
+
 /* Active-research chip (rides under the objective card) */
 #techChip{
   position:absolute; left:12px; top:70px;

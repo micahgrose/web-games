@@ -783,7 +783,8 @@ function refreshSelPanel(force){
   if (!e) return;
   const S = UI.S;
   if (S.ents.indexOf(e) < 0){ select(null); return; }
-  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex, e.filterItem || '', e.prioOut || ''].join('|');
+  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex, e.filterItem || '', e.prioOut || '',
+    (e.mods || []).join(',')].join('|');
   if (force || UI.selSig !== sig){
     UI.selSig = sig;
     buildSelPanel(e);
@@ -799,11 +800,18 @@ function dynVals(e){
   switch (e.kind){
     case 'miner':
       d.rate = rateStr(e);
+      d.modfx = modFxStr(S, e, def);
       break;
     case 'machine':
       d.rate = rateStr(e);
       if (def.fam === 'refinery') d.tank = `${e.tank.toFixed(0)} / ${def.tank}`;
+      d.modfx = modFxStr(S, e, def);
       break;
+    case 'beacon': {
+      const n = S.ents.filter(o => F.MODDABLE(o) && o._bcn && o._bcn.includes(e)).length;
+      d.reach = `${n} machine${n === 1 ? '' : 's'}`;
+      break;
+    }
     case 'gen': case 'turbine':
       d.out = `${Math.round(def.out * F.powerMul(S))} P`;
       d.load = `${Math.round((e.load || 0) * 100)}%`;
@@ -849,6 +857,39 @@ function dynVals(e){
   return d;
 }
 
+function modFxStr(S, e, def){
+  if (!(e.mods && e.mods.length) && !e._bcn) return '—';
+  const fx = F.modEffects(S, e);
+  const parts = [];
+  if (Math.abs(fx.spd - 1) > .001) parts.push(`speed ×${fx.spd.toFixed(2)}`);
+  if (def.power && Math.abs(fx.pow - 1) > .001) parts.push(`power ×${fx.pow.toFixed(2)}`);
+  if (fx.prod > 0) parts.push(`+${Math.round(fx.prod * 100)}% bonus output`);
+  return parts.join(' · ') || '—';
+}
+
+/* module slots + insert buttons for drills / machines / beacons */
+function moduleSection(S, e, def){
+  const slots = def.slots || F.MOD_SLOTS;
+  const types = Object.keys(F.MODULES).filter(k => F.recipeUnlocked(S, k) || F.invCount(S, k) > 0 || (e.mods || []).includes(k));
+  if (!types.length) return '';
+  let h = `<div class="selDivider"></div><div class="selSection">Modules</div><div class="modRow">`;
+  for (let i = 0; i < slots; i++){
+    const m = (e.mods || [])[i];
+    h += `<button class="modSlot${m ? ' filled' : ''}" data-slot="${i}" title="${m ? F.ITEMS[m].name + ' — click to remove' : 'Empty module slot'}">${m ? iconImg(m, 22) : '+'}</button>`;
+  }
+  h += `</div><div class="recipeGrid" style="margin-top:6px">`;
+  for (const k of types){
+    const inv = F.invCount(S, k);
+    h += `<button class="recipeBtn modAdd" data-mod="${k}" ${inv > 0 ? '' : 'disabled'} title="Slot a ${F.ITEMS[k].name} (${F.fmt(inv)} in pocket)">${iconImg(k, 22)}</button>`;
+  }
+  h += `</div>`;
+  if (e.kind === 'beacon')
+    h += `<div class="ghostNote">Broadcasts at half strength to every machine in its ${def.range * 2 + def.w}×${def.range * 2 + def.w} area. Productivity doesn't transmit.</div>`;
+  else
+    h += row('Module effect', modFxStr(S, e, def), 'modfx');
+  return h;
+}
+
 function bufsFor(e){
   if (e.kind === 'machine' || e.kind === 'lab') return buffers(e);
   if (e.kind === 'chest') return bufList(e.store);
@@ -871,6 +912,7 @@ function buildSelPanel(e){
     html += row('Deposit', ore ? `${ore.name} · endless vein` : '—');
     html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
+    html += moduleSection(S, e, def);
   }
   if (e.kind === 'machine'){
     html += recipeSection(S, e, def);
@@ -879,6 +921,12 @@ function buildSelPanel(e){
     html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
     html += `<div class="progOuter" data-prog-wrap style="display:none"><div class="progFill" data-prog style="width:0%"></div></div>`;
+    html += moduleSection(S, e, def);
+  }
+  if (e.kind === 'beacon'){
+    html += row('Power draw', def.power + ' P');
+    html += row('In range', dv.reach, 'reach');
+    html += moduleSection(S, e, def);
   }
   if (e.kind === 'gen' || e.kind === 'turbine'){
     html += row('Output', dv.out, 'out');
@@ -996,6 +1044,29 @@ function buildSelPanel(e){
   });
   const orb = p.querySelector('[data-openres]');
   if (orb) orb.addEventListener('click', () => { openBig('research'); });
+  p.querySelectorAll('[data-mod]').forEach(b => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.mod;
+      const slots = def.slots || F.MOD_SLOTS;
+      if (!e.mods) e.mods = [];
+      if (e.mods.length >= slots || F.invCount(S, k) <= 0){ A.sfx.error(); return; }
+      F.invAdd(S, k, -1);
+      e.mods.push(k);
+      A.sfx.buy();
+      tipOnce('firstModule');
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-slot]').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = +b.dataset.slot;
+      if (!e.mods || !e.mods[i]){ A.sfx.click(); return; }
+      F.invAdd(S, e.mods[i], 1);
+      e.mods.splice(i, 1);
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
   p.querySelector('[data-del]').addEventListener('click', () => {
     F.remove(S, e.x, e.y);
     A.sfx.remove();
@@ -1047,7 +1118,7 @@ function updateSelPanel(e){
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
     miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
-    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction', lab:'research' }[def.kind] || def.kind;
+    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction', lab:'research', beacon:'support' }[def.kind] || def.kind;
 }
 function row(k, v, dyn){ return `<div class="selRow"><span>${k}</span><b${dyn ? ` data-dyn="${dyn}"` : ''}>${v}</b></div>`; }
 function rateStr(e){
@@ -1476,6 +1547,7 @@ function usedInHtml(S, item){
       uses.push(`<span title="${F.ITEMS[r.out].name}">${iconImg(r.out, 14)}</span>`);
   }
   const bld = [];
+  if (F.MODULES[item]) bld.push('module slots in drills, machines & beacons');
   for (const k of F.BUILD_ORDER){
     if (S.unlocked[k] && F.BUILDINGS[k].cost[item]) bld.push(F.BUILDINGS[k].name);
   }
@@ -1567,6 +1639,7 @@ function renderRecipeBook(S){
       if (d.span) stats.push(`spans ${d.span}`);
       if (d.kind === 'lab') stats.push(`reads a pack every ${d.packTime}s`);
       if (d.kind === 'chest' && d.cap) stats.push(`holds ${d.cap}`);
+      if (d.kind === 'beacon') stats.push(`boosts a ${d.range * 2 + d.w}×${d.range * 2 + d.w} area`);
       h += `<div class="compRow">
         <img src="${R.makeBuildingIcon(k, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
@@ -1640,7 +1713,11 @@ function renderHowTo(){
   technology is a bonus you choose — ${ic('ironDust')} ore-doubling <b>crushers</b>, the 240-item
   <b>vault</b>, area-powering <b>substations</b>, <b>grav-belts</b>, <b>solar towers</b> — never a gate on
   the campaign. Later milestones unlock richer packs (${ic('pack2')} volt, ${ic('pack3')} polymer,
-  ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.</p>
+  ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.
+  Deep in the tree wait ${ic('speedModule')} <b>modules</b> — inserts that trade power for speed
+  (or the reverse), plus ${ic('prodModule')} productivity skim — and the <b>beacon</b>, which
+  broadcasts its own modules at half strength to every machine in a 10×10 area. Click any drill or
+  machine to slot modules into it.</p>
 
   <div class="selSection">Oil</div>
   <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws

@@ -201,11 +201,14 @@ function initEnt(S, e, def){
                      e.filterItem = null; e.prioOut = null; break;
     case 'chest':    e.store = {}; e.total = 0; break;
     case 'pipe':     e.fluid = 0; break;
-    case 'miner':    e.prog = 0; e.outBuf = {}; e.outTotal = 0; e.fuelT = 0; e.fuelBuf = 0; e.ema = 0; e.lastOut = -1; break;
+    case 'miner':    e.prog = 0; e.outBuf = {}; e.outTotal = 0; e.fuelT = 0; e.fuelBuf = 0; e.ema = 0; e.lastOut = -1;
+                     e.mods = []; e.prodAcc = 0; break;
     case 'machine':  e.recipe = null; e.prog = 0; e.crafting = false; e.inBuf = {}; e.outBuf = {}; e.outTotal = 0;
                      e.fuelT = 0; e.fuelBuf = 0; e.tank = 0; e.ema = 0; e.lastOut = -1;
+                     e.mods = []; e.prodAcc = 0;
                      if (def.fam === 'refinery') e.recipe = null;
                      break;
+    case 'beacon':   e.mods = []; break;
     case 'lab':      e.inBuf = {}; e.outBuf = {}; e.outTotal = 0; e.prog = 0; e.workItem = null; break;
     case 'gen':      e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
@@ -245,6 +248,7 @@ F.remove = function(S, x, y){
   if (e.outBuf) give(e.outBuf);
   if (e.store) give(e.store);
   if (e.item) F.invAdd(S, e.item, 1);
+  if (e.mods) for (const m of e.mods) F.invAdd(S, m, 1);
   if (e.workItem){
     // a lab mid-consume: hand the pack back and release its reservation
     F.invAdd(S, e.workItem, 1);
@@ -318,6 +322,19 @@ F.computePowerNetworks = function(S){
       for (const p of poles){
         if (p.netId && poleCovers(p, e)){ e.netId = p.netId; break; }
       }
+    }
+  }
+  // beacon auras: cache which beacons bathe which machines (geometry only —
+  // strength is read live so slotting modules needs no rebuild)
+  for (const e of S.ents) if (F.MODDABLE(e)) e._bcn = null;
+  for (const b of S.ents){
+    if (b.kind !== 'beacon') continue;
+    const r = F.BUILDINGS[b.key].range;
+    for (const e of S.ents){
+      if (!F.MODDABLE(e)) continue;
+      if (e.x > b.x + b.w - 1 + r || e.x + e.w - 1 < b.x - r ||
+          e.y > b.y + b.h - 1 + r || e.y + e.h - 1 < b.y - r) continue;
+      (e._bcn || (e._bcn = [])).push(b);
     }
   }
 };
@@ -546,10 +563,14 @@ F.tick = function(S, dt){
       if (e.kind === 'miner') wants = minerWants(S, e);
       else if (e.kind === 'pump') wants = e.tank < 30;
       else if (e.kind === 'machine') wants = e.crafting || !!machineCanStart(S, e, def);
+      else if (e.kind === 'beacon') wants = !!(e.mods && e.mods.length);
       e._want = wants;
       if (wants){
-        if (e.netId) dem[e.netId] = (dem[e.netId] || 0) + def.power * useMul;
-        else { unpowered++; unpoweredDem += def.power * useMul; }
+        // module power multiplier (beacon field uses last tick's ratio — converges)
+        const pm = (e.mods || e._bcn) ? F.modEffects(S, e).pow : 1;
+        const draw = def.power * useMul * pm;
+        if (e.netId) dem[e.netId] = (dem[e.netId] || 0) + draw;
+        else { unpowered++; unpoweredDem += draw; }
       }
     }
   }
@@ -634,7 +655,8 @@ function minerWants(S, e){
 function tickMiner(S, e, def, dt, ratio){
   tryEject(S, e);
   if (!minerWants(S, e)){ e.active = false; return; }
-  let mul = def.speed * F.mineMul(S);
+  const fx = F.modEffects(S, e);
+  let mul = def.speed * F.mineMul(S) * fx.spd;
   if (def.power){ mul *= ratio; }
   else {
     // burner
@@ -655,9 +677,14 @@ function tickMiner(S, e, def, dt, ratio){
     const i = idx(S, e.x, e.y);
     const item = F.ORES[S.oreType[i]].id;
     // deposits are endless — drills never exhaust them
-    e.outBuf[item] = (e.outBuf[item] || 0) + 1; e.outTotal++;
-    S.stats.made[item] = (S.stats.made[item] || 0) + 1;
-    S.stats.bucketAcc[item] = (S.stats.bucketAcc[item] || 0) + 1;
+    let n = 1;
+    if (fx.prod > 0){
+      e.prodAcc = (e.prodAcc || 0) + fx.prod;
+      if (e.prodAcc >= 1){ e.prodAcc -= 1; n++; }
+    }
+    e.outBuf[item] = (e.outBuf[item] || 0) + n; e.outTotal += n;
+    S.stats.made[item] = (S.stats.made[item] || 0) + n;
+    S.stats.bucketAcc[item] = (S.stats.bucketAcc[item] || 0) + n;
   }
 }
 
@@ -681,7 +708,8 @@ function tickMachine(S, e, def, dt, ratio){
   }
   const rc = F.RECIPES[e.activeRecipe];
   if (!rc){ e.crafting = false; return; }
-  let mul = def.speed * famMul(S, def.fam);
+  const fx = F.modEffects(S, e);
+  let mul = def.speed * famMul(S, def.fam) * fx.spd;
   if (def.power) mul *= ratio;
   else {
     if (e.fuelT <= 0){
@@ -698,9 +726,15 @@ function tickMachine(S, e, def, dt, ratio){
   e.prog += dt * mul / rc.time;
   if (e.prog >= 1){
     e.crafting = false; e.prog = 0;
-    e.outBuf[rc.out] = (e.outBuf[rc.out] || 0) + rc.outN; e.outTotal += rc.outN;
-    S.stats.made[rc.out] = (S.stats.made[rc.out] || 0) + rc.outN;
-    S.stats.bucketAcc[rc.out] = (S.stats.bucketAcc[rc.out] || 0) + rc.outN;
+    let outN = rc.outN;
+    if (fx.prod > 0){
+      // productivity: bank a fraction of every craft, cash in a free one at 100%
+      e.prodAcc = (e.prodAcc || 0) + fx.prod;
+      if (e.prodAcc >= 1){ e.prodAcc -= 1; outN += rc.outN; }
+    }
+    e.outBuf[rc.out] = (e.outBuf[rc.out] || 0) + outN; e.outTotal += outN;
+    S.stats.made[rc.out] = (S.stats.made[rc.out] || 0) + outN;
+    S.stats.bucketAcc[rc.out] = (S.stats.bucketAcc[rc.out] || 0) + outN;
     F.emit(S, { type:'craft', x: e.x, y: e.y, item: rc.out });
   }
 }
@@ -1026,6 +1060,8 @@ F.serialize = function(S){
     if (e.filterItem) o.fi = e.filterItem;
     if (e.prioOut) o.po = e.prioOut;
     if (e.workItem) o.wk = e.workItem;
+    if (e.mods && e.mods.length) o.md = e.mods.slice();
+    if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
     ents.push(o);
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
@@ -1080,6 +1116,8 @@ F.deserialize = function(data){
     if (o.fi) e.filterItem = o.fi;
     if (o.po) e.prioOut = o.po;
     if (o.wk) e.workItem = o.wk;
+    if (o.md) e.mods = o.md.filter(m => F.MODULES[m]);
+    if (o.pa) e.prodAcc = o.pa;
     S.ents.push(e);
     stamp(S, e);
   }
