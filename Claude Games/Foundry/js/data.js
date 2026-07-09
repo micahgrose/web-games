@@ -481,6 +481,20 @@ F.makeTribute = function(lvl){
   }
   return req;
 };
+/* what the Engine whispers when each tier completes (index = finished milestone) */
+F.ENGINE_LINES = [
+  '…warm. after so long, warm…',
+  '…iron. i remember iron…',
+  '…shapes. you make shapes of the world…',
+  '…current in old veins. yes…',
+  '…glass and light. keep going…',
+  '…thought, etched small. clever hands…',
+  '…the black blood still flows…',
+  '…you build faster than the ash falls…',
+  '…star-metal bones. almost. almost…',
+  '…I WAKE.',
+];
+
 F.TRIBUTE_LINES = [
   'The Engine hums. It asks for more.',
   'A pulse from below: the Engine dreams of gears.',

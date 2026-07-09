@@ -2227,9 +2227,12 @@ function drainEvents(){
       case 'tip': tipOnce(ev.id); break;
       case 'milestone': {
         A.sfx.milestone();
+        A.sfx.engine();
         const next = F.MILESTONES[S.msIndex];
+        const whisper = F.ENGINE_LINES[ev.index] || '';
         toast(`<b style="color:var(--accent)">◆ ${ev.name} complete</b>` +
           (next ? `<br>Next: <b>${next.name}</b>` : '') +
+          (whisper ? `<br><i style="color:#d9b8ef">${whisper}</i>` : '') +
           `<br><span style="color:#8cdc96">The ash recedes — the land around the Core remembers green.</span>`, '', 8000);
         R.buildGround(S);            // the world heals a ring further
         R.healPulse = { t: 0 };
@@ -2258,6 +2261,7 @@ function drainEvents(){
       }
       case 'tribute': {
         A.sfx.milestone();
+        A.sfx.engine();
         const bonus = Math.min(ev.lvl, 10) * 3;
         toast(`<b style="color:#ffd76e">✦ Tribute ${ev.lvl} offered</b><br>The Engine stirs in gratitude — ` +
           (ev.lvl <= 10 ? `machines now run <b>+${bonus}%</b> faster.` : 'your name rings in its halls.'), '', 8000);
@@ -2414,6 +2418,7 @@ UI.update = function(dt){
     if (act > 40) break;
   }
   A.setActivity(act / 40);
+  if (A.tickMusic) A.tickMusic(dt, S.won ? 1 : S.msIndex / F.MILESTONES.length, F.sunFactor(S) < .5);
 
   /* autosave */
   UI.autosaveT += dt;

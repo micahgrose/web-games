@@ -2277,6 +2277,50 @@ R.draw = function(S, dt, U){
     x.restore();
   }
 
+  /* weather — ashfall over the wastes, rain once the world mostly heals,
+     the odd wind gust; screen-space particles + audio beds */
+  if (!R.weather){ R.weather = { state: 'clear', t: 16 }; R.wx = []; }
+  R.weather.t -= dt;
+  if (R.weather.t <= 0){
+    const healed = R._heal && R._heal.r > Math.hypot(S.w, S.h) * .28;
+    const roll = Math.random();
+    R.weather.state = roll < .45 ? 'clear' : roll < .82 ? (healed ? 'rain' : 'ashfall') : 'gust';
+    R.weather.t = R.weather.state === 'gust' ? 8 + Math.random() * 8 : 28 + Math.random() * 45;
+    if (F.audio && F.audio.setWeather) F.audio.setWeather(R.weather.state);
+  }
+  const wst = R.weather.state;
+  if (wst !== 'clear'){
+    const want = wst === 'gust' ? 2 : 4;
+    for (let i = 0; i < want && R.wx.length < 240; i++){
+      if (wst === 'ashfall')
+        R.wx.push({ x: Math.random() * (R.W + 120) - 60, y: -8, vx: 6 + Math.random() * 12, vy: 24 + Math.random() * 22, life: 14, kind: 'ash', ph: Math.random() * 7 });
+      else if (wst === 'rain')
+        R.wx.push({ x: Math.random() * (R.W + 160) - 80, y: -12, vx: 50 + Math.random() * 40, vy: 420 + Math.random() * 160, life: 4, kind: 'rain' });
+      else
+        R.wx.push({ x: -30, y: Math.random() * R.H, vx: 380 + Math.random() * 180, vy: (Math.random() - .5) * 40, life: 3, kind: 'gust' });
+    }
+  }
+  if (R.wx && R.wx.length){
+    for (let i = R.wx.length - 1; i >= 0; i--){
+      const p = R.wx[i];
+      p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.life <= 0 || p.y > R.H + 24 || p.x > R.W + 60){ R.wx.splice(i, 1); continue; }
+      if (p.kind === 'ash'){
+        p.x += Math.sin(time * .8 + p.ph) * 14 * dt;
+        x.fillStyle = 'rgba(185,190,200,.38)';
+        x.fillRect(p.x, p.y, 2, 2);
+      } else if (p.kind === 'rain'){
+        x.strokeStyle = 'rgba(150,200,235,.32)';
+        x.lineWidth = 1;
+        x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.vx * .022, p.y - p.vy * .022); x.stroke();
+      } else {
+        x.strokeStyle = 'rgba(220,225,235,.11)';
+        x.lineWidth = 1;
+        x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - 28, p.y + 3); x.stroke();
+      }
+    }
+  }
+
   /* healing pulse — a wave of green rolls out from the Core on tier-up */
   if (R.healPulse){
     R.healPulse.t += dt;
