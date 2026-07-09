@@ -69,6 +69,15 @@
   <!-- Build-mode hint banner -->
   <div id="modeHint" class="hidden"></div>
 
+  <!-- Bottom-left dock: problem alerts + minimap -->
+  <div id="mmDock">
+    <div id="alertBar"></div>
+    <div id="minimapWrap" class="panel">
+      <canvas id="minimap" width="168" height="168"></canvas>
+      <button id="mmToggle" title="Collapse map">▾</button>
+    </div>
+  </div>
+
   <!-- Toast / tip queue -->
   <div id="toasts"></div>
 

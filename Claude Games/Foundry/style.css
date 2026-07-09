@@ -228,6 +228,43 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .ghostNote{ font-size:11px; color:var(--ink-faint); line-height:1.5; margin-top:6px; }
 .ghostTxt{ color:var(--ink-faint); }
 
+/* Bottom-left dock: alerts + minimap */
+#mmDock{
+  position:absolute; left:12px; bottom:12px;
+  display:flex; flex-direction:column; gap:8px; align-items:flex-start;
+  z-index:5;
+}
+#alertBar{ display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.alertChip{
+  display:flex; align-items:center; gap:7px;
+  padding:5px 11px; border-radius:8px; font-size:12px;
+  background:rgba(14,18,26,.92); border:1px solid var(--line);
+  color:var(--ink); cursor:pointer;
+  transition:border-color .12s, transform .1s;
+}
+.alertChip:hover{ transform:translateX(2px); }
+.alertChip.aFuel{ border-color:rgba(255,180,84,.5); color:#ffcf8a; }
+.alertChip.aPower{ border-color:rgba(255,118,118,.55); color:#ff9a9a; }
+.alertChip.aJam{ border-color:rgba(150,170,200,.45); color:#b9c6d8; }
+#minimapWrap{ position:relative; padding:5px; line-height:0; }
+#minimap{ border-radius:7px; cursor:crosshair; display:block; }
+#minimapWrap.collapsed #minimap{ display:none; }
+#mmToggle{
+  position:absolute; top:2px; right:2px;
+  width:20px; height:20px; border-radius:6px;
+  font-size:10px; color:var(--ink-dim);
+  background:rgba(14,18,26,.85); border:1px solid var(--line);
+}
+#minimapWrap.collapsed{ padding:3px; }
+#minimapWrap.collapsed #mmToggle{ position:static; width:26px; height:26px; }
+#mmToggle:hover{ color:var(--ink); }
+@media (max-width:900px), (max-height:600px){
+  #minimapWrap{ display:none; }
+}
+
+/* Stats sparklines */
+.spark{ vertical-align:middle; opacity:.9; }
+
 /* Module slots */
 .modRow{ display:flex; gap:6px; margin-top:2px; }
 .modSlot{

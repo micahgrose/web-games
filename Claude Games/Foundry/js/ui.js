@@ -595,6 +595,7 @@ function bindHud(){
   $('btnFoundry').addEventListener('click', () => toggleBig('milestones'));
   $('btnInv').addEventListener('click', () => toggleBig('inventory'));
   $('techChip').addEventListener('click', () => { toggleBig('research'); });
+  bindMinimap();
   $('btnSound').addEventListener('click', () => {
     A.init(); A.resume();
     A.setOn(!A.on);
@@ -1410,11 +1411,12 @@ function renderBig(){
       const rates = {};
       for (const b of win) for (const k in b) rates[k] = (rates[k] || 0) + b[k];
       const mins = Math.max(1 / 60, win.length * 5 / 60);
-      let h = `<div class="selSection">Production (last ${Math.round(mins * 60)}s)</div><table class="statTable">`;
+      let h = `<div class="selSection">Production — rate over the last ${Math.round(mins * 60)}s, graph spans 5 min</div><table class="statTable">`;
       const keys = F.ITEM_ORDER.filter(k => rates[k] || st.made[k]);
       if (!keys.length) h += '<tr><td class="ghostNote">No production yet.</td></tr>';
       for (const k of keys){
         h += `<tr><td>${iconImg(k, 15)} ${F.ITEMS[k].name}</td>
+          <td><canvas class="spark" width="84" height="20" data-spark="${k}"></canvas></td>
           <td>${((rates[k] || 0) / mins).toFixed(1)} /min</td>
           <td>${F.fmt(st.made[k] || 0)} lifetime</td></tr>`;
       }
@@ -1426,9 +1428,40 @@ function renderBig(){
         <tr><td>Power</td><td>${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P</td></tr>
       </table>`;
       body.innerHTML = h;
+      fillSparks(body);
       break;
     }
   }
+}
+
+/* per-item production sparklines for the stats tab (one point per 5s bucket) */
+function fillSparks(body){
+  const S = UI.S;
+  const bks = S.stats.buckets;
+  if (!bks.length) return;
+  body.querySelectorAll('canvas.spark').forEach(cv => {
+    const item = cv.dataset.spark;
+    const x = cv.getContext('2d');
+    const w = cv.width, hgt = cv.height;
+    x.clearRect(0, 0, w, hgt);
+    const vals = bks.map(b => b[item] || 0);
+    const mx = Math.max(1, ...vals);
+    x.strokeStyle = 'rgba(89,214,255,.85)';
+    x.lineWidth = 1;
+    x.beginPath();
+    const n2 = vals.length;
+    for (let i = 0; i < n2; i++){
+      const px2 = n2 > 1 ? i / (n2 - 1) * (w - 2) + 1 : w / 2;
+      const py2 = hgt - 2 - (vals[i] / mx) * (hgt - 5);
+      if (i) x.lineTo(px2, py2); else x.moveTo(px2, py2);
+    }
+    x.stroke();
+    x.lineTo(w - 1, hgt - 1);
+    x.lineTo(1, hgt - 1);
+    x.closePath();
+    x.fillStyle = 'rgba(89,214,255,.13)';
+    x.fill();
+  });
 }
 
 /* ==================================================================== */
@@ -1745,7 +1778,11 @@ function renderHowTo(){
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
   feels polite. The <b>Foundry panel</b> (${kb('U')}) sells permanent upgrades — belt speed, drill
   speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk versions to
-  rebuild with. Check <b>Stats</b> to see production per minute and find your bottleneck.</p>
+  rebuild with. Check <b>Stats</b> to see production per minute — each item now has a 5-minute
+  <b>graph</b>, so a flatlining line points straight at your bottleneck. The <b>minimap</b>
+  (bottom-left) shows the whole world — click or drag on it to fly anywhere — and the <b>alert
+  chips</b> above it count machines that are out of fuel, unpowered or jammed; click a chip to jump
+  to the next culprit.</p>
 
   <div class="selSection">Controls</div>
   <table class="statTable">
@@ -1767,6 +1804,119 @@ function renderHowTo(){
     <tr><td>Mute</td><td>${kb('M')}</td></tr>
     <tr><td>Menu / cancel</td><td>${kb('Esc')}</td></tr>
   </table>`;
+}
+
+/* ==================================================================== */
+/* MINIMAP + PROBLEM ALERTS                                             */
+/* ==================================================================== */
+const MM_CAT = { ext:'#ffd76e', log:'rgba(170,180,196,.8)', pro:'#59d6ff', pow:'#ffe9b0' };
+
+function drawMinimap(){
+  const S = UI.S;
+  const wrap = $('minimapWrap');
+  if (!S || !R.groundCanvas || wrap.classList.contains('collapsed')) return;
+  const cv = $('minimap');
+  const x = cv.getContext('2d');
+  const k = cv.width / Math.max(S.w, S.h);
+  x.clearRect(0, 0, cv.width, cv.height);
+  x.drawImage(R.groundCanvas, 0, 0, cv.width, cv.height);
+  // buildings — belts faint, machines by category
+  for (const e of S.ents){
+    if (e.kind === 'core') continue;
+    let c;
+    if (e.kind === 'belt' || e.kind === 'ubelt' || e.kind === 'pipe' || e.kind === 'splitter')
+      c = 'rgba(150,160,175,.5)';
+    else if (e.kind === 'pole') c = 'rgba(120,220,255,.65)';
+    else c = MM_CAT[F.BUILDINGS[e.key].cat] || '#fff';
+    x.fillStyle = c;
+    x.fillRect(e.x * k, e.y * k, Math.max(1.2, e.w * k), Math.max(1.2, e.h * k));
+  }
+  // the Core
+  const co = S.core;
+  x.fillStyle = '#ffd76e';
+  x.fillRect(co.x * k - 1, co.y * k - 1, co.w * k + 2, co.h * k + 2);
+  // blinking problem blips
+  if (UI._alerts && Math.floor(performance.now() / 400) % 2 === 0){
+    const blip = (list, col) => {
+      x.fillStyle = col;
+      for (const e of list){
+        x.beginPath(); x.arc(e.x * k + 1, e.y * k + 1, 2.4, 0, 7); x.fill();
+      }
+    };
+    blip(UI._alerts.power, '#ff7676');
+    blip(UI._alerts.fuel, '#ffb454');
+  }
+  // camera viewport
+  const s = R.tilePx();
+  const hw = (R.W / 2) / s, hh = (R.H / 2) / s;
+  x.strokeStyle = 'rgba(255,255,255,.8)';
+  x.lineWidth = 1;
+  x.strokeRect((R.cam.x - hw) * k, (R.cam.y - hh) * k, hw * 2 * k, hh * 2 * k);
+}
+
+function bindMinimap(){
+  const cv = $('minimap');
+  let drag = false;
+  const move = (ev) => {
+    const S = UI.S;
+    if (!S) return;
+    const r = cv.getBoundingClientRect();
+    const k = r.width / Math.max(S.w, S.h);
+    R.cam.x = (ev.clientX - r.left) / k;
+    R.cam.y = (ev.clientY - r.top) / k;
+    clampCam();
+  };
+  cv.addEventListener('pointerdown', (ev) => { drag = true; cv.setPointerCapture(ev.pointerId); move(ev); ev.preventDefault(); });
+  cv.addEventListener('pointermove', (ev) => { if (drag) move(ev); });
+  cv.addEventListener('pointerup', () => { drag = false; });
+  $('mmToggle').addEventListener('click', () => {
+    const w = $('minimapWrap');
+    w.classList.toggle('collapsed');
+    const on = w.classList.contains('collapsed');
+    $('mmToggle').textContent = on ? '▸' : '▾';
+    $('mmToggle').title = on ? 'Expand map' : 'Collapse map';
+    A.sfx.click();
+  });
+}
+
+/* scan for troubled machines → clickable chips; click cycles through them */
+function refreshAlerts(){
+  const S = UI.S;
+  const bar = $('alertBar');
+  const fuel = [], power = [], jam = [];
+  for (const e of S.ents){
+    const def = F.BUILDINGS[e.key];
+    if (!def) continue;
+    if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine') && e.fuelT <= 0 && e.fuelBuf <= 0) fuel.push(e);
+    if ((def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar') && !e.netId) power.push(e);
+    if (e.kind === 'machine' && e.outTotal >= 6 + F.bufBonus(S)) jam.push(e);
+    else if (e.kind === 'miner' && e.outTotal >= 4 + F.bufBonus(S)) jam.push(e);
+  }
+  UI._alerts = { fuel, power, jam };
+  const sig = fuel.length + '|' + power.length + '|' + jam.length;
+  if (UI._alertSig === sig) return;
+  UI._alertSig = sig;
+  let h = '';
+  if (fuel.length) h += `<button class="alertChip aFuel" data-alert="fuel" title="Click to jump to one">🔥 ${fuel.length} out of fuel</button>`;
+  if (power.length) h += `<button class="alertChip aPower" data-alert="power" title="Click to jump to one">⚡ ${power.length} no power pole</button>`;
+  if (jam.length) h += `<button class="alertChip aJam" data-alert="jam" title="Click to jump to one">⛔ ${jam.length} output jammed</button>`;
+  bar.innerHTML = h;
+  bar.querySelectorAll('[data-alert]').forEach(b =>
+    b.addEventListener('click', () => jumpAlert(b.dataset.alert)));
+}
+
+function jumpAlert(type){
+  const list = (UI._alerts && UI._alerts[type]) || [];
+  if (!list.length) return;
+  UI._alertIdx = UI._alertIdx || {};
+  const i = (UI._alertIdx[type] || 0) % list.length;
+  UI._alertIdx[type] = i + 1;
+  const e = list[i];
+  R.cam.x = e.x + e.w / 2;
+  R.cam.y = e.y + e.h / 2;
+  clampCam();
+  select(e);
+  A.sfx.click();
 }
 
 /* ==================================================================== */
@@ -2102,11 +2252,19 @@ UI.update = function(dt){
     UI.uiT = 0;
     refreshObjective();
     refreshPower();
+    refreshAlerts();
     if (UI.selection) refreshSelPanel();
     buildBarAfford();
     if (UI.bigTab === 'stats' || UI.bigTab === 'inventory' || UI.bigTab === 'research') renderBig();
     refreshTechChip();
     updateArrow();
+  }
+
+  /* minimap at ~8 Hz */
+  UI.mmT = (UI.mmT || 0) + dt;
+  if (UI.mmT >= .12){
+    UI.mmT = 0;
+    drawMinimap();
   }
 
   /* audio activity follows the working factory */

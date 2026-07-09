@@ -650,7 +650,7 @@ F.tick = function(S, dt){
   if (st.bucketT >= 5){
     st.bucketT -= 5;
     st.buckets.push(st.bucketAcc);
-    if (st.buckets.length > 24) st.buckets.shift(); // 2-minute window
+    if (st.buckets.length > 60) st.buckets.shift(); // 5-minute window (feeds the stats graphs)
     st.bucketAcc = {};
   }
 
