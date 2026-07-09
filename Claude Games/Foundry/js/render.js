@@ -532,6 +532,8 @@ function drawEntBody(x, e, s, time, S){
     case 'gen': drawGen(x, e, s, time, def); break;
     case 'turbine': drawTurbine(x, e, s, time, def); break;
     case 'solar': drawSolar(x, e, s, def); break;
+    case 'acc': drawAcc(x, e, s, time); break;
+    case 'lamp': drawLamp(x, e, s, time, S); break;
     case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
     case 'tank': drawTank(x, e, s, def); break;
@@ -553,7 +555,7 @@ function drawEntBody(x, e, s, time, S){
   }
   // disconnected from any pole network → blinking red bolt
   if (S && !e.netId &&
-      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar'))){
+      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc'))){
     drawBolt(x, s * .22, s * .24, s * .30, `rgba(255,110,110,${.55 + .35 * Math.sin(time * 5)})`);
   }
 }
@@ -1203,6 +1205,67 @@ function drawSolar(x, e, s, def){
   x.lineTo(w * .6, pad * 2);
   x.lineTo(pad * 3.4, h - pad * 2);
   x.closePath(); x.fill();
+}
+
+/* ---- accumulator ---- */
+function drawAcc(x, e, s, time){
+  const pad = s * .12;
+  x.fillStyle = '#2c333f';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  rrect(x, pad, pad, s - pad * 2, s - pad * 2, s * .12);
+  x.fill(); x.stroke();
+  // charge cells
+  const fr = clamp((e.charge || 0) / F.ACC_CAP, 0, 1);
+  const cells = 4;
+  for (let i = 0; i < cells; i++){
+    const cf = clamp(fr * cells - i, 0, 1);
+    const cy2 = s - pad * 1.6 - (i + 1) * s * .155;
+    x.fillStyle = 'rgba(0,0,0,.4)';
+    rrect(x, pad * 1.8, cy2, s - pad * 3.6, s * .12, s * .03);
+    x.fill();
+    if (cf > .05){
+      x.fillStyle = e.flow < 0 ? '#ffd76e' : '#6ec6ff';
+      rrect(x, pad * 1.8, cy2, (s - pad * 3.6) * cf, s * .12, s * .03);
+      x.fill();
+    }
+  }
+  // terminals + activity shimmer
+  x.fillStyle = '#8b96a6';
+  x.fillRect(s * .3, pad * .4, s * .1, pad);
+  x.fillRect(s * .6, pad * .4, s * .1, pad);
+  if (e.flow){
+    const a = .35 + .25 * Math.sin(time * 8);
+    x.fillStyle = e.flow > 0 ? `rgba(110,198,255,${a})` : `rgba(255,215,110,${a})`;
+    x.beginPath(); x.arc(s / 2, pad * .9, s * .06, 0, 7); x.fill();
+  }
+}
+
+/* ---- lamp ---- */
+function drawLamp(x, e, s, time, S){
+  const c = s / 2;
+  const sun = S ? F.sunFactor(S) : 1;
+  const lit = !!(S && e.netId && S._netRatio && (S._netRatio[e.netId] || 0) > 0 && sun < .85);
+  // base + stem
+  x.fillStyle = '#2c333f';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  x.beginPath(); x.arc(c, c + s * .18, s * .17, 0, 7); x.fill(); x.stroke();
+  x.strokeStyle = '#8b96a6';
+  x.lineWidth = Math.max(1.4, s * .07);
+  x.lineCap = 'round';
+  x.beginPath(); x.moveTo(c, c + s * .18); x.lineTo(c, c - s * .18); x.stroke();
+  // bulb
+  const g = x.createRadialGradient(c, c - s * .26, 0, c, c - s * .26, s * .2);
+  if (lit){
+    g.addColorStop(0, '#fff4d8');
+    g.addColorStop(.6, '#ffd68a');
+    g.addColorStop(1, 'rgba(255,180,90,.25)');
+  } else {
+    g.addColorStop(0, '#39404e');
+    g.addColorStop(1, '#242a35');
+  }
+  x.fillStyle = g;
+  x.strokeStyle = 'rgba(0,0,0,.5)';
+  x.beginPath(); x.arc(c, c - s * .26, s * .15, 0, 7); x.fill(); x.stroke();
 }
 
 /* ---- power pole / pylon ----
@@ -2072,6 +2135,41 @@ R.draw = function(S, dt, U){
   emitAmbient(S, dt, vis);
   updateParticles(dt);
   drawParticles(x);
+
+  /* night falls: dark tint over the world, warm circles around lit lamps */
+  const sun = F.sunFactor(S);
+  const dark = (1 - sun) * .42;
+  if (dark > .01){
+    x.fillStyle = `rgba(7,10,22,${dark})`;
+    x.fillRect(0, 0, R.W, R.H);
+    const s2 = R.tilePx();
+    x.save();
+    x.globalCompositeOperation = 'lighter';
+    for (const e of S.ents){
+      if (e.kind !== 'lamp') continue;
+      if (!e.netId || !S._netRatio || (S._netRatio[e.netId] || 0) <= 0) continue;
+      const glow = F.BUILDINGS[e.key].glow || 5;
+      const [lx, ly] = R.worldToScreen(e.x + .5, e.y + .24);
+      const rad = glow * s2;
+      if (lx < -rad || ly < -rad || lx > R.W + rad || ly > R.H + rad) continue;
+      const lg = x.createRadialGradient(lx, ly, 0, lx, ly, rad);
+      const flicker = .9 + .1 * Math.sin(time * 6 + e.id * 1.7);
+      lg.addColorStop(0, `rgba(255,205,120,${.32 * dark / .42 * flicker})`);
+      lg.addColorStop(.4, `rgba(255,180,90,${.14 * dark / .42})`);
+      lg.addColorStop(1, 'rgba(255,160,60,0)');
+      x.fillStyle = lg;
+      x.beginPath(); x.arc(lx, ly, rad, 0, 7); x.fill();
+    }
+    // the Core itself holds back the dark a little
+    const [ccx2, ccy2] = R.worldToScreen(S.core.x + S.core.w / 2, S.core.y + S.core.h / 2);
+    const crad = 7 * s2;
+    const cg = x.createRadialGradient(ccx2, ccy2, 0, ccx2, ccy2, crad);
+    cg.addColorStop(0, `rgba(255,190,110,${.12 * dark / .42})`);
+    cg.addColorStop(1, 'rgba(255,160,60,0)');
+    x.fillStyle = cg;
+    x.beginPath(); x.arc(ccx2, ccy2, crad, 0, 7); x.fill();
+    x.restore();
+  }
 
   /* healing pulse — a wave of green rolls out from the Core on tier-up */
   if (R.healPulse){

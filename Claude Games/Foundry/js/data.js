@@ -195,6 +195,10 @@ const B = F.BUILDINGS = {
   beacon:  { name:'Beacon',          cat:'pro', kind:'beacon', w:2, h:2, power:20, range:4, slots:2, cost:{steel:10, advCircuit:4, glass:6}, tech:'beacons',
              desc:'Broadcasts its slotted modules at half strength to every machine in its area. Productivity does not transmit.' },
   /* --- power --- */
+  lamp:    { name:'Lamp',            cat:'pow', kind:'lamp', w:1, h:1, power:1, glow:5, cost:{glass:2, wire:2, ironIngot:1}, unlock:3,
+             desc:'Pushes back the night in a warm circle. Needs a power pole in range; draws almost nothing.' },
+  acc:     { name:'Accumulator',     cat:'pow', kind:'acc', w:1, h:1, cost:{steel:4, wire:8, glass:2}, tech:'accumulators',
+             desc:'Banks 900 P·s of surplus grid energy and feeds it back when demand outruns supply — the night-side of a solar farm.' },
   pole1:   { name:'Power pole',      cat:'pow', kind:'pole', w:1, h:1, reach:7, cover:2, cost:{ironIngot:2, wire:2}, unlock:3,
              desc:'Carries power. Links to poles within 7 tiles and powers machines in the 5×5 area around it. Generators must be in a pole\'s area too.' },
   pole2:   { name:'Pylon',           cat:'pow', kind:'pole', w:1, h:1, reach:14, cover:3, cost:{steel:4, wire:6}, unlock:7,
@@ -204,11 +208,11 @@ const B = F.BUILDINGS = {
   gen1:    { name:'Burner generator',cat:'pow', kind:'gen', w:2, h:2, out:30, burn:6, cost:{brick:10, plate:6}, unlock:3,
              desc:'Burns coal to feed the grid. 30 P at full load. Needs a power pole in range to deliver it.' },
   solar:   { name:'Solar array',     cat:'pow', kind:'solar', w:2, h:2, out:12, cost:{glass:6, circuit:2, plate:4}, unlock:6,
-             desc:'Silent, fuel-free power. 12 P, always on.' },
+             desc:'Silent, fuel-free power — 12 P in full sun, nothing at night. Pair with accumulators.' },
   solar2:  { name:'Solar tower',     cat:'pow', kind:'solar', w:2, h:2, out:45, cost:{glass:12, circuit:6, steel:6}, tech:'solarTowers',
-             desc:'Concentrated mirrors around a molten-salt core. 45 P, always on.' },
+             desc:'Concentrated mirrors around a molten-salt core. 45 P in full sun.' },
   solar3:  { name:'Helios array',    cat:'pow', kind:'solar', w:3, h:3, out:130, cost:{glass:20, advCircuit:6, frame:4}, tech:'helios',
-             desc:'A field of sun-tracking mirrors. 130 P of silent power.' },
+             desc:'A field of sun-tracking mirrors. 130 P of silent daylight power.' },
   turbine: { name:'Fuel turbine',    cat:'pow', kind:'turbine', w:2, h:2, out:150, burn:20, cost:{steel:10, motor:4, plate:8}, unlock:6,
              desc:'Burns fuel cells for serious power. 150 P at full load.' },
   turbine2:{ name:'Chrome turbine',  cat:'pow', kind:'turbine', w:2, h:2, out:400, burn:15, cost:{chromsteel:12, motor:6, advCircuit:4}, tech:'chromeTurbines',
@@ -245,7 +249,7 @@ F.MILESTONES = [
   { id:'m3', name:'Cogs & Current',
     flavor:'Gears to turn, wire to carry the spark. The grid wakes.',
     req:{ gear:30, wire:40 },
-    unlocks:['gen1','pole1','miner2','smelter2','chest','ubelt1','r:glass'],
+    unlocks:['gen1','pole1','lamp','miner2','smelter2','chest','ubelt1','r:glass'],
     grant:{ plate:10, coal:20 },
     hint:'Fabricators craft a chosen recipe — click one to set it. A single fabricator eats the output of several kilns.' },
   { id:'m4', name:'Vitreous Earth',
@@ -341,6 +345,9 @@ F.TECHS = {
   chromeTurbines:{ name:'Chrome turbines', icon:'chrome',
     desc:'A turbine whose chromsteel blades spin near the speed of sound — 400 P from a single machine.',
     cost:{ pack3:14, pack4:12 }, req:['chromeworks'], unlocks:['turbine2'] },
+  accumulators:{ name:'Accumulators', icon:'fuelCell',
+    desc:'Grid batteries: bank surplus power by day, spend it through the night. Each stores 900 P·s and moves up to 45 P.',
+    cost:{ pack2:16 }, req:[], unlocks:['acc'] },
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
@@ -435,6 +442,22 @@ F.TIPS = {
   firstPipe:    'Pipes only connect to pumpjacks, refineries and other pipes.',
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
 };
+
+/* ================= DAY / NIGHT =================
+   One full cycle every DAY_LEN sim-seconds. Solar output scales with
+   sunFactor: full day 45%, dusk 10%, night 35%, dawn 10%. */
+F.DAY_LEN = 240;
+F.sunFactor = function(S){
+  const t = ((S.dayT || 0) % F.DAY_LEN) / F.DAY_LEN;
+  if (t < .45) return 1;
+  if (t < .55) return 1 - (t - .45) / .1;
+  if (t < .9) return 0;
+  return (t - .9) / .1;
+};
+
+/* accumulator behaviour (per unit) */
+F.ACC_CAP = 900;    // stored energy, P·s
+F.ACC_RATE = 45;    // max charge/discharge, P
 
 /* fuel: seconds of burn per coal */
 F.COAL_BURN = 10;

@@ -50,6 +50,7 @@ F.newState = function(seed){
   return {
     seed: seed >>> 0,
     time: 0,               // sim seconds
+    dayT: 20,              // seconds into the day/night cycle (starts mid-morning)
     tick: 0,
     w: 0, h: 0,            // map size (set by worldgen)
     ground: null,          // Uint8Array terrain variant (visual)

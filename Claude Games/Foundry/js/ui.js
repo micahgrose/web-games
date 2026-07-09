@@ -733,6 +733,8 @@ function showBuildTip(ev, key){
   if (def.cap && def.kind === 'chest') stats.push(`holds ${def.cap}`);
   if (def.kind === 'tank') stats.push(`buffers ${def.cap} crude`);
   if (def.kind === 'beacon') stats.push(`boosts a ${def.range * 2 + def.w}×${def.range * 2 + def.w} area`);
+  if (def.kind === 'acc') stats.push(`stores ${F.ACC_CAP} P·s · ${F.ACC_RATE} P rate`);
+  if (def.kind === 'lamp') stats.push(`lights ${def.glow * 2} tiles at night`);
   if (stats.length) html += `<div class="tt-stat">${stats.join(' · ')}</div>`;
   html += '<div class="tt-cost">' + Object.entries(def.cost).map(([k, n]) => {
     const have = F.invCount(S, k);
@@ -819,9 +821,25 @@ function dynVals(e){
       d.out = `${Math.round(def.out * F.powerMul(S))} P`;
       d.load = `${Math.round((e.load || 0) * 100)}%`;
       break;
-    case 'solar':
-      d.out = `${Math.round(def.out * F.powerMul(S))} P`;
+    case 'solar': {
+      const sn = F.sunFactor(S);
+      d.out = `${Math.round(def.out * F.powerMul(S) * sn)} P` +
+        (sn <= 0 ? ' · night' : sn < 1 ? ' · twilight' : ' · full sun');
       break;
+    }
+    case 'acc':
+      d.charge = `${Math.round(e.charge || 0)} / ${F.ACC_CAP} P·s`;
+      d.flow = e.flow > 0 ? `<span style="color:var(--accent2)">charging +${Math.round(e.flow)} P</span>`
+        : e.flow < 0 ? `<span style="color:var(--accent)">discharging ${Math.round(e.flow)} P</span>`
+        : 'idle';
+      break;
+    case 'lamp': {
+      const sn2 = F.sunFactor(S);
+      const powered = e.netId && S._netRatio && (S._netRatio[e.netId] || 0) > 0;
+      d.lit = !powered ? '<span style="color:var(--bad)">no power</span>'
+        : sn2 >= .85 ? 'off — daylight' : '<span style="color:var(--accent)">lit</span>';
+      break;
+    }
     case 'belt':
       d.speed = `${(def.speed * F.beltMul(S)).toFixed(2)} tiles/s`;
       break;
@@ -938,7 +956,19 @@ function buildSelPanel(e){
     html += row('Output', dv.out, 'out');
     html += row('Load', dv.load, 'load');
   }
-  if (e.kind === 'solar') html += row('Output', dv.out, 'out');
+  if (e.kind === 'solar'){
+    html += row('Output', dv.out, 'out');
+    html += `<div class="ghostNote">Solar power follows the sun — nothing at night. Accumulators bridge the dark hours.</div>`;
+  }
+  if (e.kind === 'acc'){
+    html += row('Charge', dv.charge, 'charge');
+    html += row('Flow', dv.flow, 'flow');
+    html += `<div class="ghostNote">Charges when its grid runs a surplus, discharges to cover deficits — up to ${F.ACC_RATE} P either way.</div>`;
+  }
+  if (e.kind === 'lamp'){
+    html += row('Status', dv.lit, 'lit');
+    html += `<div class="ghostNote">Lights the night in a ${def.glow * 2}-tile circle. Needs a pole in range.</div>`;
+  }
   if (e.kind === 'belt') html += row('Speed', dv.speed, 'speed');
   if (e.kind === 'splitter'){
     // filter: matched items always exit LEFT; everything else shares the rest
@@ -1128,7 +1158,7 @@ function updateSelPanel(e){
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
     miner:'extraction', tank:'fluid', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
-    gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction', lab:'research', beacon:'support' }[def.kind] || def.kind;
+    gen:'power', turbine:'power', solar:'power', acc:'power storage', lamp:'lighting', pole:'power grid', pump:'extraction', lab:'research', beacon:'support' }[def.kind] || def.kind;
 }
 function row(k, v, dyn){ return `<div class="selRow"><span>${k}</span><b${dyn ? ` data-dyn="${dyn}"` : ''}>${v}</b></div>`; }
 function rateStr(e){
@@ -1271,7 +1301,9 @@ function refreshPower(){
   fill.id = 'powerBarFill';
   if (st.powerRatio < .999) fill.classList.add('brown');
   else if (frac > .8) fill.classList.add('strain');
-  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P` +
+  const sn = F.sunFactor(S);
+  const sky = sn >= .85 ? '☀' : sn <= .05 ? '☾' : '⛅';
+  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P ${sky}` +
     (st.unpowered ? ` · ${st.unpowered} no pole` : '');
 }
 
@@ -1684,6 +1716,8 @@ function renderRecipeBook(S){
       if (d.kind === 'chest' && d.cap) stats.push(`holds ${d.cap}`);
       if (d.kind === 'beacon') stats.push(`boosts a ${d.range * 2 + d.w}×${d.range * 2 + d.w} area`);
       if (d.kind === 'tank') stats.push(`buffers ${d.cap} crude`);
+      if (d.kind === 'acc') stats.push(`stores ${F.ACC_CAP} P·s`);
+      if (d.kind === 'lamp') stats.push(`lights ${d.glow * 2} tiles at night`);
       h += `<div class="compRow">
         <img src="${R.makeBuildingIcon(k, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
@@ -1750,6 +1784,13 @@ function renderHowTo(){
   turns red). Generators idle when nothing draws power, so fuel is never wasted. Later:
   <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn ${ic('fuelCell')} fuel cells
   for serious output; the <b>pylon</b> spans 14 tiles.</p>
+
+  <div class="selSection">Day & night</div>
+  <p class="howP">The world turns: every four minutes a full <b>day/night cycle</b> passes (the sun
+  icon by the power bar shows where you are). <b>Solar power follows the sun</b> — full output at
+  noon, nothing at night — so a solar-heavy factory browns out after dusk unless you research
+  <b>accumulators</b>: grid batteries that bank surplus by day and feed it back through the dark.
+  <b>Lamps</b> (cheap, from tier 3) light the night in a warm circle around your factory floors.</p>
 
   <div class="selSection">Research</div>
   <p class="howP">From tier 3 the <b>laboratory</b> opens an optional <b>tech tree</b> beside the milestone

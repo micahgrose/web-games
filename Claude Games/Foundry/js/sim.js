@@ -223,6 +223,7 @@ function initEnt(S, e, def){
     case 'beacon':   e.mods = []; break;
     case 'lab':      e.inBuf = {}; e.outBuf = {}; e.outTotal = 0; e.prog = 0; e.workItem = null; break;
     case 'gen':      e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
+    case 'acc':      e.charge = 0; e.flow = 0; break;
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'solar':    break;
     case 'pole':     e.links = []; e.netId = 0; break;
@@ -329,7 +330,7 @@ F.computePowerNetworks = function(S){
     if (e.kind === 'pole') continue;
     const def = F.BUILDINGS[e.key];
     if (!def) continue;
-    if (e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || def.power){
+    if (e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc' || def.power){
       e.netId = 0;
       for (const p of poles){
         if (p.netId && poleCovers(p, e)){ e.netId = p.netId; break; }
@@ -554,6 +555,7 @@ function famMul(S, fam){
 F.tick = function(S, dt){
   S.tick++;
   S.time += dt;
+  S.dayT = ((S.dayT || 0) + dt) % F.DAY_LEN;
   const ents = S.ents;
 
   /* ---- pass A: power book-keeping (per pole-network) ---- */
@@ -561,6 +563,7 @@ F.tick = function(S, dt){
   const sup = {}, dem = {};
   let unpowered = 0, unpoweredDem = 0;
   const useMul = F.powerUseMul(S), outMul = F.powerMul(S);
+  const sun = F.sunFactor(S);
   for (let i = 0; i < ents.length; i++){
     const e = ents[i], def = F.BUILDINGS[e.key];
     if (!def) continue;
@@ -568,7 +571,7 @@ F.tick = function(S, dt){
       e._fueled = e.fuelT > 0 || e.fuelBuf > 0;
       if (e._fueled && e.netId) sup[e.netId] = (sup[e.netId] || 0) + def.out * outMul;
     } else if (e.kind === 'solar'){
-      if (e.netId) sup[e.netId] = (sup[e.netId] || 0) + def.out * outMul;
+      if (e.netId && sun > 0) sup[e.netId] = (sup[e.netId] || 0) + def.out * outMul * sun;
     } else if (def.power){
       // does it want to work?
       let wants = false;
@@ -576,6 +579,7 @@ F.tick = function(S, dt){
       else if (e.kind === 'pump') wants = e.tank < 30;
       else if (e.kind === 'machine') wants = e.crafting || !!machineCanStart(S, e, def);
       else if (e.kind === 'beacon') wants = !!(e.mods && e.mods.length);
+      else if (e.kind === 'lamp') wants = sun < .85;
       e._want = wants;
       if (wants){
         // module power multiplier (beacon field uses last tick's ratio — converges)
@@ -586,6 +590,45 @@ F.tick = function(S, dt){
       }
     }
   }
+  /* accumulators: charge on surplus (raising generator load), discharge to
+     cover deficits (raising supply) — evaluated per network */
+  const accsByNet = {};
+  for (let i = 0; i < ents.length; i++){
+    const e = ents[i];
+    if (e.kind === 'acc'){
+      e.flow = 0;
+      if (e.netId) (accsByNet[e.netId] || (accsByNet[e.netId] = [])).push(e);
+    }
+  }
+  for (const nid in accsByNet){
+    const s0 = sup[nid] || 0, d0 = dem[nid] || 0;
+    if (s0 > d0){
+      let surplus = s0 - d0;
+      for (const a of accsByNet[nid]){
+        if (surplus <= 0) break;
+        const take = Math.min(F.ACC_RATE, (F.ACC_CAP - a.charge) / dt, surplus);
+        if (take > 0){
+          a.charge += take * dt;
+          a.flow = take;
+          dem[nid] = (dem[nid] || 0) + take;
+          surplus -= take;
+        }
+      }
+    } else if (d0 > s0){
+      let need = d0 - s0;
+      for (const a of accsByNet[nid]){
+        if (need <= 0) break;
+        const give = Math.min(F.ACC_RATE, a.charge / dt, need);
+        if (give > 0){
+          a.charge -= give * dt;
+          a.flow = -give;
+          sup[nid] = (sup[nid] || 0) + give;
+          need -= give;
+        }
+      }
+    }
+  }
+
   const ratioByNet = {};
   let totSup = 0, totDem = unpoweredDem, served = 0;
   for (const nid of new Set([...Object.keys(sup), ...Object.keys(dem)])){
@@ -1086,11 +1129,13 @@ F.serialize = function(S){
     if (e.workItem) o.wk = e.workItem;
     if (e.mods && e.mods.length) o.md = e.mods.slice();
     if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
+    if (e.charge) o.ch = +e.charge.toFixed(2);
     ents.push(o);
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
   return {
     v: 3, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
+    dayT: +(S.dayT || 0).toFixed(2),
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     msIndex: S.msIndex, msProg: S.msProg,
     research: { cur: S.research.cur, done: S.research.done, prog: S.research.prog },
@@ -1104,6 +1149,7 @@ F.deserialize = function(data){
   // v1 saves carry no genVer → regenerate with the original 128² layout
   const S = F.newGame(data.seed, data.genVer || 1);
   S.time = data.time; S.tick = data.tick;
+  S.dayT = data.dayT != null ? data.dayT : 20;
   S.inv = data.inv || {};
   S.delivered = data.delivered || {};
   S.handMined = data.handMined || {};
@@ -1142,6 +1188,7 @@ F.deserialize = function(data){
     if (o.wk) e.workItem = o.wk;
     if (o.md) e.mods = o.md.filter(m => F.MODULES[m]);
     if (o.pa) e.prodAcc = o.pa;
+    if (o.ch) e.charge = o.ch;
     S.ents.push(e);
     stamp(S, e);
   }
