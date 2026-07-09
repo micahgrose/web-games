@@ -94,7 +94,7 @@ R.buildGround = function(S){
      milestone (drainEvents → R.buildGround). */
   /* heal radius per completed tier (tiles): barely creeps in for the first
      few tiers, then accelerates; full map on victory */
-  const HEAL_R = [0, 4, 7, 10, 13, 21, 33, 50, 72, 100, 1e4];
+  const HEAL_R = [0, 4, 7, 10, 13, 21, 28, 36, 47, 60, 78, 100, 1e4];
   const msDone = S.won || S.freeplay ? HEAL_R.length - 1 : Math.min(S.msIndex || 0, HEAL_R.length - 1);
   R._heal = null;
   if (HEAL_R[msDone] > 0){
@@ -561,8 +561,10 @@ function drawEntBody(x, e, s, time, S){
     }
   }
   // disconnected from any pole network → blinking red bolt
+  // (unless it's a stoked machine happily burning coal from its hopper)
   if (S && !e.netId &&
-      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc'))){
+      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc')) &&
+      !(def.power && F.stoked(S) && F.stokable(e) && (e.fuelT > 0 || e.fuelBuf > 0))){
     drawBolt(x, s * .22, s * .24, s * .30, `rgba(255,110,110,${.55 + .35 * Math.sin(time * 5)})`);
   }
 }

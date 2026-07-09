@@ -641,12 +641,14 @@ function bindHud(){
 /* BUILD BAR                                                            */
 /* ==================================================================== */
 function catBuildings(cat){
-  // tech-gated buildings stay hidden until researched (the Research tab is their teaser)
+  // tech-gated buildings appear (locked) once their tech is researchABLE —
+  // an advert for the tree; deeper branches stay hidden until their prereqs land
   const S = UI.S;
   return F.BUILD_ORDER.filter(k => {
     const d = F.BUILDINGS[k];
     if (d.cat !== cat) return false;
-    if (d.tech && !(S && S.unlocked[k])) return false;
+    if (d.tech && !(S && (S.unlocked[k] || F.techAvailable(S, d.tech) ||
+        (S.research && S.research.cur === d.tech)))) return false;
     return true;
   });
 }
@@ -670,6 +672,11 @@ function buildBar(){
   bar.innerHTML = '';
   const S = UI.S;
   const list = catBuildings(UI.activeCat);
+  if (!list.length){
+    const note = el('span', 'bname', 'Nothing yet — this age sleeps in the tech tree (U)');
+    note.style.cssText = 'opacity:.55;padding:8px 12px;align-self:center';
+    bar.appendChild(note);
+  }
   list.forEach((key, i) => {
     const def = F.BUILDINGS[key];
     const unlocked = !!S.unlocked[key];
@@ -1052,7 +1059,8 @@ function buildSelPanel(e){
   }
 
   // fuel: two transfer slots — machine buffer ⇄ your pocket
-  if (def.fuel || e.kind === 'gen' || e.kind === 'turbine'){
+  const stokedHere = F.stoked(S) && def.power && F.stokable(e);
+  if (def.fuel || e.kind === 'gen' || e.kind === 'turbine' || stokedHere){
     const isT = e.kind === 'turbine';
     const item = isT ? 'fuelCell' : 'coal';
     html += `<div class="selDivider"></div><div class="selSection">Fuel — ${isT ? 'fuel cells' : 'coal'}</div>
@@ -1061,7 +1069,7 @@ function buildSelPanel(e){
       <div class="slotRow">
         <div class="slotBox" data-side="machine">
           ${iconImg(item, 22)}
-          <span class="slotN" data-sn="machine">${e.fuelBuf} / ${F.FUEL_CAP}</span>
+          <span class="slotN" data-sn="machine">${e.fuelBuf} / ${F.fuelCap(S)}</span>
           <span class="slotLbl">in machine</span>
         </div>
         <div class="slotArrows">⇄</div>
@@ -1072,6 +1080,7 @@ function buildSelPanel(e){
         </div>
       </div>
       <div class="ghostNote">click: pick up all · right-click: half · with a stack in hand, scroll over a box to move one at a time</div>`;
+    if (stokedHere) html += `<div class="ghostNote">Stoked: burns coal from this hopper before drawing on the grid.</div>`;
   }
 
   html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
@@ -1195,10 +1204,13 @@ function updateSelPanel(e){
   const fb = p.querySelector('[data-fbar]');
   if (fb){
     const isT = e.kind === 'turbine';
-    fb.style.width = (clamp(e.fuelT / (isT ? def.burn : F.COAL_BURN), 0, 1) * 100).toFixed(1) + '%';
+    const perFuel = isT ? def.burn :
+      (def.fuel || e.kind === 'gen') ? F.COAL_BURN :
+      F.STOKE_PS / Math.max(1, def.power || 1);   // stoked electric machine
+    fb.style.width = (clamp(e.fuelT / perFuel, 0, 1) * 100).toFixed(1) + '%';
     const item = isT ? 'fuelCell' : 'coal';
     const snM = p.querySelector('[data-sn="machine"]');
-    const tM = `${e.fuelBuf} / ${F.FUEL_CAP}`;
+    const tM = `${e.fuelBuf} / ${F.fuelCap(S)}`;
     if (snM && snM.textContent !== tM) snM.textContent = tM;
     const snI = p.querySelector('[data-sn="inv"]');
     const tI = F.fmt(F.invCount(S, item));
@@ -1821,7 +1833,7 @@ function renderHowTo(){
   becomes <b>construction material</b> in your inventory — deliveries literally fund every building,
   upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
   that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
-  Complete all ten tiers to reignite the World Engine — and watch the land: <b>every finished tier
+  Complete all twelve tiers to reignite the World Engine — and watch the land: <b>every finished tier
   heals a ring of the ash-waste around the Core back to green</b>. Even after Ignition the game
   goes on: the woken Engine asks for endless <b>tributes</b> — escalating baskets of goods, each
   one granting <b>+3% machine speed</b> (up to +30%).</p>
@@ -1850,19 +1862,25 @@ function renderHowTo(){
   <b>chute</b> (amber arrow — watch it when rotating). <b>Furnaces</b> smelt whatever suits their
   contents; <b>fabricators and assemblers</b> craft one chosen recipe — click the machine and pick it.
   The <b>alloy furnace</b> fuses two inputs: iron ingots + coal → ${ic('steel')} steel,
-  quartz + coal → ${ic('silicon')} silicon. Mk1 machines burn coal; electric machines are far faster
-  but need the grid. A machine with a blinking <b>amber dot</b> is out of fuel; a stalled machine
-  usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
+  quartz + coal → ${ic('silicon')} silicon. Mk1 machines burn coal; electric machines are far
+  faster but need power — from the grid, or straight from a <b>coal hopper</b> once
+  <b>Coal stokers</b> is researched. A machine with a blinking <b>amber dot</b> is out of fuel;
+  a stalled machine usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
 
   <div class="selSection">Power</div>
-  <p class="howP">Generators make power but <b>poles deliver it</b>. A ${ic('wire')} <b>power pole</b>
-  links to poles within 7 tiles (wires draw automatically) and energises the 5×5 area around it —
-  generators must stand in a pole's area too. Separate pole clusters are <b>separate grids</b>, each
-  with its own supply and demand. A blinking <b>red bolt</b> means no pole in range; when demand
-  exceeds supply everything electric slows down proportionally (a brown-out — the top-right bar
-  turns red). Generators idle when nothing draws power, so fuel is never wasted. Later:
-  <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn ${ic('fuelCell')} fuel cells
-  for serious output; the <b>pylon</b> spans 14 tiles.</p>
+  <p class="howP">Every electric machine starts life unpowered — the tech tree offers two roads.
+  <b>Coal stokers</b> (cheap, early) bolts a firebox onto electric machines, drills and pumpjacks:
+  drop or belt coal in and they run at full speed, burning their hopper <b>before</b> touching any
+  grid. <b>Coal hoppers</b> triples the bunker and <b>Forced draft</b> makes every coal-fired
+  building 30% faster — while eating coal 60% faster. <b>Electrification</b> (deeper in the tree)
+  wakes the true grid: generators make power but <b>poles deliver it</b>. A ${ic('wire')}
+  <b>power pole</b> links to poles within 7 tiles (wires draw automatically) and energises the 5×5
+  area around it — generators must stand in a pole's area too. Separate pole clusters are
+  <b>separate grids</b>, each with its own supply and demand. A blinking <b>red bolt</b> means no
+  pole in range; when demand exceeds supply everything electric slows down proportionally (a
+  brown-out — the top-right bar turns red). Generators idle when nothing draws power, so fuel is
+  never wasted. Later: <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn
+  ${ic('fuelCell')} fuel cells for serious output; the <b>pylon</b> spans 14 tiles.</p>
 
   <div class="selSection">Air freight</div>
   <p class="howP">The <b>Cargo drones</b> tech unlocks the <b>drone depot</b>. Set one to
@@ -1872,19 +1890,21 @@ function renderHowTo(){
   depot chest. Both ends need grid power to dispatch; airborne drones always finish their run.</p>
 
   <div class="selSection">Day & night</div>
-  <p class="howP">The world turns: every four minutes a full <b>day/night cycle</b> passes (the sun
+  <p class="howP">The world turns: every eleven minutes a full <b>day/night cycle</b> passes (the sun
   icon by the power bar shows where you are). <b>Solar power follows the sun</b> — full output at
   noon, nothing at night — so a solar-heavy factory browns out after dusk unless you research
   <b>accumulators</b>: grid batteries that bank surplus by day and feed it back through the dark.
-  <b>Lamps</b> (cheap, from tier 3) light the night in a warm circle around your factory floors.</p>
+  <b>Lamps</b> (cheap, with Electrification) light the night in a warm circle around your factory floors.</p>
 
   <div class="selSection">Research</div>
-  <p class="howP">From tier 3 the <b>laboratory</b> opens an optional <b>tech tree</b> beside the milestone
-  campaign. Craft ${ic('pack1')} <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
-  belt them into any side of a lab, and pick a project in the <b>Research</b> tab (${kb('U')}). Every
-  technology is a bonus you choose — ${ic('ironDust')} ore-doubling <b>crushers</b>, the 240-item
-  <b>vault</b>, area-powering <b>substations</b>, <b>grav-belts</b>, <b>solar towers</b> — never a gate on
-  the campaign. Later milestones unlock richer packs (${ic('pack2')} volt, ${ic('pack3')} polymer,
+  <p class="howP">From tier 3 the <b>laboratory</b> is the road onward: milestones hand out only the
+  most basic machines, and <b>everything else lives in the tech tree</b> — coal-fired machinery, the
+  power grid, every Mk2+ machine, faster belts, depots and tunnels. Craft ${ic('pack1')}
+  <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
+  belt them into any side of a lab, and pick a project in the <b>Research</b> tab (${kb('U')}).
+  Branches include ${ic('ironDust')} ore-doubling <b>crushers</b>, the 240-item
+  <b>vault</b>, area-powering <b>substations</b>, <b>grav-belts</b>, <b>solar towers</b>.
+  Later milestones unlock richer packs (${ic('pack2')} volt, ${ic('pack3')} polymer,
   ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.
   Deep in the tree wait ${ic('speedModule')} <b>modules</b> — inserts that trade power for speed
   (or the reverse), plus ${ic('prodModule')} productivity skim — and the <b>beacon</b>, which
@@ -2021,8 +2041,13 @@ function refreshAlerts(){
   for (const e of S.ents){
     const def = F.BUILDINGS[e.key];
     if (!def) continue;
-    if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine') && e.fuelT <= 0 && e.fuelBuf <= 0) fuel.push(e);
-    if ((def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar') && !e.netId) power.push(e);
+    const stokable = F.stoked(S) && def.power && F.stokable(e);
+    const hasCoal = e.fuelT > 0 || e.fuelBuf > 0;
+    if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine' || (stokable && !e.netId)) &&
+        e.fuelT <= 0 && e.fuelBuf <= 0) fuel.push(e);
+    // an off-grid machine happily burning its hopper is not a power problem
+    if ((def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar') &&
+        !e.netId && !(stokable && hasCoal)) power.push(e);
     const atCap = (e.kind === 'machine' && e.outTotal >= 6 + F.bufBonus(S)) ||
                   (e.kind === 'miner' && e.outTotal >= 4 + F.bufBonus(S));
     if (atCap){
@@ -2160,7 +2185,7 @@ function slotWheel(ev, box, side, ent, item){
     // drop one from the hand into this box
     if (H.n <= 0) return;
     if (side === 'machine'){
-      if (ent.fuelBuf >= F.FUEL_CAP){ A.sfx.error(); return; }
+      if (ent.fuelBuf >= F.fuelCap(UI.S)){ A.sfx.error(); return; }
       ent.fuelBuf += 1;
     } else {
       F.invAdd(UI.S, item, 1);
@@ -2180,7 +2205,7 @@ function depositTo(side, ent, item, btn){
   let put = 0;
   if (side === 'machine'){
     if (H.item !== item){ A.sfx.error(); return; }
-    put = Math.min(amt, F.FUEL_CAP - ent.fuelBuf);
+    put = Math.min(amt, F.fuelCap(UI.S) - ent.fuelBuf);
     if (!put){ A.sfx.error(); return; }
     ent.fuelBuf += put;
   } else {

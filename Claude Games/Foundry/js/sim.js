@@ -228,7 +228,7 @@ function initEnt(S, e, def){
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'solar':    break;
     case 'pole':     e.links = []; e.netId = 0; break;
-    case 'pump':     e.tank = 0; e.prog = 0; break;
+    case 'pump':     e.tank = 0; e.prog = 0; e.fuelT = 0; e.fuelBuf = 0; break;
   }
 }
 
@@ -389,11 +389,16 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       return true;
     case 'miner': case 'gen':
       if (item !== 'coal') return false;
-      if (target.kind === 'miner' && !F.BUILDINGS[target.key].fuel) return false;
-      if (target.fuelBuf >= F.FUEL_CAP) return false;
+      if (target.kind === 'miner' && !F.BUILDINGS[target.key].fuel &&
+          !(F.stoked(S) && F.BUILDINGS[target.key].power)) return false;
+      if (target.fuelBuf >= F.fuelCap(S)) return false;
+      target.fuelBuf++; return true;
+    case 'pump':
+      // stoked pumpjacks take coal like any other fired machine
+      if (item !== 'coal' || !F.stoked(S) || target.fuelBuf >= F.fuelCap(S)) return false;
       target.fuelBuf++; return true;
     case 'turbine':
-      if (item !== 'fuelCell' || target.fuelBuf >= F.FUEL_CAP) return false;
+      if (item !== 'fuelCell' || target.fuelBuf >= F.fuelCap(S)) return false;
       target.fuelBuf++; return true;
     case 'lab':
       if (!F.PACKS.includes(item)) return false;
@@ -414,11 +419,8 @@ F.tryInsert = function(S, target, item, fromDir, t0){
 
 function machineAccept(S, m, item){
   const def = F.BUILDINGS[m.key];
-  // burner fuel
-  if (def.fuel && item === 'coal' && m.fuelBuf < F.FUEL_CAP && !recipeUses(S, m, 'coal')){
-    m.fuelBuf++; return true;
-  }
   const cap = 2; // buffer holds cap × recipe need (+capacitor bonus)
+  // ingredients first — coal that a recipe needs must never be eaten as fuel
   if (F.AUTO_RECIPES[def.fam]){
     // accept anything belonging to an unlocked auto recipe
     let need = 0;
@@ -427,28 +429,24 @@ function machineAccept(S, m, item){
       const r = F.RECIPES[rk];
       if (r.in[item]) need = Math.max(need, r.in[item]);
     }
-    if (!need){
-      if (def.fuel && item === 'coal' && m.fuelBuf < F.FUEL_CAP){ m.fuelBuf++; return true; }
-      return false;
+    if (need){
+      const lim = need * cap + F.bufBonus(S) + (def.fam === 'alloy' ? 2 : 0);
+      if ((m.inBuf[item] || 0) < lim){ m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true; }
     }
-    const lim = need * cap + F.bufBonus(S) + (def.fam === 'alloy' ? 2 : 0);
-    if ((m.inBuf[item] || 0) >= lim) return false;
-    m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true;
+  } else {
+    // asm / refinery: only the chosen recipe's ingredients
+    const r = m.recipe && F.RECIPES[m.recipe];
+    if (r && r.in[item]){
+      const lim = r.in[item] * cap + F.bufBonus(S);
+      if ((m.inBuf[item] || 0) < lim){ m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true; }
+    }
   }
-  // asm / refinery: only the chosen recipe's ingredients
-  const r = m.recipe && F.RECIPES[m.recipe];
-  if (!r || !r.in[item]) {
-    if (def.fuel && item === 'coal' && m.fuelBuf < F.FUEL_CAP){ m.fuelBuf++; return true; }
-    return false;
+  // overflow / non-ingredient coal → the firebox (burners, or stoked electrics)
+  if (item === 'coal' && m.fuelBuf < F.fuelCap(S) &&
+      (def.fuel || (def.power && F.stoked(S)))){
+    m.fuelBuf++; return true;
   }
-  const lim = r.in[item] * cap + F.bufBonus(S);
-  if ((m.inBuf[item] || 0) >= lim) return false;
-  m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true;
-}
-
-function recipeUses(S, m, item){
-  const r = m.recipe && F.RECIPES[m.recipe];
-  return !!(r && r.in[item]);
+  return false;
 }
 
 function deliverToCore(S, item){
@@ -595,7 +593,10 @@ F.tick = function(S, dt){
       else if (e.kind === 'lamp') wants = sun < .85;
       else if (e.kind === 'port') wants = !!e.mode;
       e._want = wants;
-      if (wants){
+      // stoked (coal-fired) machines run off their firebox this tick:
+      // no grid demand, and being off-grid is fine
+      e._stoke = wants && F.stoked(S) && F.stokable(e) && (e.fuelT > 0 || e.fuelBuf > 0);
+      if (wants && !e._stoke){
         // module power multiplier (beacon field uses last tick's ratio — converges)
         const pm = (e.mods || e._bcn) ? F.modEffects(S, e).pow : 1;
         const draw = def.power * useMul * pm;
@@ -738,12 +739,28 @@ function minerWants(S, e){
   return S.oreType[i] !== 0 && S.oreType[i] !== F.OIL_TYPE && S.oreAmt[i] > 0;
 }
 
+/* run a stoked electric machine off its firebox: one coal buys
+   STOKE_PS / power-draw seconds of full-speed work */
+function stokeBurn(S, e, def, dt){
+  if (e.fuelT <= 0){
+    if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.STOKE_PS / Math.max(1, def.power) * F.burnMul(S); }
+    else return false;
+  }
+  e.fuelT -= dt * F.draftBurn(S);
+  return true;
+}
+
 function tickMiner(S, e, def, dt, ratio){
   tryEject(S, e);
   if (!minerWants(S, e)){ e.active = false; return; }
   const fx = F.modEffects(S, e);
   let mul = def.speed * F.mineMul(S) * fx.spd * F.tributeMul(S);
-  if (def.power){ mul *= ratio; }
+  if (def.power){
+    if (e._stoke){
+      if (!stokeBurn(S, e, def, dt)){ e.active = false; return; }
+      mul *= F.draftSpd(S);
+    } else mul *= ratio;
+  }
   else {
     // burner
     if (e.fuelT <= 0){
@@ -754,7 +771,8 @@ function tickMiner(S, e, def, dt, ratio){
         return;
       }
     }
-    e.fuelT -= dt;
+    e.fuelT -= dt * F.draftBurn(S);
+    mul *= F.draftSpd(S);
   }
   e.active = mul > 0;
   e.prog += dt * mul / def.mineTime;
@@ -796,7 +814,12 @@ function tickMachine(S, e, def, dt, ratio){
   if (!rc){ e.crafting = false; return; }
   const fx = F.modEffects(S, e);
   let mul = def.speed * famMul(S, def.fam) * fx.spd * F.tributeMul(S);
-  if (def.power) mul *= ratio;
+  if (def.power){
+    if (e._stoke){
+      if (!stokeBurn(S, e, def, dt)){ e.active = false; return; }
+      mul *= F.draftSpd(S);
+    } else mul *= ratio;
+  }
   else {
     if (e.fuelT <= 0){
       if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN * F.burnMul(S); }
@@ -806,7 +829,8 @@ function tickMachine(S, e, def, dt, ratio){
         return;
       }
     }
-    e.fuelT -= dt;
+    e.fuelT -= dt * F.draftBurn(S);
+    mul *= F.draftSpd(S);
   }
   e.active = mul > 0;
   e.prog += dt * mul / rc.time;
@@ -840,10 +864,14 @@ function tickPump(S, e, def, dt, ratio){
     if (S.oreType[t] === F.OIL_TYPE && S.oreAmt[t] > 0){ oil = t; break; }
   }
   e.active = false;
-  if (oil != null && e.tank < 30 && ratio > 0){
-    const drawn = Math.min(def.rate * ratio * dt, 30 - e.tank);
-    e.tank += drawn;   // seeps are endless
-    e.active = drawn > 0;
+  if (oil != null && e.tank < 30){
+    // stoked pumps run on coal at full rate; otherwise the grid decides
+    const r = e._stoke ? (stokeBurn(S, e, def, dt) ? F.draftSpd(S) : 0) : ratio;
+    if (r > 0){
+      const drawn = Math.min(def.rate * r * dt, 30 - e.tank);
+      e.tank += drawn;   // seeps are endless
+      e.active = drawn > 0;
+    }
   }
   // push into adjacent pipes and reservoirs
   if (e.tank > 0){
@@ -1213,9 +1241,10 @@ F.addFuel = function(S, e, n){
   const def = F.BUILDINGS[e.key];
   const isTurbine = e.kind === 'turbine';
   const item = isTurbine ? 'fuelCell' : 'coal';
-  if (!(def.fuel || e.kind === 'gen' || isTurbine)) return 0;
+  if (!(def.fuel || e.kind === 'gen' || isTurbine ||
+        (F.stoked(S) && def.power && F.stokable(e)))) return 0;
   let moved = 0;
-  while (moved < n && F.invCount(S, item) > 0 && e.fuelBuf < F.FUEL_CAP){
+  while (moved < n && F.invCount(S, item) > 0 && e.fuelBuf < F.fuelCap(S)){
     F.invAdd(S, item, -1); e.fuelBuf++; moved++;
   }
   return moved;
@@ -1259,9 +1288,11 @@ F.serialize = function(S){
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
   return {
-    v: 3, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
+    v: 4, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
     dayT: +(S.dayT || 0).toFixed(2),
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
+    // milestones are saved BY ID so tiers can be inserted without breaking saves
+    msId: S.msIndex < F.MILESTONES.length ? F.MILESTONES[S.msIndex].id : 'won',
     msIndex: S.msIndex, msProg: S.msProg,
     research: { cur: S.research.cur, done: S.research.done, prog: S.research.prog },
     tribute: S.tribute || null,
@@ -1279,7 +1310,22 @@ F.deserialize = function(data){
   S.inv = data.inv || {};
   S.delivered = data.delivered || {};
   S.handMined = data.handMined || {};
-  S.msIndex = data.msIndex || 0;
+  // milestone position: prefer the saved id; legacy saves carry only a
+  // numeric index into the ORIGINAL 10-tier list (ids m0…m9)
+  if (data.msId != null){
+    if (data.msId === 'won') S.msIndex = F.MILESTONES.length;
+    else {
+      const mi = F.MILESTONES.findIndex(m => m.id === data.msId);
+      S.msIndex = mi >= 0 ? mi : Math.min(data.msIndex || 0, F.MILESTONES.length);
+    }
+  } else {
+    const li = data.msIndex || 0;
+    if (li >= 10) S.msIndex = F.MILESTONES.length;
+    else {
+      const mi = F.MILESTONES.findIndex(m => m.id === 'm' + li);
+      S.msIndex = mi >= 0 ? mi : li;
+    }
+  }
   S.msProg = data.msProg || {};
   S.upgrades = data.upgrades || {};
   S.unlocked = data.unlocked || {};
@@ -1339,6 +1385,14 @@ F.deserialize = function(data){
   for (const id in S.research.done){
     const tk = F.TECHS[id];
     if (tk && tk.unlocks) for (const u of tk.unlocks) S.unlocked[u] = true;
+  }
+  // legacy saves: buildings that used to be milestone rewards now live in the
+  // tech tree — if a save already owns everything a tech grants, count the
+  // tech as researched so the tree stays coherent
+  for (const id of F.TECH_ORDER){
+    const tk = F.TECHS[id];
+    if (S.research.done[id] || tk.effect || !tk.unlocks || !tk.unlocks.length) continue;
+    if (tk.unlocks.every(u => S.unlocked[u])) S.research.done[id] = true;
   }
   S.powerDirty = true;
   return S;
