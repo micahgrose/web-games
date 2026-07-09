@@ -1203,7 +1203,9 @@ function recipeSection(S, e, def){
     h += `<div class="compChain" style="margin-top:7px">` +
       Object.entries(r.in).map(([k, n]) => `<span>${n}× ${iconImg(k, 14)}</span>`).join(' ') +
       (r.fluid ? `<span>${r.fluid} crude</span>` : '') +
-      `<span class="arrow">→</span><span>${r.outN}× ${iconImg(r.out, 14)}</span></div>`;
+      `<span class="arrow">→</span><span>${r.outN}× ${iconImg(r.out, 14)}</span>` +
+      (r.by ? Object.entries(r.by).map(([k, n]) => `<span class="arrow">+</span><span>${n}× ${iconImg(k, 14)}</span>`).join('') : '') +
+      `</div>`;
   } else {
     h += `<div class="ghostNote">Choose what this machine crafts.</div>`;
   }
@@ -1686,7 +1688,7 @@ function renderRecipeBook(S){
         <img src="${R.itemIcon(r.out, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
           <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}${needed[r.out] ? neededBadge() : ''}${locked && msu ? `<span class="lockBadge">unlocks: ${msu.name}</span>` : tkid ? `<span class="lockBadge">research: ${F.TECHS[tkid].name}</span>` : ''}</div>
-          <div class="compChain">${Object.entries(r.in).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)} ${F.ITEMS[ik].name}</span>`).join('<span class="arrow">+</span>')}${r.fluid ? `<span class="arrow">+</span><span>${r.fluid} crude</span>` : ''}</div>
+          <div class="compChain">${Object.entries(r.in).map(([ik, n]) => `<span>${n}× ${iconImg(ik, 13)} ${F.ITEMS[ik].name}</span>`).join('<span class="arrow">+</span>')}${r.fluid ? `<span class="arrow">+</span><span>${r.fluid} crude</span>` : ''}${r.by ? Object.entries(r.by).map(([bk, bn]) => `<span class="arrow">→ also</span><span>${bn}× ${iconImg(bk, 13)} ${F.ITEMS[bk].name}</span>`).join('') : ''}</div>
           ${usedInHtml(S, r.out)}
         </div>
         <span class="compMachine">${MACHINE_NAMES[r.machine]}</span>
@@ -1809,7 +1811,10 @@ function renderHowTo(){
   <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws
   it endlessly; <b>pipes</b> carry it to a <b>refinery</b>, which cracks it into ${ic('plastic')}
   plastic (with coal) or ${ic('fuelCell')} fuel cells (with steel). Pipes only connect pumpjacks,
-  refineries, <b>reservoirs</b> (a researchable 240-crude buffer tank) and other pipes.</p>
+  refineries, <b>reservoirs</b> (a researchable 240-crude buffer tank) and other pipes.
+  Cracking always leaves ${ic('tar')} <b>tar</b> in the chute alongside the product — let it pile up
+  and the refinery jams. Set a <b>splitter filter</b> to pull tar aside, smelt it back into coal,
+  or research <b>Tar synthesis</b> to re-polymerise it into extra plastic.</p>
 
   <div class="selSection">Growing the factory</div>
   <p class="howP">Ore near the Core is humble; <b>quartz and teal chromite wait in the middle distance,

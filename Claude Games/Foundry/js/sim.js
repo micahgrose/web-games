@@ -790,6 +790,13 @@ function tickMachine(S, e, def, dt, ratio){
     e.outBuf[rc.out] = (e.outBuf[rc.out] || 0) + outN; e.outTotal += outN;
     S.stats.made[rc.out] = (S.stats.made[rc.out] || 0) + outN;
     S.stats.bucketAcc[rc.out] = (S.stats.bucketAcc[rc.out] || 0) + outN;
+    if (rc.by) for (const bk in rc.by){
+      const bn = rc.by[bk];
+      e.outBuf[bk] = (e.outBuf[bk] || 0) + bn; e.outTotal += bn;
+      S.stats.made[bk] = (S.stats.made[bk] || 0) + bn;
+      S.stats.bucketAcc[bk] = (S.stats.bucketAcc[bk] || 0) + bn;
+      if (bk === 'tar' && !S.flags.tarSeen){ S.flags.tarSeen = true; F.emit(S, { type:'tip', id:'firstTar' }); }
+    }
     F.emit(S, { type:'craft', x: e.x, y: e.y, item: rc.out });
   }
 }

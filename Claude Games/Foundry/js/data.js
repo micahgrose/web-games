@@ -49,6 +49,7 @@ F.ITEMS = {
   circuit:    { name:'Circuit',        tier:2, icon:{kind:'chip',  c1:'#3f7f5f', c2:'#8fe0b0'} },
   motor:      { name:'Motor',          tier:2, icon:{kind:'motor', c1:'#96a3b5', c2:'#5b6674'} },
   plastic:    { name:'Plastic',        tier:2, icon:{kind:'plate', c1:'#f5f0e6', c2:'#b5ae9d'} },
+  tar:        { name:'Tar',            tier:2, icon:{kind:'dust',  c1:'#3a3f35', c2:'#12140c'} },
   fuelCell:   { name:'Fuel cell',      tier:2, icon:{kind:'cell',  c1:'#ffcf6e', c2:'#c78430'} },
   advCircuit: { name:'Adv. circuit',   tier:3, icon:{kind:'chip',  c1:'#7f3f4f', c2:'#f09ab4'} },
   frame:      { name:'Titan frame',    tier:3, icon:{kind:'frame', c1:'#cdbdf5', c2:'#7a68b0'} },
@@ -113,9 +114,12 @@ F.RECIPES = {
   pack2:      { out:'pack2', outN:1, in:{circuit:1, glass:1},       time:5.0, machine:'asm', unlock:4 },
   pack3:      { out:'pack3', outN:1, in:{plastic:1, motor:1},       time:6.0, machine:'asm', unlock:6 },
   pack4:      { out:'pack4', outN:1, in:{processor:1, titanIngot:1},time:7.0, machine:'asm', unlock:8 },
-  /* refinery (fluid) */
-  plastic:    { out:'plastic',  outN:2, in:{coal:1}, fluid:8,  time:3.2, machine:'refinery', unlock:6 },
-  fuelCell:   { out:'fuelCell', outN:1, in:{steel:1}, fluid:10, time:3.0, machine:'refinery', unlock:6 },
+  /* refinery (fluid) — cracking crude always leaves tar behind */
+  plastic:    { out:'plastic',  outN:2, in:{coal:1}, fluid:8,  by:{tar:1}, time:3.2, machine:'refinery', unlock:6 },
+  fuelCell:   { out:'fuelCell', outN:1, in:{steel:1}, fluid:10, by:{tar:1}, time:3.0, machine:'refinery', unlock:6 },
+  /* tar handling */
+  tarCoal:    { out:'coal',     outN:1, in:{tar:1},   time:1.6, machine:'smelter', unlock:6 },
+  plasticTar: { out:'plastic',  outN:1, in:{tar:2, coal:1}, time:3.0, machine:'asm', tech:'tarSynthesis' },
 };
 
 /* what a smelter/alloy/crusher can make, for auto-select */
@@ -267,9 +271,9 @@ F.MILESTONES = [
   { id:'m6', name:'Black Blood',
     flavor:'Deep in the waste, the ground weeps oil. Drink it.',
     req:{ motor:25, circuit:30 },
-    unlocks:['pump','pipe','refinery','turbine','solar','r:plastic','r:fuelCell','r:advCircuit','r:pack3'],
+    unlocks:['pump','pipe','refinery','turbine','solar','r:plastic','r:fuelCell','r:tarCoal','r:advCircuit','r:pack3'],
     grant:{ steel:10 },
-    hint:'Pumpjacks sit on oil seeps; pipes carry crude to refineries. Fuel turbines dwarf burner generators.' },
+    hint:'Pumpjacks sit on oil seeps; pipes carry crude to refineries. Cracking crude leaves tar in the chute — filter it off and smelt it back into coal. Fuel turbines dwarf burner generators.' },
   { id:'m7', name:'Polymer Mind',
     flavor:'Plastic and copper laid in impossible lattices. The machines improve the machines.',
     req:{ advCircuit:40, plastic:30 },
@@ -348,6 +352,9 @@ F.TECHS = {
   accumulators:{ name:'Accumulators', icon:'fuelCell',
     desc:'Grid batteries: bank surplus power by day, spend it through the night. Each stores 900 P·s and moves up to 45 P.',
     cost:{ pack2:16 }, req:[], unlocks:['acc'] },
+  tarSynthesis:{ name:'Tar synthesis', icon:'tar',
+    desc:'Re-polymerise refinery tar: 2 tar + coal → plastic in any assembler. Turns your dirtiest byproduct into your most-wanted material.',
+    cost:{ pack3:12 }, req:[], unlocks:['r:plasticTar'] },
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
@@ -439,6 +446,7 @@ F.TIPS = {
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',
   firstLab:     'Belt science packs into any side of the laboratory, then pick a project in the <b>Research</b> tab (U). Research is optional — every tech is a bonus, not a gate.',
   firstModule:  'Modules boost the machine they\'re slotted in. Speed costs extra power, efficiency saves it — and a <b>beacon</b> broadcasts its modules to every machine around it.',
+  firstTar:     'Cracking crude leaves <b>tar</b> — it shares the refinery\'s output chute, and a chute full of tar jams the plastic. Filter it aside with a splitter and <b>smelt it back into coal</b>, or research Tar synthesis to re-polymerise it.',
   firstPipe:    'Pipes only connect to pumpjacks, refineries and other pipes.',
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
 };
