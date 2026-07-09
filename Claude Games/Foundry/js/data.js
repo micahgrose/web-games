@@ -507,7 +507,7 @@ F.tributeMul = S => 1 + Math.min(S.tribute ? S.tribute.lvl : 0, 10) * .03;
 /* ================= DAY / NIGHT =================
    One full cycle every DAY_LEN sim-seconds. Solar output scales with
    sunFactor: full day 45%, dusk 10%, night 35%, dawn 10%. */
-F.DAY_LEN = 240;
+F.DAY_LEN = 660;   // 11-minute days
 F.sunFactor = function(S){
   const t = ((S.dayT || 0) % F.DAY_LEN) / F.DAY_LEN;
   if (t < .45) return 1;

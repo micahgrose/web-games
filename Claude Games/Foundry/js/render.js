@@ -92,42 +92,48 @@ R.buildGround = function(S){
   /* ---- the world heals: life radiates from the Core as tiers complete ----
      radius grows with msIndex; won/freeplay = full bloom. Rebuilt on each
      milestone (drainEvents → R.buildGround). */
-  const healFrac = S.won || S.freeplay ? 1 : (S.msIndex || 0) / F.MILESTONES.length;
+  /* heal radius per completed tier (tiles): barely creeps in for the first
+     few tiers, then accelerates; full map on victory */
+  const HEAL_R = [0, 4, 7, 10, 13, 21, 33, 50, 72, 100, 1e4];
+  const msDone = S.won || S.freeplay ? HEAL_R.length - 1 : Math.min(S.msIndex || 0, HEAL_R.length - 1);
   R._heal = null;
-  if (healFrac > 0){
+  if (HEAL_R[msDone] > 0){
     const ccx = S.w / 2, ccy = S.h / 2;
     const maxD = Math.hypot(ccx, ccy) + 6;
-    const healR = Math.pow(healFrac, .85) * maxD;
+    const healR = Math.min(HEAL_R[msDone], maxD);
     R._heal = { cx: ccx, cy: ccy, r: healR };
-    const fade = Math.max(6, healR * .3);
+    const fade = Math.max(4, healR * .25);
     const hr = F.makeRng((S.seed ^ 0x51ed270b) >>> 0);
     for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
-      const jitter = (hr() - .5) * 7;                 // ragged organic edge
+      const jitter = (hr() - .5) * 5;                 // ragged organic edge
+      const gr1 = hr(), gr2 = hr();                   // fixed draws → stable pattern per tier
+      const i = ty * S.w + tx;
+      if (S.oreType[i]) continue;                     // never green over ore or oil
       const d = Math.hypot(tx + .5 - ccx, ty + .5 - ccy) + jitter;
       let h = (healR - d) / fade;
       if (h <= 0) continue;
       h = Math.min(1, h);
       // mossy base wash
-      const v = S.ground[ty * S.w + tx];
+      const v = S.ground[i];
       x.fillStyle = `rgba(${34 + v * 3},${58 + v * 4},${34 + v * 2},${(.5 + v * .04) * h * .8})`;
       x.fillRect(tx * g, ty * g, g, g);
-      // grass tufts
-      if (h > .3 && hr() < .1){
-        x.strokeStyle = `rgba(${90 + hr() * 40},${140 + hr() * 50},${70 + hr() * 30},${.5 * h})`;
+      // sparse low grass
+      if (h > .4 && gr1 < .05){
+        x.strokeStyle = `rgba(${95 + gr2 * 30},${138 + gr2 * 40},${72 + gr2 * 20},${.4 * h})`;
         x.lineWidth = 1;
-        const bx = tx * g + hr() * g, by = ty * g + hr() * g;
-        for (let b = 0; b < 3; b++){
+        const bx = tx * g + 2 + gr2 * (g - 4), by = ty * g + g * .7;
+        for (let b = 0; b < 2; b++){
           x.beginPath();
-          x.moveTo(bx + b * 2 - 2, by);
-          x.lineTo(bx + b * 2 - 2 + (hr() - .5) * 3, by - 3 - hr() * 4);
+          x.moveTo(bx + b * 2, by);
+          x.lineTo(bx + b * 2 + (gr1 * 20 % 1 - .5) * 2, by - 2 - gr2 * 2.5);
           x.stroke();
         }
       }
-      // rare flowers deep in the healed zone
-      if (h > .55 && hr() < .014){
-        x.fillStyle = hr() < .5 ? `rgba(216,194,106,${.75 * h})` : `rgba(201,162,201,${.75 * h})`;
+      // very rare small flowers deep in the healed zone
+      if (h > .65 && gr1 >= .05 && gr1 < .056){
+        x.fillStyle = gr2 < .5 ? `rgba(216,194,106,${.6 * h})` : `rgba(201,162,201,${.6 * h})`;
         x.beginPath();
-        x.arc(tx * g + 2 + hr() * (g - 4), ty * g + 2 + hr() * (g - 4), 1.3 + hr(), 0, 7);
+        x.arc(tx * g + 2 + gr2 * (g - 4), ty * g + 2 + gr1 * 16 % (g - 4), .9 + gr2 * .5, 0, 7);
         x.fill();
       }
     }
@@ -2242,11 +2248,12 @@ R.draw = function(S, dt, U){
     }
   }
 
-  /* night falls: dark tint over the world, warm circles around lit lamps */
+  /* night falls: HEAVY dark over the world, warm circles around lit lamps */
   const sun = F.sunFactor(S);
-  const dark = (1 - sun) * .42;
+  const NIGHT_MAX = .84;
+  const dark = (1 - sun) * NIGHT_MAX;
   if (dark > .01){
-    x.fillStyle = `rgba(7,10,22,${dark})`;
+    x.fillStyle = `rgba(6,9,20,${dark})`;
     x.fillRect(0, 0, R.W, R.H);
     const s2 = R.tilePx();
     x.save();
@@ -2260,8 +2267,9 @@ R.draw = function(S, dt, U){
       if (lx < -rad || ly < -rad || lx > R.W + rad || ly > R.H + rad) continue;
       const lg = x.createRadialGradient(lx, ly, 0, lx, ly, rad);
       const flicker = .9 + .1 * Math.sin(time * 6 + e.id * 1.7);
-      lg.addColorStop(0, `rgba(255,205,120,${.32 * dark / .42 * flicker})`);
-      lg.addColorStop(.4, `rgba(255,180,90,${.14 * dark / .42})`);
+      const k2 = dark / NIGHT_MAX;
+      lg.addColorStop(0, `rgba(255,205,120,${.5 * k2 * flicker})`);
+      lg.addColorStop(.4, `rgba(255,180,90,${.22 * k2})`);
       lg.addColorStop(1, 'rgba(255,160,60,0)');
       x.fillStyle = lg;
       x.beginPath(); x.arc(lx, ly, rad, 0, 7); x.fill();
@@ -2270,54 +2278,33 @@ R.draw = function(S, dt, U){
     const [ccx2, ccy2] = R.worldToScreen(S.core.x + S.core.w / 2, S.core.y + S.core.h / 2);
     const crad = 7 * s2;
     const cg = x.createRadialGradient(ccx2, ccy2, 0, ccx2, ccy2, crad);
-    cg.addColorStop(0, `rgba(255,190,110,${.12 * dark / .42})`);
+    cg.addColorStop(0, `rgba(255,190,110,${.2 * dark / NIGHT_MAX})`);
     cg.addColorStop(1, 'rgba(255,160,60,0)');
     x.fillStyle = cg;
     x.beginPath(); x.arc(ccx2, ccy2, crad, 0, 7); x.fill();
     x.restore();
   }
 
-  /* weather — ashfall over the wastes, rain once the world mostly heals,
-     the odd wind gust; screen-space particles + audio beds */
+  /* weather — occasional rain showers (screen-space streaks + audio bed) */
   if (!R.weather){ R.weather = { state: 'clear', t: 16 }; R.wx = []; }
   R.weather.t -= dt;
   if (R.weather.t <= 0){
-    const healed = R._heal && R._heal.r > Math.hypot(S.w, S.h) * .28;
-    const roll = Math.random();
-    R.weather.state = roll < .45 ? 'clear' : roll < .82 ? (healed ? 'rain' : 'ashfall') : 'gust';
-    R.weather.t = R.weather.state === 'gust' ? 8 + Math.random() * 8 : 28 + Math.random() * 45;
+    R.weather.state = Math.random() < .35 ? 'rain' : 'clear';
+    R.weather.t = 30 + Math.random() * 50;
     if (F.audio && F.audio.setWeather) F.audio.setWeather(R.weather.state);
   }
-  const wst = R.weather.state;
-  if (wst !== 'clear'){
-    const want = wst === 'gust' ? 2 : 4;
-    for (let i = 0; i < want && R.wx.length < 240; i++){
-      if (wst === 'ashfall')
-        R.wx.push({ x: Math.random() * (R.W + 120) - 60, y: -8, vx: 6 + Math.random() * 12, vy: 24 + Math.random() * 22, life: 14, kind: 'ash', ph: Math.random() * 7 });
-      else if (wst === 'rain')
-        R.wx.push({ x: Math.random() * (R.W + 160) - 80, y: -12, vx: 50 + Math.random() * 40, vy: 420 + Math.random() * 160, life: 4, kind: 'rain' });
-      else
-        R.wx.push({ x: -30, y: Math.random() * R.H, vx: 380 + Math.random() * 180, vy: (Math.random() - .5) * 40, life: 3, kind: 'gust' });
-    }
+  if (R.weather.state === 'rain'){
+    for (let i = 0; i < 4 && R.wx.length < 240; i++)
+      R.wx.push({ x: Math.random() * (R.W + 160) - 80, y: -12, vx: 50 + Math.random() * 40, vy: 420 + Math.random() * 160, life: 4 });
   }
   if (R.wx && R.wx.length){
     for (let i = R.wx.length - 1; i >= 0; i--){
       const p = R.wx[i];
       p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
       if (p.life <= 0 || p.y > R.H + 24 || p.x > R.W + 60){ R.wx.splice(i, 1); continue; }
-      if (p.kind === 'ash'){
-        p.x += Math.sin(time * .8 + p.ph) * 14 * dt;
-        x.fillStyle = 'rgba(185,190,200,.38)';
-        x.fillRect(p.x, p.y, 2, 2);
-      } else if (p.kind === 'rain'){
-        x.strokeStyle = 'rgba(150,200,235,.32)';
-        x.lineWidth = 1;
-        x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.vx * .022, p.y - p.vy * .022); x.stroke();
-      } else {
-        x.strokeStyle = 'rgba(220,225,235,.11)';
-        x.lineWidth = 1;
-        x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - 28, p.y + 3); x.stroke();
-      }
+      x.strokeStyle = 'rgba(150,200,235,.32)';
+      x.lineWidth = 1;
+      x.beginPath(); x.moveTo(p.x, p.y); x.lineTo(p.x - p.vx * .022, p.y - p.vy * .022); x.stroke();
     }
   }
 

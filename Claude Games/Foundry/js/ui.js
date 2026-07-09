@@ -2014,13 +2014,23 @@ function refreshAlerts(){
   const S = UI.S;
   const bar = $('alertBar');
   const fuel = [], power = [], jam = [];
+  // a machine only counts as jammed after sitting at a FULL output buffer
+  // for 3+ seconds — brief cap-touches while still ejecting don't flicker it
+  if (!UI._jamSince) UI._jamSince = {};
+  const now = S.time;
   for (const e of S.ents){
     const def = F.BUILDINGS[e.key];
     if (!def) continue;
     if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine') && e.fuelT <= 0 && e.fuelBuf <= 0) fuel.push(e);
     if ((def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar') && !e.netId) power.push(e);
-    if (e.kind === 'machine' && e.outTotal >= 6 + F.bufBonus(S)) jam.push(e);
-    else if (e.kind === 'miner' && e.outTotal >= 4 + F.bufBonus(S)) jam.push(e);
+    const atCap = (e.kind === 'machine' && e.outTotal >= 6 + F.bufBonus(S)) ||
+                  (e.kind === 'miner' && e.outTotal >= 4 + F.bufBonus(S));
+    if (atCap){
+      if (UI._jamSince[e.id] == null) UI._jamSince[e.id] = now;
+      if (now - UI._jamSince[e.id] > 3) jam.push(e);
+    } else if (UI._jamSince[e.id] != null){
+      delete UI._jamSince[e.id];
+    }
   }
   UI._alerts = { fuel, power, jam };
   const sig = fuel.length + '|' + power.length + '|' + jam.length;

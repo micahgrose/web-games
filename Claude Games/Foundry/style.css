@@ -334,7 +334,7 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 
 /* Toasts */
 #toasts{
-  position:absolute; left:50%; bottom:96px; transform:translateX(-50%);
+  position:absolute; left:50%; bottom:158px; transform:translateX(-50%);
   display:flex; flex-direction:column-reverse; align-items:center; gap:7px;
   pointer-events:none; width:min(460px, calc(100vw - 30px));
 }

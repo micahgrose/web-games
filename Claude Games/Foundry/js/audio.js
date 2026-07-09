@@ -80,12 +80,10 @@ A.setOn = function(on){
   if (A.ready) A.master.gain.setTargetAtTime(on ? .5 : 0, A.ctx.currentTime, .05);
 };
 
-/* weather → wind & rain beds */
+/* weather → rain bed (wind stays a constant ambient) */
 A.setWeather = function(state){
   if (!A.ready) return;
   const t = A.ctx.currentTime;
-  const wind = { clear: .028, ashfall: .042, gust: .085, rain: .034 }[state] || .028;
-  A.windGain.gain.setTargetAtTime(wind, t, 2.5);
   A.rainGain.gain.setTargetAtTime(state === 'rain' ? .038 : 0, t, 2.5);
 };
 
@@ -100,7 +98,7 @@ A.tickMusic = function(dt, prog, night){
   const root = night ? 110 : 130.81;               // A2 / C3
   const pick = () => root * Math.pow(2, scale[(Math.random() * scale.length) | 0] / 12) *
     (Math.random() < .3 ? 2 : 1);
-  const pad = (f, mul) => tone(f, 'sine', 1.8, .034 * mul, 5.5, null, 1000);
+  const pad = (f, mul) => tone(f, 'sine', 1.8, .05 * mul, 5.5, null, 1000);
   pad(pick(), 1);                                   // always: a lone low voice
   if (prog > .25 && Math.random() < .8)
     setTimeout(() => pad(pick(), .85), 800 + Math.random() * 1600);
