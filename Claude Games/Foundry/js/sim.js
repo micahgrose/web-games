@@ -459,6 +459,11 @@ function deliverToCore(S, item){
     S.msProg[item] = (S.msProg[item] || 0) + 1;
     S.msDirty = true;
   }
+  // post-win: deliveries feed the Engine's tribute
+  if (S.won && S.tribute && S.tribute.req[item] && (S.tribute.prog[item] || 0) < S.tribute.req[item]){
+    S.tribute.prog[item] = (S.tribute.prog[item] || 0) + 1;
+    S.tribDirty = true;
+  }
   S.core.pulse = 1;
   F.emit(S, { type:'deliver', item });
 }
@@ -709,6 +714,22 @@ F.tick = function(S, dt){
 
   /* ---- milestones ---- */
   if (S.msDirty){ S.msDirty = false; checkMilestone(S); }
+
+  /* ---- tribute ---- */
+  if (S.tribDirty){
+    S.tribDirty = false;
+    const tr = S.tribute;
+    if (tr){
+      let done = true;
+      for (const k in tr.req) if ((tr.prog[k] || 0) < tr.req[k]){ done = false; break; }
+      if (done){
+        tr.lvl++;
+        tr.prog = {};
+        tr.req = F.makeTribute(tr.lvl);
+        F.emit(S, { type:'tribute', lvl: tr.lvl });
+      }
+    }
+  }
 };
 
 function minerWants(S, e){
@@ -721,7 +742,7 @@ function tickMiner(S, e, def, dt, ratio){
   tryEject(S, e);
   if (!minerWants(S, e)){ e.active = false; return; }
   const fx = F.modEffects(S, e);
-  let mul = def.speed * F.mineMul(S) * fx.spd;
+  let mul = def.speed * F.mineMul(S) * fx.spd * F.tributeMul(S);
   if (def.power){ mul *= ratio; }
   else {
     // burner
@@ -774,7 +795,7 @@ function tickMachine(S, e, def, dt, ratio){
   const rc = F.RECIPES[e.activeRecipe];
   if (!rc){ e.crafting = false; return; }
   const fx = F.modEffects(S, e);
-  let mul = def.speed * famMul(S, def.fam) * fx.spd;
+  let mul = def.speed * famMul(S, def.fam) * fx.spd * F.tributeMul(S);
   if (def.power) mul *= ratio;
   else {
     if (e.fuelT <= 0){
@@ -1165,6 +1186,8 @@ function checkMilestone(S){
   S.msProg = {};
   if (S.msIndex >= F.MILESTONES.length){
     S.won = true;
+    // the Engine wakes — and starts asking for tribute
+    if (!S.tribute) S.tribute = { lvl: 0, prog: {}, req: F.makeTribute(0) };
     F.emit(S, { type:'win' });
   }
 };
@@ -1241,6 +1264,7 @@ F.serialize = function(S){
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     msIndex: S.msIndex, msProg: S.msProg,
     research: { cur: S.research.cur, done: S.research.done, prog: S.research.prog },
+    tribute: S.tribute || null,
     upgrades: S.upgrades, unlocked: S.unlocked, flags: S.flags,
     won: S.won, freeplay: S.freeplay, made: S.stats.made,
     nextId: S.nextId, ents,
@@ -1261,6 +1285,8 @@ F.deserialize = function(data){
   S.unlocked = data.unlocked || {};
   S.flags = data.flags || {};
   S.won = !!data.won; S.freeplay = !!data.freeplay;
+  if (data.tribute) S.tribute = { lvl: data.tribute.lvl || 0, prog: data.tribute.prog || {}, req: data.tribute.req || F.makeTribute(data.tribute.lvl || 0) };
+  else if (S.won) S.tribute = { lvl: 0, prog: {}, req: F.makeTribute(0) };  // migration: already-won saves
   S.stats.made = data.made || {};
   const rs = data.research || {};
   S.research = { cur: rs.cur || null, done: rs.done || {}, prog: rs.prog || {}, resv: {} };

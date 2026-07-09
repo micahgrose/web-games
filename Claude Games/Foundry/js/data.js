@@ -456,6 +456,40 @@ F.TIPS = {
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
 };
 
+/* ================= TRIBUTE (post-win endless goal) =================
+   Once the Engine wakes it asks for escalating baskets of goods. Each
+   completed tribute grants +3% global machine/drill speed (cap +30%);
+   beyond the cap it's for glory. Pool holds only milestone-spine items
+   so a tribute can never demand tech-gated goods. */
+F.TRIBUTE_POOL = [
+  ['circuit', 30],  ['steel', 30],     ['motor', 24],   ['plastic', 26],
+  ['advCircuit', 20], ['frame', 14],   ['processor', 12], ['titanIngot', 24],
+  ['fuelCell', 18], ['logicMatrix', 6], ['powerCore', 6], ['hullPlate', 6],
+];
+F.makeTribute = function(lvl){
+  const rng = F.makeRng((0x51ab3e7 + lvl * 2654435761) >>> 0);
+  const idx = [];
+  while (idx.length < 3){
+    const i = rng.int(0, F.TRIBUTE_POOL.length - 1);
+    if (!idx.includes(i)) idx.push(i);
+  }
+  const scale = 1 + lvl * .2;
+  const req = {};
+  for (const i of idx){
+    const [item, base] = F.TRIBUTE_POOL[i];
+    req[item] = Math.round(base * scale);
+  }
+  return req;
+};
+F.TRIBUTE_LINES = [
+  'The Engine hums. It asks for more.',
+  'A pulse from below: the Engine dreams of gears.',
+  'The Engine turns its vast attention to your belts.',
+  'Deep chords roll under the ash. It is listening.',
+  'The Engine remembers hunger.',
+];
+F.tributeMul = S => 1 + Math.min(S.tribute ? S.tribute.lvl : 0, 10) * .03;
+
 /* ================= DAY / NIGHT =================
    One full cycle every DAY_LEN sim-seconds. Solar output scales with
    sunFactor: full day 45%, dusk 10%, night 35%, dawn 10%. */

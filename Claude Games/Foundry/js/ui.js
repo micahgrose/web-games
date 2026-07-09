@@ -1271,9 +1271,32 @@ function refreshObjective(){
   if (!S) return;
   const ms = F.MILESTONES[S.msIndex];
   if (!ms){
+    // post-win: the Engine's tribute
+    const tr = S.tribute;
     $('objTier').textContent = '✦';
-    $('objName').textContent = 'The Engine turns';
-    const h = '<div class="objFlavor">Freeplay — the world is yours to pave.</div>';
+    if (!tr){
+      $('objName').textContent = 'The Engine turns';
+      const h = '<div class="objFlavor">Freeplay — the world is yours to pave.</div>';
+      if (UI._objCache !== h){ UI._objCache = h; $('objBody').innerHTML = h; }
+      return;
+    }
+    $('objName').textContent = 'Tribute ' + (tr.lvl + 1);
+    let h = `<div class="objFlavor">${F.TRIBUTE_LINES[tr.lvl % F.TRIBUTE_LINES.length]}</div>`;
+    for (const k in tr.req){
+      const cur = Math.min(tr.prog[k] || 0, tr.req[k]);
+      const done = cur >= tr.req[k];
+      h += `<div class="objReq${done ? ' done' : ''}">
+        <img src="${R.itemIcon(k, 36).toDataURL()}" width="18" height="18">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between">
+            <span class="objReqName">${F.ITEMS[k].name}</span>
+            <span class="objReqNum">${cur} / ${tr.req[k]}</span>
+          </div>
+          <div class="objBarOuter"><div class="objBarFill" style="width:${(cur / tr.req[k] * 100).toFixed(1)}%"></div></div>
+        </div></div>`;
+    }
+    const bonus = Math.min(tr.lvl, 10) * 3;
+    h += `<div class="objReward">Engine's favour: <b style="color:var(--accent)">+${bonus}%</b> machine & drill speed${tr.lvl >= 10 ? ' (max — further tributes are for glory)' : ' · +3% per tribute'}</div>`;
     if (UI._objCache !== h){ UI._objCache = h; $('objBody').innerHTML = h; }
     return;
   }
@@ -1511,6 +1534,7 @@ function renderBig(){
         <tr><td>Machines placed</td><td>${S.ents.length - 1}</td></tr>
         <tr><td>Delivered to Core</td><td>${F.fmt(Object.values(S.delivered).reduce((a, b) => a + b, 0))}</td></tr>
         <tr><td>Power</td><td>${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P</td></tr>
+        ${S.tribute ? `<tr><td>Tributes offered</td><td>${S.tribute.lvl} · +${Math.min(S.tribute.lvl, 10) * 3}% speed</td></tr>` : ''}
       </table>`;
       body.innerHTML = h;
       fillSparks(body);
@@ -1798,7 +1822,9 @@ function renderHowTo(){
   upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
   that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
   Complete all ten tiers to reignite the World Engine — and watch the land: <b>every finished tier
-  heals a ring of the ash-waste around the Core back to green</b>.</p>
+  heals a ring of the ash-waste around the Core back to green</b>. Even after Ignition the game
+  goes on: the woken Engine asks for endless <b>tributes</b> — escalating baskets of goods, each
+  one granting <b>+3% machine speed</b> (up to +30%).</p>
 
   <div class="selSection">First steps</div>
   <p class="howP"><b>Hold left-click on an ore deposit</b> to hand-mine it — slow, but always available,
@@ -2227,6 +2253,16 @@ function drainEvents(){
         buildBar();
         UI._resSig = null;
         if (UI.bigTab === 'research') renderBig();
+        UI.save();
+        break;
+      }
+      case 'tribute': {
+        A.sfx.milestone();
+        const bonus = Math.min(ev.lvl, 10) * 3;
+        toast(`<b style="color:#ffd76e">✦ Tribute ${ev.lvl} offered</b><br>The Engine stirs in gratitude — ` +
+          (ev.lvl <= 10 ? `machines now run <b>+${bonus}%</b> faster.` : 'your name rings in its halls.'), '', 8000);
+        R.healPulse = { t: 0, gold: true };
+        refreshObjective();
         UI.save();
         break;
       }

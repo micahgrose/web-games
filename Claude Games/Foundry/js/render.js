@@ -2286,13 +2286,14 @@ R.draw = function(S, dt, U){
       const k = R.healPulse.t / dur;
       const [hx, hy] = R.worldToScreen(S.core.x + S.core.w / 2, S.core.y + S.core.h / 2);
       const rad = (k * k * .8 + k * .2) * Math.hypot(R.W, R.H) * .75;
+      const col = R.healPulse.gold ? '255,214,110' : '140,220,150';
       for (const [off, wgt] of [[0, .55], [-.06, .25]]){
         const rr2 = Math.max(1, rad * (1 + off));
-        x.strokeStyle = `rgba(140,220,150,${(1 - k) * wgt})`;
+        x.strokeStyle = `rgba(${col},${(1 - k) * wgt})`;
         x.lineWidth = Math.max(2, R.tilePx() * .35 * (1 - k));
         x.beginPath(); x.arc(hx, hy, rr2, 0, 7); x.stroke();
       }
-      x.fillStyle = `rgba(140,220,150,${(1 - k) * .05})`;
+      x.fillStyle = `rgba(${col},${(1 - k) * .05})`;
       x.beginPath(); x.arc(hx, hy, rad, 0, 7); x.fill();
     }
   }
