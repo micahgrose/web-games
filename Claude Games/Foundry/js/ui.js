@@ -1677,7 +1677,8 @@ function renderHowTo(){
   becomes <b>construction material</b> in your inventory — deliveries literally fund every building,
   upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
   that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
-  Complete all ten tiers to reignite the World Engine.</p>
+  Complete all ten tiers to reignite the World Engine — and watch the land: <b>every finished tier
+  heals a ring of the ash-waste around the Core back to green</b>.</p>
 
   <div class="selSection">First steps</div>
   <p class="howP"><b>Hold left-click on an ore deposit</b> to hand-mine it — slow, but always available,
@@ -1948,7 +1949,10 @@ function drainEvents(){
         A.sfx.milestone();
         const next = F.MILESTONES[S.msIndex];
         toast(`<b style="color:var(--accent)">◆ ${ev.name} complete</b>` +
-          (next ? `<br>Next: <b>${next.name}</b>` : ''), '', 8000);
+          (next ? `<br>Next: <b>${next.name}</b>` : '') +
+          `<br><span style="color:#8cdc96">The ash recedes — the land around the Core remembers green.</span>`, '', 8000);
+        R.buildGround(S);            // the world heals a ring further
+        R.healPulse = { t: 0 };
         refreshObjective();
         buildBar();
         if (S.msIndex === 3) tipOnce('firstUpgrade');

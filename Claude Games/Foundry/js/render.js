@@ -89,6 +89,49 @@ R.buildGround = function(S){
       x.stroke();
     }
   }
+  /* ---- the world heals: life radiates from the Core as tiers complete ----
+     radius grows with msIndex; won/freeplay = full bloom. Rebuilt on each
+     milestone (drainEvents → R.buildGround). */
+  const healFrac = S.won || S.freeplay ? 1 : (S.msIndex || 0) / F.MILESTONES.length;
+  R._heal = null;
+  if (healFrac > 0){
+    const ccx = S.w / 2, ccy = S.h / 2;
+    const maxD = Math.hypot(ccx, ccy) + 6;
+    const healR = Math.pow(healFrac, .85) * maxD;
+    R._heal = { cx: ccx, cy: ccy, r: healR };
+    const fade = Math.max(6, healR * .3);
+    const hr = F.makeRng((S.seed ^ 0x51ed270b) >>> 0);
+    for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
+      const jitter = (hr() - .5) * 7;                 // ragged organic edge
+      const d = Math.hypot(tx + .5 - ccx, ty + .5 - ccy) + jitter;
+      let h = (healR - d) / fade;
+      if (h <= 0) continue;
+      h = Math.min(1, h);
+      // mossy base wash
+      const v = S.ground[ty * S.w + tx];
+      x.fillStyle = `rgba(${34 + v * 3},${58 + v * 4},${34 + v * 2},${(.5 + v * .04) * h * .8})`;
+      x.fillRect(tx * g, ty * g, g, g);
+      // grass tufts
+      if (h > .3 && hr() < .1){
+        x.strokeStyle = `rgba(${90 + hr() * 40},${140 + hr() * 50},${70 + hr() * 30},${.5 * h})`;
+        x.lineWidth = 1;
+        const bx = tx * g + hr() * g, by = ty * g + hr() * g;
+        for (let b = 0; b < 3; b++){
+          x.beginPath();
+          x.moveTo(bx + b * 2 - 2, by);
+          x.lineTo(bx + b * 2 - 2 + (hr() - .5) * 3, by - 3 - hr() * 4);
+          x.stroke();
+        }
+      }
+      // rare flowers deep in the healed zone
+      if (h > .55 && hr() < .014){
+        x.fillStyle = hr() < .5 ? `rgba(216,194,106,${.75 * h})` : `rgba(201,162,201,${.75 * h})`;
+        x.beginPath();
+        x.arc(tx * g + 2 + hr() * (g - 4), ty * g + 2 + hr() * (g - 4), 1.3 + hr(), 0, 7);
+        x.fill();
+      }
+    }
+  }
   // ore patch under-glow (so patches read from far zoom)
   for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
     const i = ty * S.w + tx;
@@ -1705,6 +1748,20 @@ function emitAmbient(S, dt, vis){
       });
     }
   }
+  // green spores drift over the healed land
+  if (R._heal && R._heal.r > 6 && Math.random() < dt * 5){
+    const [wx0, wy0] = R.screenToWorld(0, 0);
+    const [wx1, wy1] = R.screenToWorld(R.W, R.H);
+    const sx2 = wx0 + Math.random() * (wx1 - wx0);
+    const sy2 = wy0 + Math.random() * (wy1 - wy0);
+    if (Math.hypot(sx2 - R._heal.cx, sy2 - R._heal.cy) < R._heal.r * .85){
+      R.spawnParticle({
+        x: sx2, y: sy2,
+        vx: .04 + Math.random() * .08, vy: -.05 - Math.random() * .08,
+        life: 3.5, maxLife: 3.5, color: 'rgba(150,220,140,.45)', size: .045 + Math.random() * .03, drag: .1,
+      });
+    }
+  }
 }
 
 /* event hooks from UI: place puffs, mine sparks, core absorb */
@@ -2015,6 +2072,26 @@ R.draw = function(S, dt, U){
   emitAmbient(S, dt, vis);
   updateParticles(dt);
   drawParticles(x);
+
+  /* healing pulse — a wave of green rolls out from the Core on tier-up */
+  if (R.healPulse){
+    R.healPulse.t += dt;
+    const dur = 3.2;
+    if (R.healPulse.t >= dur) R.healPulse = null;
+    else {
+      const k = R.healPulse.t / dur;
+      const [hx, hy] = R.worldToScreen(S.core.x + S.core.w / 2, S.core.y + S.core.h / 2);
+      const rad = (k * k * .8 + k * .2) * Math.hypot(R.W, R.H) * .75;
+      for (const [off, wgt] of [[0, .55], [-.06, .25]]){
+        const rr2 = Math.max(1, rad * (1 + off));
+        x.strokeStyle = `rgba(140,220,150,${(1 - k) * wgt})`;
+        x.lineWidth = Math.max(2, R.tilePx() * .35 * (1 - k));
+        x.beginPath(); x.arc(hx, hy, rr2, 0, 7); x.stroke();
+      }
+      x.fillStyle = `rgba(140,220,150,${(1 - k) * .05})`;
+      x.beginPath(); x.arc(hx, hy, rad, 0, 7); x.fill();
+    }
+  }
 
   /* hover + ghost + belt-drag preview */
   if (U){
