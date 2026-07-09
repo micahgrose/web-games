@@ -537,6 +537,7 @@ function drawEntBody(x, e, s, time, S){
     case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
     case 'tank': drawTank(x, e, s, def); break;
+    case 'port': drawPortPad(x, e, s, time); break;
     case 'lab': drawLab(x, e, s, time, def); break;
     case 'beacon': drawBeacon(x, e, s, time, S); break;
     case 'core': drawCore(x, e, s, time, S); break;
@@ -1480,6 +1481,91 @@ function drawPump(x, e, s, time, def){
 }
 
 /* ---- THE CORE ---- */
+/* ---- drone depot ---- */
+function drawPortPad(x, e, s, time){
+  const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
+  const pad = s * .08;
+  x.fillStyle = '#2b323d';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  rrect(x, pad, pad, w - pad * 2, h - pad * 2, s * .12);
+  x.fill(); x.stroke();
+  // hazard corner chevrons
+  x.fillStyle = 'rgba(255,214,138,.5)';
+  for (const [qx, qy] of [[pad * 1.5, pad * 1.5], [w - pad * 1.5, pad * 1.5], [pad * 1.5, h - pad * 1.5], [w - pad * 1.5, h - pad * 1.5]]){
+    x.beginPath(); x.arc(qx, qy, s * .05, 0, 7); x.fill();
+  }
+  // landing ring
+  x.strokeStyle = e.mode ? 'rgba(110,198,255,.7)' : 'rgba(140,150,165,.4)';
+  x.lineWidth = Math.max(1.4, s * .06);
+  x.beginPath(); x.arc(cx, cy, s * .52, 0, 7); x.stroke();
+  x.beginPath(); x.arc(cx, cy, s * .18, 0, 7); x.stroke();
+  // mode glyph: ▲ export (provide) / ▼ import (request)
+  if (e.mode){
+    x.fillStyle = e.mode === 'provide' ? 'rgba(255,214,138,.95)' : 'rgba(110,198,255,.95)';
+    x.beginPath();
+    if (e.mode === 'provide'){
+      x.moveTo(cx, cy - s * .38); x.lineTo(cx + s * .12, cy - s * .18); x.lineTo(cx - s * .12, cy - s * .18);
+    } else {
+      x.moveTo(cx, cy - s * .18); x.lineTo(cx + s * .12, cy - s * .38); x.lineTo(cx - s * .12, cy - s * .38);
+    }
+    x.closePath(); x.fill();
+  } else {
+    // unconfigured: blinking amber dot
+    x.fillStyle = `rgba(255,180,84,${.4 + .3 * Math.sin(time * 5)})`;
+    x.beginPath(); x.arc(cx, cy, s * .08, 0, 7); x.fill();
+  }
+  // configured-item badge
+  if (e.portItem){
+    const ic = R.itemIcon(e.portItem, Math.max(10, Math.round(s * .42)));
+    x.fillStyle = 'rgba(10,13,18,.75)';
+    x.beginPath(); x.arc(w - s * .3, h - s * .3, s * .26, 0, 7); x.fill();
+    x.drawImage(ic, w - s * .3 - ic.width / 2, h - s * .3 - ic.height / 2);
+  }
+  // parked drones on the pad
+  if (e.drones){
+    let slot = 0;
+    for (const d of e.drones){
+      if (d.st !== 'idle') continue;
+      drawDroneBody(x, cx - s * .28 + slot * s * .56, cy + s * .3, s * .8, time, false);
+      slot++;
+    }
+  }
+  // antenna
+  x.strokeStyle = '#8b96a6';
+  x.lineWidth = Math.max(1, s * .05);
+  x.beginPath(); x.moveTo(s * .22, s * .3); x.lineTo(s * .22, s * .02); x.stroke();
+  x.fillStyle = e.mode ? `rgba(110,198,255,${.5 + .4 * Math.sin(time * 3 + e.id)})` : '#5b6674';
+  x.beginPath(); x.arc(s * .22, s * .02, s * .05, 0, 7); x.fill();
+}
+
+/* a drone chassis at screen-space center (bx,by); sc ≈ tile px */
+function drawDroneBody(x, bx, by, sc, time, flying){
+  // rotor blurs
+  x.strokeStyle = flying ? 'rgba(200,220,240,.55)' : 'rgba(140,150,165,.5)';
+  x.lineWidth = Math.max(1, sc * .035);
+  for (const [ox, oy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]){
+    const rx = bx + ox * sc * .16, ry = by + oy * sc * .13;
+    x.beginPath();
+    if (flying){
+      const a = time * 26 + ox * 2 + oy;
+      x.moveTo(rx - Math.cos(a) * sc * .1, ry - Math.sin(a) * sc * .05);
+      x.lineTo(rx + Math.cos(a) * sc * .1, ry + Math.sin(a) * sc * .05);
+    } else {
+      x.moveTo(rx - sc * .08, ry); x.lineTo(rx + sc * .08, ry);
+    }
+    x.stroke();
+  }
+  // body
+  x.fillStyle = '#96a3b5';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  x.lineWidth = 1;
+  rrect(x, bx - sc * .1, by - sc * .08, sc * .2, sc * .16, sc * .05);
+  x.fill(); x.stroke();
+  x.fillStyle = flying ? '#6ec6ff' : '#4a5261';
+  x.beginPath(); x.arc(bx, by, sc * .04, 0, 7); x.fill();
+}
+R.drawDroneBody = drawDroneBody;
+
 /* ---- reservoir tank ---- */
 function drawTank(x, e, s, def){
   const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
@@ -2135,6 +2221,26 @@ R.draw = function(S, dt, U){
   emitAmbient(S, dt, vis);
   updateParticles(dt);
   drawParticles(x);
+
+  /* cargo drones in flight (above everything on the ground) */
+  for (const e of S.ents){
+    if (e.kind !== 'port' || !e.drones) continue;
+    for (const d of e.drones){
+      if (d.st === 'idle') continue;
+      const [dx2, dy2] = R.worldToScreen(d.x, d.y);
+      const s3 = R.tilePx();
+      if (dx2 < -40 || dy2 < -40 || dx2 > R.W + 40 || dy2 > R.H + 40) continue;
+      // ground shadow
+      x.fillStyle = 'rgba(0,0,0,.25)';
+      x.beginPath(); x.ellipse(dx2, dy2 + s3 * .55, s3 * .16, s3 * .07, 0, 0, 7); x.fill();
+      const bob = Math.sin(time * 3 + d.x) * s3 * .04;
+      R.drawDroneBody(x, dx2, dy2 + bob, s3, time, true);
+      if (d.cargo > 0 && d.item){
+        const ic = R.itemIcon(d.item, Math.max(8, Math.round(s3 * .34)));
+        x.drawImage(ic, dx2 - ic.width / 2, dy2 + bob + s3 * .12);
+      }
+    }
+  }
 
   /* night falls: dark tint over the world, warm circles around lit lamps */
   const sun = F.sunFactor(S);

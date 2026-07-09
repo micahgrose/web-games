@@ -211,6 +211,7 @@ function initEnt(S, e, def){
     case 'splitter': e.item = null; e.t = 0; e.srcDir = e.dir; e.outIdx = 0;
                      e.filterItem = null; e.prioOut = null; break;
     case 'chest':    e.store = {}; e.total = 0; break;
+    case 'port':     e.store = {}; e.total = 0; e.mode = null; e.portItem = null; e.drones = []; break;
     case 'pipe':     e.fluid = 0; break;
     case 'tank':     e.fluid = 0; break;
     case 'miner':    e.prog = 0; e.outBuf = {}; e.outTotal = 0; e.fuelT = 0; e.fuelBuf = 0; e.ema = 0; e.lastOut = -1;
@@ -262,6 +263,7 @@ F.remove = function(S, x, y){
   if (e.store) give(e.store);
   if (e.item) F.invAdd(S, e.item, 1);
   if (e.mods) for (const m of e.mods) F.invAdd(S, m, 1);
+  if (e.drones) for (const d of e.drones) if (d.cargo > 0 && d.item) F.invAdd(S, d.item, d.cargo);
   if (e.workItem){
     // a lab mid-consume: hand the pack back and release its reservation
     F.invAdd(S, e.workItem, 1);
@@ -397,6 +399,12 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       if (!F.PACKS.includes(item)) return false;
       if ((target.inBuf[item] || 0) >= F.LAB_BUF) return false;
       target.inBuf[item] = (target.inBuf[item] || 0) + 1; return true;
+    case 'port':
+      // only providers take belt input, and only their configured item
+      if (target.mode !== 'provide' || item !== target.portItem) return false;
+      if (target.total >= F.BUILDINGS[target.key].cap) return false;
+      target.store[item] = (target.store[item] || 0) + 1; target.total++;
+      return true;
     case 'machine':
       return machineAccept(S, target, item);
     default:
@@ -580,6 +588,7 @@ F.tick = function(S, dt){
       else if (e.kind === 'machine') wants = e.crafting || !!machineCanStart(S, e, def);
       else if (e.kind === 'beacon') wants = !!(e.mods && e.mods.length);
       else if (e.kind === 'lamp') wants = sun < .85;
+      else if (e.kind === 'port') wants = !!e.mode;
       e._want = wants;
       if (wants){
         // module power multiplier (beacon field uses last tick's ratio — converges)
@@ -672,6 +681,7 @@ F.tick = function(S, dt){
       case 'pump': tickPump(S, e, def, dt, pr(e, def)); break;
       case 'chest': tickChest(S, e, dt); break;
       case 'lab': tickLab(S, e, def, dt); break;
+      case 'port': tickPort(S, e, def, dt, pr(e, def)); break;
     }
   }
 
@@ -912,6 +922,87 @@ F.techAvailable = function(S, id){
   return true;
 };
 
+/* ---- drone depots ----
+   provider: a belt-fed larder, emptied only by visiting drones.
+   requester: owns two drones; each flies to the nearest stocked provider of
+   the configured item, loads up to DRONE_CAP, flies home, unloads; the depot
+   dispenses its store out the front like a chest. Depots need grid power to
+   dispatch (airborne drones always finish their run). */
+function portCenter(e){ return [e.x + e.w / 2, e.y + e.h / 2]; }
+
+function tickPort(S, e, def, dt, ratio){
+  if (e.mode === 'request'){
+    // dispense out the front
+    if (e.total > 0){
+      for (const k in e.store){
+        if (e.store[k] <= 0) continue;
+        const [px, py] = outPort(e);
+        const tgt = F.entAt(S, px, py);
+        if (tgt && F.tryInsert(S, tgt, k, e.dir, 0)){
+          e.store[k]--; e.total--;
+          if (e.store[k] <= 0) delete e.store[k];
+        }
+        break;
+      }
+    }
+    if (!e.portItem) return;
+    while (e.drones.length < F.DRONES_PER_PORT){
+      const [hx, hy] = portCenter(e);
+      e.drones.push({ x: hx, y: hy, st: 'idle', cargo: 0, item: null, tid: 0 });
+    }
+    const cap = def.cap;
+    for (const d of e.drones){
+      if (d.st === 'idle'){
+        if (ratio <= 0) continue;                      // no power → grounded
+        if (e.total + d.cargo >= cap - F.DRONE_CAP) continue;   // nearly full
+        // nearest powered-enough provider holding our item
+        let best = null, bd = 1e9;
+        for (const o of S.ents){
+          if (o.kind !== 'port' || o.mode !== 'provide' || o.portItem !== e.portItem) continue;
+          if ((o.store[e.portItem] || 0) <= 0) continue;
+          const dx = o.x - e.x, dy = o.y - e.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < bd){ bd = dist; best = o; }
+        }
+        if (best){ d.st = 'out'; d.tid = best.id; }
+      } else if (d.st === 'out'){
+        const prov = F.entById(S, d.tid);
+        if (!prov || prov.kind !== 'port' || prov.mode !== 'provide'){ d.st = 'home'; continue; }
+        const [tx, ty] = portCenter(prov);
+        if (moveDrone(d, tx, ty, dt)){
+          const take = Math.min(F.DRONE_CAP, prov.store[e.portItem] || 0);
+          if (take > 0){
+            prov.store[e.portItem] -= take;
+            prov.total -= take;
+            if (prov.store[e.portItem] <= 0) delete prov.store[e.portItem];
+            d.cargo = take; d.item = e.portItem;
+          }
+          d.st = 'home';
+        }
+      } else if (d.st === 'home'){
+        const [hx, hy] = portCenter(e);
+        if (moveDrone(d, hx, hy, dt)){
+          if (d.cargo > 0 && d.item){
+            e.store[d.item] = (e.store[d.item] || 0) + d.cargo;
+            e.total += d.cargo;
+          }
+          d.cargo = 0; d.item = null; d.st = 'idle'; d.tid = 0;
+        }
+      }
+    }
+  }
+}
+
+function moveDrone(d, tx, ty, dt){
+  const dx = tx - d.x, dy = ty - d.y;
+  const dist = Math.hypot(dx, dy);
+  const step = F.DRONE_SPEED * dt;
+  if (dist <= step){ d.x = tx; d.y = ty; return true; }
+  d.x += dx / dist * step;
+  d.y += dy / dist * step;
+  return false;
+}
+
 function tickChest(S, e, dt){
   // release out the front, one at a time
   if (e.total <= 0) return;
@@ -1137,6 +1228,10 @@ F.serialize = function(S){
     if (e.mods && e.mods.length) o.md = e.mods.slice();
     if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
     if (e.charge) o.ch = +e.charge.toFixed(2);
+    if (e.mode) o.pm = e.mode;
+    if (e.portItem) o.pi = e.portItem;
+    if (e.drones && e.drones.length) o.dr = e.drones.map(d => ({
+      x: +d.x.toFixed(2), y: +d.y.toFixed(2), st: d.st, cargo: d.cargo, item: d.item, tid: d.tid }));
     ents.push(o);
   }
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
@@ -1196,6 +1291,9 @@ F.deserialize = function(data){
     if (o.md) e.mods = o.md.filter(m => F.MODULES[m]);
     if (o.pa) e.prodAcc = o.pa;
     if (o.ch) e.charge = o.ch;
+    if (o.pm) e.mode = o.pm;
+    if (o.pi) e.portItem = o.pi;
+    if (o.dr) e.drones = o.dr.map(d => ({ x: d.x, y: d.y, st: d.st || 'idle', cargo: d.cargo || 0, item: d.item || null, tid: d.tid || 0 }));
     S.ents.push(e);
     stamp(S, e);
   }

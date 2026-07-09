@@ -158,6 +158,8 @@ const B = F.BUILDINGS = {
              desc:'Carries crude oil between pumpjacks and refineries.' },
   tank:    { name:'Reservoir',       cat:'log', kind:'tank', w:2, h:2, cap:240, cost:{steel:8, plate:6, glass:4}, tech:'reservoirs',
              desc:'Buffers 240 crude between connected pipes — fills when the line runs rich, feeds it when pumps fall behind.' },
+  port:    { name:'Drone depot',     cat:'log', kind:'port', w:2, h:2, power:8, cap:100, cost:{steel:8, processor:1, motor:4, glass:4}, tech:'drones',
+             desc:'Long-haul air freight. Set one depot to PROVIDE an item (feed it by belt), another to REQUEST it — two drones ferry the cargo across any distance, no belts needed.' },
   /* --- extraction --- */
   miner1:  { name:'Burner drill',    cat:'ext', kind:'miner', w:1, h:1, speed:1, mineTime:2.4, fuel:true, cost:{ironOre:6, stone:4}, unlock:0,
              desc:'Chews ore out of a deposit. Burns coal — feed it by belt or by hand.' },
@@ -355,6 +357,9 @@ F.TECHS = {
   tarSynthesis:{ name:'Tar synthesis', icon:'tar',
     desc:'Re-polymerise refinery tar: 2 tar + coal → plastic in any assembler. Turns your dirtiest byproduct into your most-wanted material.',
     cost:{ pack3:12 }, req:[], unlocks:['r:plasticTar'] },
+  drones:      { name:'Cargo drones', icon:'motor',
+    desc:'Drone depots: one PROVIDES an item, another REQUESTS it, and drones ferry 10 at a time across any distance — titanium from the world\'s edge without a single belt.',
+    cost:{ pack3:18, pack4:12 }, req:[], unlocks:['port'] },
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
@@ -466,6 +471,11 @@ F.sunFactor = function(S){
 /* accumulator behaviour (per unit) */
 F.ACC_CAP = 900;    // stored energy, P·s
 F.ACC_RATE = 45;    // max charge/discharge, P
+
+/* cargo drones */
+F.DRONE_CAP = 10;      // items per trip
+F.DRONES_PER_PORT = 2; // owned by each requester depot
+F.DRONE_SPEED = 7;     // tiles per second
 
 /* fuel: seconds of burn per coal */
 F.COAL_BURN = 10;

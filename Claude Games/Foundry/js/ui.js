@@ -460,7 +460,8 @@ function captureBlueprint(b){
   const list = entsInBox(b);
   if (!list.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
   const parts = list.map(e => ({ key: e.key, dx: e.x - b.x0, dy: e.y - b.y0, dir: e.dir,
-    recipe: e.recipe || null, filterItem: e.filterItem || null, prioOut: e.prioOut || null }));
+    recipe: e.recipe || null, filterItem: e.filterItem || null, prioOut: e.prioOut || null,
+    mode: e.mode || null, portItem: e.portItem || null }));
   UI.blueprint = { w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1, parts };
   UI.bpDir = 0;
   setMode('stamp');
@@ -484,7 +485,8 @@ function bpParts(anchorX, anchorY){
   return bp.parts.map(p => {
     const [ox, oy] = bpTransform(p.dx, p.dy, bp.w, bp.h, rot);
     return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3,
-             recipe: p.recipe, filterItem: p.filterItem, prioOut: p.prioOut };
+             recipe: p.recipe, filterItem: p.filterItem, prioOut: p.prioOut,
+             mode: p.mode, portItem: p.portItem };
   });
 }
 
@@ -503,6 +505,7 @@ function stampBlueprint(t){
       if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe;
       if (p.filterItem) e.filterItem = p.filterItem;
       if (p.prioOut) e.prioOut = p.prioOut;
+      if (p.mode && e.kind === 'port'){ e.mode = p.mode; e.portItem = p.portItem; }
     }
     else poor++;
   }
@@ -789,7 +792,7 @@ function refreshSelPanel(force){
   const S = UI.S;
   if (S.ents.indexOf(e) < 0){ select(null); return; }
   const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex, e.filterItem || '', e.prioOut || '',
-    (e.mods || []).join(',')].join('|');
+    (e.mods || []).join(','), e.mode || '', e.portItem || ''].join('|');
   if (force || UI.selSig !== sig){
     UI.selSig = sig;
     buildSelPanel(e);
@@ -833,6 +836,14 @@ function dynVals(e){
         : e.flow < 0 ? `<span style="color:var(--accent)">discharging ${Math.round(e.flow)} P</span>`
         : 'idle';
       break;
+    case 'port': {
+      d.stored = `${e.total} / ${def.cap}`;
+      if (e.mode === 'request' && e.drones){
+        const flying = e.drones.filter(dr => dr.st !== 'idle').length;
+        d.drones = flying ? `${flying} in flight · ${e.drones.length - flying} docked` : `${e.drones.length || F.DRONES_PER_PORT} docked`;
+      } else d.drones = '—';
+      break;
+    }
     case 'lamp': {
       const sn2 = F.sunFactor(S);
       const powered = e.netId && S._netRatio && (S._netRatio[e.netId] || 0) > 0;
@@ -917,6 +928,7 @@ function moduleSection(S, e, def){
 function bufsFor(e){
   if (e.kind === 'machine' || e.kind === 'lab') return buffers(e);
   if (e.kind === 'chest') return bufList(e.store);
+  if (e.kind === 'port') return e.total > 0 ? bufList(e.store) : '';
   return '';
 }
 
@@ -996,6 +1008,25 @@ function buildSelPanel(e){
     html += `<button class="menuBtn" data-openres style="margin-top:8px">⚗ Open research</button>`;
     html += `<div class="ghostNote">Belt science packs into any side — all labs feed one shared project.</div>`;
   }
+  if (e.kind === 'port'){
+    html += `<div class="selSection">Mode</div><div class="recipeGrid">`;
+    for (const [val, lbl, tip] of [['provide', '▲ Provide', 'Belts feed this depot; drones come and take from it'],
+                                   ['request', '▼ Request', 'This depot sends drones to fetch the item, then feeds it out the front']])
+      html += `<button class="recipeBtn prioBtn${e.mode === val ? ' on' : ''}" data-pmode="${val}" title="${tip}" style="width:auto;padding:0 10px">${lbl}</button>`;
+    html += `</div>`;
+    const seenP = F.ITEM_ORDER.filter(k => F.oreTypeByItem[k] || S.inv[k] || S.delivered[k] || S.stats.made[k]);
+    html += `<div class="selSection">Item</div><div class="recipeGrid">`;
+    html += `<button class="recipeBtn${!e.portItem ? ' on' : ''}" data-pitem="_" title="None">✕</button>`;
+    for (const k of seenP)
+      html += `<button class="recipeBtn${e.portItem === k ? ' on' : ''}" data-pitem="${k}" title="${F.ITEMS[k].name}">${iconImg(k, 22)}</button>`;
+    html += `</div>`;
+    html += row('Stored', dv.stored, 'stored');
+    html += row('Drones', dv.drones, 'drones');
+    html += `<div data-bufs>${bufsFor(e)}</div>`;
+    if (!e.mode || !e.portItem)
+      html += `<div class="ghostNote">Pick a mode and an item. A ▲ provider is fed by belts; a ▼ requester flies its two drones to the nearest stocked provider and dispenses out its front.</div>`;
+    if (def.power) html += row('Power draw', def.power + ' P');
+  }
   if (e.kind === 'ubelt'){
     html += row('Linked', dv.link, 'link');
     if (!e.linkId) html += `<div class="ghostNote">Place a matching tunnel within ${def.span} tiles, in the same direction, to link.</div>`;
@@ -1071,6 +1102,26 @@ function buildSelPanel(e){
   p.querySelectorAll('[data-prio]').forEach(b => {
     b.addEventListener('click', () => {
       e.prioOut = b.dataset.prio === '_' ? null : b.dataset.prio;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-pmode]').forEach(b => {
+    b.addEventListener('click', () => {
+      const m = b.dataset.pmode === e.mode ? null : b.dataset.pmode;
+      if (e.mode === 'request' && m !== 'request' && e.drones){
+        // recall the fleet: cargo back to your pocket, drones scrapped with the mode
+        for (const d of e.drones) if (d.cargo > 0 && d.item) F.invAdd(S, d.item, d.cargo);
+        e.drones = [];
+      }
+      e.mode = m;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-pitem]').forEach(b => {
+    b.addEventListener('click', () => {
+      e.portItem = b.dataset.pitem === '_' ? null : b.dataset.pitem;
       A.sfx.click();
       refreshSelPanel(true);
     });
@@ -1156,7 +1207,7 @@ function updateSelPanel(e){
 }
 
 function kindLabel(def){
-  return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
+  return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid', port:'air freight',
     miner:'extraction', tank:'fluid', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
     gen:'power', turbine:'power', solar:'power', acc:'power storage', lamp:'lighting', pole:'power grid', pump:'extraction', lab:'research', beacon:'support' }[def.kind] || def.kind;
 }
@@ -1786,6 +1837,13 @@ function renderHowTo(){
   turns red). Generators idle when nothing draws power, so fuel is never wasted. Later:
   <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn ${ic('fuelCell')} fuel cells
   for serious output; the <b>pylon</b> spans 14 tiles.</p>
+
+  <div class="selSection">Air freight</div>
+  <p class="howP">The <b>Cargo drones</b> tech unlocks the <b>drone depot</b>. Set one to
+  <b>▲ Provide</b> an item and feed it by belt; set another anywhere — the far titanium fields,
+  the oil wastes — to <b>▼ Request</b> the same item. Its two drones fly to the nearest stocked
+  provider, carry back ${F.DRONE_CAP} at a time, and the depot dispenses out its front like a
+  depot chest. Both ends need grid power to dispatch; airborne drones always finish their run.</p>
 
   <div class="selSection">Day & night</div>
   <p class="howP">The world turns: every four minutes a full <b>day/night cycle</b> passes (the sun
