@@ -491,6 +491,7 @@ function drawEntBody(x, e, s, time, S){
     case 'solar': drawSolar(x, e, s, def); break;
     case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
+    case 'tank': drawTank(x, e, s, def); break;
     case 'lab': drawLab(x, e, s, time, def); break;
     case 'beacon': drawBeacon(x, e, s, time, S); break;
     case 'core': drawCore(x, e, s, time, S); break;
@@ -745,7 +746,7 @@ function drawPipe(x, e, s, S){
   if (S){
     for (let d = 0; d < 4; d++){
       const n = F.entAt(S, e.x + DX[d], e.y + DY[d]);
-      if (n && (n.kind === 'pipe' || n.kind === 'pump' ||
+      if (n && (n.kind === 'pipe' || n.kind === 'pump' || n.kind === 'tank' ||
         (n.kind === 'machine' && F.BUILDINGS[n.key].fam === 'refinery'))) conn.push(d);
     }
   }
@@ -1097,14 +1098,15 @@ function drawGen(x, e, s, time, def){
 
 /* ---- turbine ---- */
 function drawTurbine(x, e, s, time, def){
-  chassis(x, e, s, '#ffd76e', 2);
+  const chrome = e.key === 'turbine2';
+  chassis(x, e, s, chrome ? '#8fe0d4' : '#ffd76e', 2);
   const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
   x.fillStyle = '#1b212c';
   x.beginPath(); x.arc(cx, cy, s * .58, 0, 7); x.fill();
   x.save();
   x.translate(cx, cy);
-  x.rotate(e.load > 0 ? time * (4 + e.load * 14) : 0);
-  x.fillStyle = '#96a3b5';
+  x.rotate(e.load > 0 ? time * ((chrome ? 7 : 4) + e.load * 14) : 0);
+  x.fillStyle = chrome ? '#a9ded7' : '#96a3b5';
   x.strokeStyle = 'rgba(0,0,0,.5)';
   for (let i = 0; i < 5; i++){
     x.save();
@@ -1372,6 +1374,50 @@ function drawPump(x, e, s, time, def){
 }
 
 /* ---- THE CORE ---- */
+/* ---- reservoir tank ---- */
+function drawTank(x, e, s, def){
+  const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
+  const pad = s * .08;
+  // footing
+  x.fillStyle = '#272e3a';
+  x.strokeStyle = 'rgba(0,0,0,.55)';
+  rrect(x, pad, pad, w - pad * 2, h - pad * 2, s * .1);
+  x.fill(); x.stroke();
+  // big riveted drum
+  const g = x.createRadialGradient(cx - s * .3, cy - s * .3, 0, cx, cy, s * .95);
+  g.addColorStop(0, '#4b5567');
+  g.addColorStop(.7, '#39414f');
+  g.addColorStop(1, '#272e3a');
+  x.fillStyle = g;
+  x.beginPath(); x.arc(cx, cy, s * .82, 0, 7); x.fill();
+  x.strokeStyle = 'rgba(0,0,0,.6)'; x.lineWidth = 1.4;
+  x.beginPath(); x.arc(cx, cy, s * .82, 0, 7); x.stroke();
+  // seam bands + rivets
+  x.strokeStyle = 'rgba(0,0,0,.35)';
+  x.lineWidth = Math.max(1, s * .04);
+  x.beginPath(); x.arc(cx, cy, s * .58, 0, 7); x.stroke();
+  x.fillStyle = '#8b96a6';
+  for (let i = 0; i < 8; i++){
+    const a = i / 8 * Math.PI * 2 + .4;
+    x.beginPath(); x.arc(cx + Math.cos(a) * s * .7, cy + Math.sin(a) * s * .7, s * .04, 0, 7); x.fill();
+  }
+  // level window: dark slot with oil column
+  x.fillStyle = '#12100c';
+  rrect(x, cx - s * .12, cy - s * .44, s * .24, s * .88, s * .08);
+  x.fill();
+  const fr = clamp(e.fluid / def.cap, 0, 1);
+  if (fr > .02){
+    x.fillStyle = '#3b3320';
+    const lh = s * .84 * fr;
+    rrect(x, cx - s * .09, cy + s * .42 - lh, s * .18, lh, s * .05);
+    x.fill();
+  }
+  // top hatch
+  x.fillStyle = '#5b6674';
+  x.strokeStyle = 'rgba(0,0,0,.5)';
+  x.beginPath(); x.arc(cx, cy - s * .55, s * .11, 0, 7); x.fill(); x.stroke();
+}
+
 /* ---- laboratory ---- */
 function drawLab(x, e, s, time, def){
   chassis(x, e, s, '#c07ae8', 0);

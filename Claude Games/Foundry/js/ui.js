@@ -730,6 +730,8 @@ function showBuildTip(ev, key){
   if (def.span) stats.push(`spans ${def.span} tiles`);
   if (def.kind === 'pole') stats.push(`links ${def.reach} tiles · powers ${def.cover * 2 + 1}×${def.cover * 2 + 1}`);
   if (def.cap && def.kind === 'chest') stats.push(`holds ${def.cap}`);
+  if (def.kind === 'tank') stats.push(`buffers ${def.cap} crude`);
+  if (def.kind === 'beacon') stats.push(`boosts a ${def.range * 2 + def.w}×${def.range * 2 + def.w} area`);
   if (stats.length) html += `<div class="tt-stat">${stats.join(' · ')}</div>`;
   html += '<div class="tt-cost">' + Object.entries(def.cost).map(([k, n]) => {
     const have = F.invCount(S, k);
@@ -833,6 +835,9 @@ function dynVals(e){
       break;
     case 'pipe':
       d.fluid = `${e.fluid.toFixed(1)} / ${def.cap}`;
+      break;
+    case 'tank':
+      d.fluid = `${e.fluid.toFixed(0)} / ${def.cap}`;
       break;
     case 'lab': {
       const RS = S.research;
@@ -973,6 +978,10 @@ function buildSelPanel(e){
     html += row('Power draw', def.power + ' P');
   }
   if (e.kind === 'pipe') html += row('Crude', dv.fluid, 'fluid');
+  if (e.kind === 'tank'){
+    html += row('Crude stored', dv.fluid, 'fluid');
+    html += `<div class="ghostNote">Connect pipes to any side — the reservoir banks crude when the line runs rich and feeds it back when pumps fall behind.</div>`;
+  }
   if (e.kind === 'pole'){
     html += row('Linked poles', dv.links, 'links');
     html += row('Network', dv.net, 'net');
@@ -1117,7 +1126,7 @@ function updateSelPanel(e){
 
 function kindLabel(def){
   return { belt:'logistics', ubelt:'logistics', splitter:'logistics', chest:'storage', pipe:'fluid',
-    miner:'extraction', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
+    miner:'extraction', tank:'fluid', machine:{smelter:'furnace', alloy:'furnace', asm:'assembler', refinery:'refinery', crusher:'crusher'}[def.fam] || 'machine',
     gen:'power', turbine:'power', solar:'power', pole:'power grid', pump:'extraction', lab:'research', beacon:'support' }[def.kind] || def.kind;
 }
 function row(k, v, dyn){ return `<div class="selRow"><span>${k}</span><b${dyn ? ` data-dyn="${dyn}"` : ''}>${v}</b></div>`; }
@@ -1574,6 +1583,7 @@ function renderRecipeBook(S){
     ['stone',    'Pale boulders. Kilns and bricks.'],
     ['quartz',   'Pale-blue crystal, a journey out from the Core. Glass and silicon.'],
     ['titanOre', 'Violet boulders at the far edges of the world. The last age of machines.'],
+    ['chromite', 'Teal crystal in the middle and far rings. Alloys into chrome — the metal of the Sunforge.'],
   ];
   for (const [id, note] of RAW){
     h += `<div class="compRow">
@@ -1640,6 +1650,7 @@ function renderRecipeBook(S){
       if (d.kind === 'lab') stats.push(`reads a pack every ${d.packTime}s`);
       if (d.kind === 'chest' && d.cap) stats.push(`holds ${d.cap}`);
       if (d.kind === 'beacon') stats.push(`boosts a ${d.range * 2 + d.w}×${d.range * 2 + d.w} area`);
+      if (d.kind === 'tank') stats.push(`buffers ${d.cap} crude`);
       h += `<div class="compRow">
         <img src="${R.makeBuildingIcon(k, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
@@ -1723,11 +1734,13 @@ function renderHowTo(){
   <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws
   it endlessly; <b>pipes</b> carry it to a <b>refinery</b>, which cracks it into ${ic('plastic')}
   plastic (with coal) or ${ic('fuelCell')} fuel cells (with steel). Pipes only connect pumpjacks,
-  refineries and other pipes.</p>
+  refineries, <b>reservoirs</b> (a researchable 240-crude buffer tank) and other pipes.</p>
 
   <div class="selSection">Growing the factory</div>
-  <p class="howP">Ore near the Core is humble; <b>quartz waits in the middle distance and titanium and
-  oil at the world's edge</b> — every age pushes your logistics farther out. Ratios matter: one
+  <p class="howP">Ore near the Core is humble; <b>quartz and teal chromite wait in the middle distance,
+  titanium and oil at the world's edge</b> — every age pushes your logistics farther out.
+  Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
+  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
   feels polite. The <b>Foundry panel</b> (${kb('U')}) sells permanent upgrades — belt speed, drill
   speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk versions to

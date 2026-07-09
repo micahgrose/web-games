@@ -100,6 +100,11 @@ F.genWorld = function(S){
     placePatch(S, rng, 44, 60, 2, rng.int(40, 60), 4000, 8000);
     placePatch(S, rng, 44, 60, 3, rng.int(40, 60), 4000, 8000);
     placePatch(S, rng, 46, 60, 5, rng.int(30, 44), 3000, 6000);
+    /* chromite — APPENDED after every original call so the RNG stream (and
+       therefore the original patch layout) stays byte-identical; existing
+       saves simply grow new deposits on empty ground */
+    placePatch(S, rng, 30, 44, 8, rng.int(16, 24), 1500, 3000);
+    placePatch(S, rng, 46, 60, 8, rng.int(22, 32), 4000, 8000);
     return;
   }
 
@@ -133,6 +138,12 @@ F.genWorld = function(S){
   placePatch(S, rng, 58, 74, 3, rng.int(44, 64), 4000, 8000);  // rich coal
   placePatch(S, rng, 60, 76, 5, rng.int(32, 46), 3000, 6000);  // rich quartz
   placePatch(S, rng, 60, 76, 4, rng.int(26, 38), 3000, 6000);  // rich stone
+
+  /* chromite — APPENDED after every original call so the RNG stream (and
+     therefore the original patch layout) stays byte-identical; existing
+     saves simply grow new deposits on empty ground */
+  placePatch(S, rng, 36, 52, 8, rng.int(18, 26), 1500, 3000);  // chromite (mid)
+  placePatch(S, rng, 58, 76, 8, rng.int(24, 36), 4000, 8000);  // chromite (far)
 };
 
 function stamp(S, e){
@@ -201,6 +212,7 @@ function initEnt(S, e, def){
                      e.filterItem = null; e.prioOut = null; break;
     case 'chest':    e.store = {}; e.total = 0; break;
     case 'pipe':     e.fluid = 0; break;
+    case 'tank':     e.fluid = 0; break;
     case 'miner':    e.prog = 0; e.outBuf = {}; e.outTotal = 0; e.fuelT = 0; e.fuelBuf = 0; e.ema = 0; e.lastOut = -1;
                      e.mods = []; e.prodAcc = 0; break;
     case 'machine':  e.recipe = null; e.prog = 0; e.crafting = false; e.inBuf = {}; e.outBuf = {}; e.outTotal = 0;
@@ -752,10 +764,10 @@ function tickPump(S, e, def, dt, ratio){
     e.tank += drawn;   // seeps are endless
     e.active = drawn > 0;
   }
-  // push into adjacent pipes
+  // push into adjacent pipes and reservoirs
   if (e.tank > 0){
     forAdjacent(S, e, (n) => {
-      if (n.kind === 'pipe'){
+      if (n.kind === 'pipe' || n.kind === 'tank'){
         const cap = F.BUILDINGS[n.key].cap;
         const amt = Math.min(e.tank, cap - n.fluid, 8 * dt);
         if (amt > 0){ n.fluid += amt; e.tank -= amt; }
@@ -973,6 +985,18 @@ function tickPipes(S, dt){
         if (n.kind === 'pipe' && n.fluid < p.fluid){
           const amt = Math.min((p.fluid - n.fluid) / 2, flow, cap - n.fluid);
           if (amt > 0){ n.fluid += amt; p.fluid -= amt; }
+        } else if (n.kind === 'tank'){
+          // equalise FILL FRACTIONS so the reservoir banks surplus and
+          // releases it when the pipe runs low
+          const tcap = F.BUILDINGS[n.key].cap;
+          const diff = p.fluid / cap - n.fluid / tcap;
+          if (Math.abs(diff) > 1e-4){
+            let amt = diff / (1 / cap + 1 / tcap);           // exact equalising volume
+            amt = Math.max(-flow, Math.min(flow, amt));      // rate-limited
+            if (amt > 0) amt = Math.min(amt, tcap - n.fluid, p.fluid);
+            else amt = -Math.min(-amt, cap - p.fluid, n.fluid);
+            n.fluid += amt; p.fluid -= amt;
+          }
         } else if (n.kind === 'machine' && F.BUILDINGS[n.key].fam === 'refinery'){
           const tcap = F.BUILDINGS[n.key].tank;
           const amt = Math.min(p.fluid, flow, tcap - n.tank);

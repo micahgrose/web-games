@@ -12,9 +12,10 @@ F.ORES = {
   5: { id:'quartz',    name:'Quartz',   c1:'#cfe6f2', c2:'#8fb4c9' },
   6: { id:'titanOre',  name:'Titanium', c1:'#b9a7e8', c2:'#7a68b0' },
   7: { id:'crude',     name:'Oil seep', c1:'#2a2f2a', c2:'#141712' },
+  8: { id:'chromite',  name:'Chromite', c1:'#9be8e0', c2:'#4a8d86' },
 };
 F.OIL_TYPE = 7;
-F.oreTypeByItem = { ironOre:1, copperOre:2, coal:3, stone:4, quartz:5, titanOre:6 };
+F.oreTypeByItem = { ironOre:1, copperOre:2, coal:3, stone:4, quartz:5, titanOre:6, chromite:8 };
 
 /* ================= ITEMS =================
    icon: kind drives the procedural icon painter in render.js */
@@ -26,6 +27,7 @@ F.ITEMS = {
   stone:      { name:'Stone',          tier:0, icon:{kind:'ore',   c1:'#a39d92', c2:'#635e55'} },
   quartz:     { name:'Quartz',         tier:0, icon:{kind:'shard', c1:'#e6f4fc', c2:'#8fb4c9'} },
   titanOre:   { name:'Titanium ore',   tier:0, icon:{kind:'ore',   c1:'#b9a7e8', c2:'#655397'} },
+  chromite:   { name:'Chromite',       tier:0, icon:{kind:'shard', c1:'#b8f2ea', c2:'#4a8d86'} },
   /* smelted */
   ironIngot:  { name:'Iron ingot',     tier:1, icon:{kind:'ingot', c1:'#c9d4e2', c2:'#7c8ba0'} },
   copperIngot:{ name:'Copper ingot',   tier:1, icon:{kind:'ingot', c1:'#f0a26a', c2:'#a86038'} },
@@ -34,6 +36,8 @@ F.ITEMS = {
   titanIngot: { name:'Titanium ingot', tier:3, icon:{kind:'ingot', c1:'#cdbdf5', c2:'#8672c4'} },
   steel:      { name:'Steel bar',      tier:2, icon:{kind:'ingot', c1:'#8f9dad', c2:'#4d5866'} },
   silicon:    { name:'Silicon',        tier:2, icon:{kind:'chip0', c1:'#3f4c5c', c2:'#93aac2'} },
+  chrome:     { name:'Chrome',         tier:3, icon:{kind:'ingot', c1:'#c4f0ea', c2:'#5da8a0'} },
+  chromsteel: { name:'Chromsteel',     tier:4, icon:{kind:'ingot', c1:'#8fe0d4', c2:'#2f5f58'} },
   /* crushed grit (1 ore → 2 grit → 2 ingots) */
   ironDust:   { name:'Iron grit',      tier:1, icon:{kind:'dust',  c1:'#a8b4c4', c2:'#5f6e84'} },
   copperDust: { name:'Copper grit',    tier:1, icon:{kind:'dust',  c1:'#e8965a', c2:'#8f5028'} },
@@ -86,6 +90,8 @@ F.RECIPES = {
   /* alloy furnace (auto) */
   steel:      { out:'steel',      outN:1, in:{ironIngot:2, coal:1},  time:3.2, machine:'alloy', unlock:4 },
   silicon:    { out:'silicon',    outN:1, in:{quartz:1, coal:1},     time:2.6, machine:'alloy', unlock:4 },
+  chrome:     { out:'chrome',     outN:1, in:{chromite:1, coal:1},   time:3.4, machine:'alloy', tech:'chromeworks' },
+  chromsteel: { out:'chromsteel', outN:1, in:{chrome:1, steel:1},    time:4.2, machine:'alloy', tech:'chromeworks' },
   /* assembler */
   gear:       { out:'gear',   outN:1, in:{ironIngot:2},              time:1.6, machine:'asm', unlock:2 },
   wire:       { out:'wire',   outN:2, in:{copperIngot:1},            time:1.4, machine:'asm', unlock:2 },
@@ -146,6 +152,8 @@ const B = F.BUILDINGS = {
              desc:'A reinforced depot holding 240 items. Feeds out the front like a depot.' },
   pipe:    { name:'Pipe',            cat:'log', kind:'pipe', w:1, h:1, cap:40, cost:{plate:1},                unlock:6,
              desc:'Carries crude oil between pumpjacks and refineries.' },
+  tank:    { name:'Reservoir',       cat:'log', kind:'tank', w:2, h:2, cap:240, cost:{steel:8, plate:6, glass:4}, tech:'reservoirs',
+             desc:'Buffers 240 crude between connected pipes — fills when the line runs rich, feeds it when pumps fall behind.' },
   /* --- extraction --- */
   miner1:  { name:'Burner drill',    cat:'ext', kind:'miner', w:1, h:1, speed:1, mineTime:2.4, fuel:true, cost:{ironOre:6, stone:4}, unlock:0,
              desc:'Chews ore out of a deposit. Burns coal — feed it by belt or by hand.' },
@@ -164,6 +172,8 @@ const B = F.BUILDINGS = {
              desc:'Electric smelting, over twice as fast.' },
   smelter3:{ name:'Plasma forge',    cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:4,   power:20, cost:{steel:12, advCircuit:3, plastic:6}, unlock:7,
              desc:'Star-hot. Smelts anything almost instantly.' },
+  smelter4:{ name:'Sunforge',        cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:7,   power:40, cost:{chromsteel:8, advCircuit:4, brick:10}, tech:'sunforge',
+             desc:'A caged fragment of dawn. The final word in smelting.' },
   alloy:   { name:'Alloy furnace',   cat:'pro', kind:'machine', fam:'alloy', w:2, h:2, speed:1.6, power:10, cost:{brick:12, plate:10, wire:8}, unlock:4,
              desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon.' },
   asm1:    { name:'Fabricator',      cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:1,   fuel:true, cost:{brick:8, ironIngot:8}, unlock:2,
@@ -172,6 +182,8 @@ const B = F.BUILDINGS = {
              desc:'Powered assembly line, over twice as fast.' },
   asm3:    { name:'Nano-forge',      cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:4,   power:24, cost:{steel:10, motor:4, advCircuit:4}, unlock:7,
              desc:'Assembles at the molecular scale.' },
+  asm4:    { name:'Chrome fabricator', cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:7, power:45, cost:{chromsteel:8, processor:2, motor:6}, tech:'sunforge',
+             desc:'Chromsteel arms moving faster than sight. The final word in assembly.' },
   refinery:{ name:'Refinery',        cat:'pro', kind:'machine', fam:'refinery', w:3, h:3, speed:1.6, power:16, tank:60, cost:{steel:14, brick:10, circuit:6}, unlock:6,
              desc:'Cracks crude oil into plastic and fuel cells. Needs pipe input.' },
   crusher1:{ name:'Jaw crusher',     cat:'pro', kind:'machine', fam:'crusher', w:2, h:2, speed:1, fuel:true, cost:{brick:8, gear:6, plate:4}, tech:'crushing',
@@ -199,6 +211,8 @@ const B = F.BUILDINGS = {
              desc:'A field of sun-tracking mirrors. 130 P of silent power.' },
   turbine: { name:'Fuel turbine',    cat:'pow', kind:'turbine', w:2, h:2, out:150, burn:20, cost:{steel:10, motor:4, plate:8}, unlock:6,
              desc:'Burns fuel cells for serious power. 150 P at full load.' },
+  turbine2:{ name:'Chrome turbine',  cat:'pow', kind:'turbine', w:2, h:2, out:400, burn:15, cost:{chromsteel:12, motor:6, advCircuit:4}, tech:'chromeTurbines',
+             desc:'Chromsteel blades spinning near the speed of sound. 400 P at full load.' },
 };
 F.BUILD_ORDER = Object.keys(B);
 F.CATS = [
@@ -315,6 +329,18 @@ F.TECHS = {
   beacons:     { name:'Beacons', icon:'glass',
     desc:'A transmitter that broadcasts its modules at half strength to every machine in a 10×10 area — one beacon, a whole block boosted.',
     cost:{ pack3:14, pack4:8 }, req:['modules'], unlocks:['beacon'] },
+  reservoirs:  { name:'Reservoirs', icon:'plate',
+    desc:'A 240-crude buffer tank for pipe networks — banks oil when pumps run rich, feeds refineries when they fall behind.',
+    cost:{ pack2:14 }, req:[], unlocks:['tank'] },
+  chromeworks: { name:'Chromeworks', icon:'chromite',
+    desc:'Refine teal chromite (mid & far rings) in the alloy furnace: chromite + coal → chrome, chrome + steel → chromsteel — the metal of the last machines.',
+    cost:{ pack2:12, pack3:12 }, req:[], unlocks:['r:chrome','r:chromsteel'] },
+  sunforge:    { name:'The Sunforge', icon:'chromsteel',
+    desc:'Mk4 production: the Sunforge smelter and Chrome fabricator — 7× base speed, built from chromsteel.',
+    cost:{ pack3:20, pack4:14 }, req:['chromeworks'], unlocks:['smelter4','asm4'] },
+  chromeTurbines:{ name:'Chrome turbines', icon:'chrome',
+    desc:'A turbine whose chromsteel blades spin near the speed of sound — 400 P from a single machine.',
+    cost:{ pack3:14, pack4:12 }, req:['chromeworks'], unlocks:['turbine2'] },
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
