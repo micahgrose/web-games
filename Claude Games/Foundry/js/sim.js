@@ -7,12 +7,14 @@ const F = root.F;
 const { DX, DY, OPP, clamp } = F;
 
 /* world-gen versions: v1 = original 128² (kept so old saves regenerate
-   identically); v2 = bigger 160² world with wider ore rings */
+   identically); v2 = 160² with wider ore rings; v3 = 224² with the rings
+   pushed far apart and LAKES — open water only platforms can bridge */
 const GEN = {
   1: { size: 128 },
   2: { size: 160 },
+  3: { size: 224 },
 };
-const GEN_CURRENT = 2;
+const GEN_CURRENT = 3;
 const CORE_SIZE = 4;
 F.CORE_SIZE = CORE_SIZE;
 
@@ -32,7 +34,7 @@ function paintBlob(S, rng, cx, cy, type, count, richLo, richHi){
   while (painted < count && guard-- > 0){
     if (F.inMap(S, x, y)){
       const i = idx(S, x, y);
-      if (S.oreType[i] === 0 && !S.grid[i]){
+      if (S.oreType[i] === 0 && !S.grid[i] && !S.water[i]){
         S.oreType[i] = type;
         S.oreAmt[i] = rng.int(richLo, richHi);
         painted++;
@@ -55,7 +57,7 @@ function placePatch(S, rng, distLo, distHi, type, count, richLo, richHi){
     const cx = Math.round(ccx + Math.cos(a) * d);
     const cy = Math.round(ccy + Math.sin(a) * d);
     if (!F.inMap(S, cx, cy) || cx < 3 || cy < 3 || cx > S.w-4 || cy > S.h-4) continue;
-    if (S.oreType[idx(S, cx, cy)] !== 0) continue;
+    if (S.oreType[idx(S, cx, cy)] !== 0 || S.water[idx(S, cx, cy)]) continue;
     if (paintBlob(S, rng, cx, cy, type, count, richLo, richHi) > count * .5) return true;
   }
   return false;
@@ -68,6 +70,8 @@ F.genWorld = function(S){
   S.ground = new Uint8Array(S.w * S.h);
   S.oreType = new Uint8Array(S.w * S.h);
   S.oreAmt = new Float64Array(S.w * S.h);
+  S.water = new Uint8Array(S.w * S.h);      // 1 = open water (v3+ worlds)
+  S.platform = new Uint8Array(S.w * S.h);   // 1 = decked over, buildable
   S.grid = new Array(S.w * S.h).fill(null);
 
   for (let i = 0; i < S.ground.length; i++) S.ground[i] = Math.floor(rng() * 6);
@@ -108,7 +112,9 @@ F.genWorld = function(S){
     return;
   }
 
-  /* v2 layout — 160² world, ore rings spread wider apart */
+  if (S.genVer === 2){
+  /* v2 layout — 160² world, ore rings spread wider apart.
+     MUST stay byte-identical so v2 saves regenerate correctly. */
 
   /* near field — the starter kit (10..22 tiles out) */
   placePatch(S, rng, 11, 18, 1, rng.int(34, 46), 350, 700);   // iron
@@ -144,7 +150,73 @@ F.genWorld = function(S){
      saves simply grow new deposits on empty ground */
   placePatch(S, rng, 36, 52, 8, rng.int(18, 26), 1500, 3000);  // chromite (mid)
   placePatch(S, rng, 58, 76, 8, rng.int(24, 36), 4000, 8000);  // chromite (far)
+  return;
+  }
+
+  /* v3 layout — 224² world: lakes first (ore avoids water), then the ore
+     rings pushed far apart so every age is a real expedition */
+
+  /* lakes — amoeba blobs of open water; only platforms make them buildable */
+  const nLakes = rng.int(8, 12);
+  for (let l = 0; l < nLakes; l++){
+    const a = rng() * Math.PI * 2;
+    const d = 22 + rng() * 76;
+    paintLake(S, rng,
+      Math.round(S.w / 2 + Math.cos(a) * d),
+      Math.round(S.h / 2 + Math.sin(a) * d),
+      rng.int(50, 160));
+  }
+
+  /* near field — the starter kit (12..24 tiles out) */
+  placePatch(S, rng, 13, 21, 1, rng.int(34, 46), 350, 700);   // iron
+  placePatch(S, rng, 13, 22, 1, rng.int(26, 36), 300, 600);   // iron 2
+  placePatch(S, rng, 13, 22, 2, rng.int(28, 38), 350, 700);   // copper
+  placePatch(S, rng, 12, 21, 3, rng.int(26, 36), 350, 700);   // coal
+  placePatch(S, rng, 12, 21, 4, rng.int(24, 34), 350, 700);   // stone
+  placePatch(S, rng, 16, 24, 2, rng.int(20, 28), 300, 600);   // copper 2
+
+  /* mid ring — expansion (46..68) */
+  placePatch(S, rng, 47, 62, 5, rng.int(28, 40), 1200, 2400); // quartz
+  placePatch(S, rng, 47, 66, 5, rng.int(22, 32), 1200, 2400); // quartz 2
+  placePatch(S, rng, 46, 66, 1, rng.int(40, 56), 1400, 2800); // iron
+  placePatch(S, rng, 46, 66, 2, rng.int(36, 48), 1400, 2800); // copper
+  placePatch(S, rng, 46, 66, 3, rng.int(36, 50), 1400, 2800); // coal
+  placePatch(S, rng, 48, 68, 4, rng.int(26, 38), 1200, 2400); // stone
+  placePatch(S, rng, 50, 68, 1, rng.int(30, 44), 1400, 2800); // iron 2
+  placePatch(S, rng, 50, 68, 3, rng.int(26, 38), 1400, 2800); // coal 2
+  placePatch(S, rng, 50, 68, 8, rng.int(18, 26), 1500, 3000); // chromite
+
+  /* far ring — the last age (82..104) */
+  placePatch(S, rng, 84, 100, 6, rng.int(32, 46), 3000, 6000); // titanium
+  placePatch(S, rng, 84, 100, 6, rng.int(26, 38), 3000, 6000); // titanium 2
+  placePatch(S, rng, 82, 100, 7, rng.int(10, 16), 20000, 30000); // oil
+  placePatch(S, rng, 82, 100, 7, rng.int(8, 14), 20000, 30000);  // oil 2
+  placePatch(S, rng, 84, 102, 7, rng.int(8, 14), 20000, 30000);  // oil 3
+  placePatch(S, rng, 84, 102, 1, rng.int(56, 80), 4000, 8000);  // rich iron
+  placePatch(S, rng, 84, 102, 2, rng.int(46, 66), 4000, 8000);  // rich copper
+  placePatch(S, rng, 84, 102, 3, rng.int(46, 66), 4000, 8000);  // rich coal
+  placePatch(S, rng, 86, 104, 5, rng.int(32, 46), 3000, 6000);  // rich quartz
+  placePatch(S, rng, 86, 104, 4, rng.int(26, 38), 3000, 6000);  // rich stone
+  placePatch(S, rng, 84, 104, 8, rng.int(26, 38), 4000, 8000);  // chromite (far)
 };
+
+/* random-walk water blob; keeps a dry ring around the Core and off map edges */
+function paintLake(S, rng, cx, cy, count){
+  const ccx = S.w / 2, ccy = S.h / 2;
+  let painted = 0, guard = count * 30;
+  let x = cx, y = cy;
+  const stack = [[cx, cy]];
+  while (painted < count && guard-- > 0){
+    if (x > 2 && y > 2 && x < S.w - 3 && y < S.h - 3 &&
+        Math.hypot(x + .5 - ccx, y + .5 - ccy) > 14){
+      const i = idx(S, x, y);
+      if (!S.water[i] && !S.grid[i]){ S.water[i] = 1; painted++; stack.push([x, y]); }
+    }
+    const b = stack[Math.floor(rng() * stack.length)];
+    const d = Math.floor(rng() * 4);
+    x = b[0] + DX[d]; y = b[1] + DY[d];
+  }
+}
 
 function stamp(S, e){
   for (let j = 0; j < e.h; j++) for (let i = 0; i < e.w; i++)
@@ -175,10 +247,18 @@ F.canPlace = function(S, key, x, y, dir){
   const def = F.BUILDINGS[key];
   if (!def || !S.unlocked[key]) return { ok:false, why:'locked' };
   if (!F.inMap(S, x, y) || !F.inMap(S, x + def.w - 1, y + def.h - 1)) return { ok:false, why:'out of bounds' };
+  if (def.kind === 'platform'){
+    const t = idx(S, x, y);
+    if (!S.water[t]) return { ok:false, why:'platforms go on open water' };
+    if (S.platform[t]) return { ok:false, why:'occupied' };
+    if (!F.canAfford(S, def.cost)) return { ok:false, why:'cost' };
+    return { ok:true };
+  }
   let ore = 0, oil = 0;
   for (let j = 0; j < def.h; j++) for (let i = 0; i < def.w; i++){
     const t = idx(S, x + i, y + j);
     if (S.grid[t]) return { ok:false, why:'occupied' };
+    if (S.water[t] && !S.platform[t]) return { ok:false, why:'open water — needs a platform' };
     if (S.oreType[t] === F.OIL_TYPE && S.oreAmt[t] > 0) oil++;
     else if (S.oreType[t] !== 0 && S.oreAmt[t] > 0) ore++;
   }
@@ -194,6 +274,13 @@ F.place = function(S, key, x, y, dir, free){
   if (!chk.ok) return null;
   if (!free && !F.pay(S, F.BUILDINGS[key].cost)) return null;
   const def = F.BUILDINGS[key];
+  if (def.kind === 'platform'){
+    // platforms are tile FLAGS, not entities: the deck becomes the ground,
+    // and whatever is built on it owns the grid cell
+    S.platform[idx(S, x, y)] = 1;
+    F.emit(S, { type:'place', key, x, y });
+    return { key, kind:'platform', x, y, w:1, h:1, dir:0, platform:true };
+  }
   const e = { id: S.nextId++, key, kind: def.kind, x, y, w: def.w, h: def.h, dir: dir & 3 };
   initEnt(S, e, def);
   S.ents.push(e);
@@ -250,6 +337,17 @@ function linkTunnel(S, e, def){
 }
 
 F.entById = (S, id) => S.ents.find(e => e.id === id) || null;
+
+/* lift a platform deck back out of the water — only once the tile is clear */
+F.removePlatform = function(S, x, y){
+  if (!F.inMap(S, x, y)) return false;
+  const t = idx(S, x, y);
+  if (!S.platform[t] || S.grid[t]) return false;
+  S.platform[t] = 0;
+  F.refund(S, F.BUILDINGS.platform.cost);
+  F.emit(S, { type:'remove', key:'platform', x, y });
+  return true;
+};
 
 F.remove = function(S, x, y){
   const e = F.entAt(S, x, y);
@@ -1286,9 +1384,13 @@ F.serialize = function(S){
       x: +d.x.toFixed(2), y: +d.y.toFixed(2), st: d.st, cargo: d.cargo, item: d.item, tid: d.tid }));
     ents.push(o);
   }
+  // platform decks (tile indices) — water itself regenerates from the seed
+  const plat = [];
+  if (S.platform) for (let i = 0; i < S.platform.length; i++) if (S.platform[i]) plat.push(i);
   // (ore amounts aren't saved — deposits are endless, worlds regenerate from seed)
   return {
     v: 4, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
+    plat,
     dayT: +(S.dayT || 0).toFixed(2),
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     // milestones are saved BY ID so tiers can be inserted without breaking saves
@@ -1337,6 +1439,9 @@ F.deserialize = function(data){
   const rs = data.research || {};
   S.research = { cur: rs.cur || null, done: rs.done || {}, prog: rs.prog || {}, resv: {} };
   if (S.research.cur && !F.TECHS[S.research.cur]) S.research.cur = null;
+  // platform decks back onto the water before buildings land on them
+  if (data.plat) for (const i of data.plat)
+    if (i >= 0 && i < S.platform.length) S.platform[i] = 1;
   for (const o of data.ents){
     const def = F.BUILDINGS[o.k];
     if (!def) continue;

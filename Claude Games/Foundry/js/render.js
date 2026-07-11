@@ -109,6 +109,7 @@ R.buildGround = function(S){
       const gr1 = hr(), gr2 = hr();                   // fixed draws → stable pattern per tier
       const i = ty * S.w + tx;
       if (S.oreType[i]) continue;                     // never green over ore or oil
+      if (S.water && S.water[i]) continue;            // …or across open water
       const d = Math.hypot(tx + .5 - ccx, ty + .5 - ccy) + jitter;
       let h = (healR - d) / fade;
       if (h <= 0) continue;
@@ -138,6 +139,15 @@ R.buildGround = function(S){
       }
     }
   }
+  /* ---- open water (v3 worlds): dark lakes with shore rims, then decks ---- */
+  if (S.water){
+    for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
+      if (S.water[ty * S.w + tx]) paintWaterTile(x, S, tx, ty, g);
+    }
+    for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
+      if (S.platform[ty * S.w + tx]) paintPlatformTile(x, tx, ty, g);
+    }
+  }
   // ore patch under-glow (so patches read from far zoom)
   for (let ty = 0; ty < S.h; ty++) for (let tx = 0; tx < S.w; tx++){
     const i = ty * S.w + tx;
@@ -148,6 +158,57 @@ R.buildGround = function(S){
     x.fillRect(tx * g, ty * g, g, g);
   }
   R.groundCanvas = cv;
+};
+
+/* one water tile: darker in the deeps, pale rim along every shore, the
+   occasional static glint (deterministic per tile so rebuilds are stable) */
+function paintWaterTile(x, S, tx, ty, g){
+  const i = ty * S.w + tx;
+  const N = ty > 0        && S.water[i - S.w];
+  const So = ty < S.h - 1 && S.water[i + S.w];
+  const W = tx > 0        && S.water[i - 1];
+  const E = tx < S.w - 1  && S.water[i + 1];
+  x.fillStyle = (N && So && W && E) ? '#0b1722' : '#0e1d2b';
+  x.fillRect(tx * g, ty * g, g, g);
+  x.fillStyle = 'rgba(140,200,220,.18)';
+  if (!N)  x.fillRect(tx * g, ty * g, g, 1);
+  if (!So) x.fillRect(tx * g, ty * g + g - 1, g, 1);
+  if (!W)  x.fillRect(tx * g, ty * g, 1, g);
+  if (!E)  x.fillRect(tx * g + g - 1, ty * g, 1, g);
+  let h2 = (tx * 668265263 + ty * 374761393) >>> 0;
+  h2 = (h2 ^ (h2 >> 13)) * 1274126177 >>> 0;
+  if ((h2 & 15) === 3){
+    x.fillStyle = 'rgba(150,210,230,.10)';
+    x.fillRect(tx * g + ((h2 >> 4) % (g - 4)) + 1, ty * g + ((h2 >> 7) % (g - 3)) + 1, 3, 1);
+  }
+}
+
+/* one platform deck tile painted onto the ground canvas */
+function paintPlatformTile(x, tx, ty, g){
+  const px = tx * g, py = ty * g;
+  x.fillStyle = '#39404e';
+  x.fillRect(px, py, g, g);
+  x.fillStyle = 'rgba(0,0,0,.28)';                       // plank seams
+  x.fillRect(px, py + Math.floor(g / 3), g, 1);
+  x.fillRect(px, py + Math.floor(g * 2 / 3), g, 1);
+  x.fillStyle = 'rgba(255,255,255,.07)';                 // top light
+  x.fillRect(px, py, g, 1);
+  x.strokeStyle = 'rgba(8,10,14,.55)';                   // edge frame
+  x.lineWidth = 1;
+  x.strokeRect(px + .5, py + .5, g - 1, g - 1);
+  x.fillStyle = 'rgba(210,220,235,.25)';                 // corner rivets
+  x.fillRect(px + 1, py + 1, 1, 1); x.fillRect(px + g - 2, py + 1, 1, 1);
+  x.fillRect(px + 1, py + g - 2, 1, 1); x.fillRect(px + g - 2, py + g - 2, 1, 1);
+}
+
+/* patch one tile after a platform is laid or lifted (water map never changes,
+   so the neighbours' shore rims stay valid) */
+R.platTile = function(S, tx, ty){
+  if (!R.groundCanvas) return;
+  const g = R.groundScale;
+  const x = R.groundCanvas.getContext('2d');
+  if (S.platform[ty * S.w + tx]) paintPlatformTile(x, tx, ty, g);
+  else paintWaterTile(x, S, tx, ty, g);
 };
 
 /* patch one tile of the ground canvas (deposit depleted → scar) */
@@ -547,6 +608,18 @@ function drawEntBody(x, e, s, time, S){
     case 'lab': drawLab(x, e, s, time, def); break;
     case 'beacon': drawBeacon(x, e, s, time, S); break;
     case 'core': drawCore(x, e, s, time, S); break;
+    case 'platform': {
+      // ghost / build-bar art only — placed decks live on the ground canvas
+      x.fillStyle = '#39404e';
+      x.fillRect(0, 0, s, s);
+      x.fillStyle = 'rgba(0,0,0,.28)';
+      x.fillRect(0, s / 3, s, Math.max(1, s * .04));
+      x.fillRect(0, s * 2 / 3, s, Math.max(1, s * .04));
+      x.strokeStyle = 'rgba(8,10,14,.6)';
+      x.lineWidth = Math.max(1, s * .05);
+      x.strokeRect(s * .03, s * .03, s * .94, s * .94);
+      break;
+    }
   }
   // slotted-module pips along the top-right edge
   if (e.mods && e.mods.length){

@@ -161,6 +161,8 @@ const B = F.BUILDINGS = {
              desc:'Carries crude oil between pumpjacks and refineries.' },
   tank:    { name:'Reservoir',       cat:'log', kind:'tank', w:2, h:2, cap:240, cost:{steel:20, plate:16, glass:10}, tech:'reservoirs',
              desc:'Buffers 240 crude between connected pipes — fills when the line runs rich, feeds it when pumps fall behind.' },
+  platform:{ name:'Platform',        cat:'log', kind:'platform', w:1, h:1, cost:{stone:4, plate:1}, tech:'platforms',
+             desc:'A steel-pinned deck over open water. Anything builds on it — belts, machines, even power poles. Drag to deck a crossing; remove it only once it\'s clear.' },
   port:    { name:'Drone depot',     cat:'log', kind:'port', w:2, h:2, power:8, cap:100, cost:{steel:40, processor:5, motor:20, glass:20}, tech:'drones',
              desc:'Long-haul air freight. Set one depot to PROVIDE an item (feed it by belt), another to REQUEST it — two drones ferry the cargo across any distance, no belts needed.' },
   /* --- extraction --- */
@@ -341,6 +343,9 @@ F.TECHS = {
   tunnels:     { name:'Tunnels', icon:'gear',
     desc:'Send items under 4 tiles of anything — the only way to cross two belt lines.',
     cost:{ pack1:8 }, req:[], unlocks:['ubelt1'] },
+  platforms:   { name:'Pontoon platforms', icon:'stone',
+    desc:'Drive piles into the lakebed and deck them over: platforms turn open water into buildable ground — for belts, machines, even power poles.',
+    cost:{ pack1:6 }, req:[], unlocks:['platform'] },
   fastBelts:   { name:'Fast conveyors', icon:'plate',
     desc:'Twice the throughput of a basic conveyor. Your mainline will thank you.',
     cost:{ pack1:14 }, req:[], unlocks:['belt2'] },

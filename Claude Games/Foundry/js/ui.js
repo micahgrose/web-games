@@ -314,6 +314,7 @@ function placeAt(t, first){
   if (e){
     A.sfx.place();
     UI.pointer.lastPlaced = [t[0], t[1]];   // anchor for spaced drag-lines
+    if (e.platform){ R.platTile(S, e.x, e.y); buildBarAfford(); return; }
     if (e.kind === 'belt') tipOnce('firstBelt');
     if (e.kind === 'splitter') tipOnce('firstSplitter');
     if (e.kind === 'pump') tipOnce('firstPipe');
@@ -358,7 +359,7 @@ function dragPlace(px, py){
   const P = UI.pointer;
   const last = P.lastTile;
   if (!last || (t[0] === last[0] && t[1] === last[1])) return;
-  if (def.kind !== 'belt' && def.kind !== 'pipe'){
+  if (def.kind !== 'belt' && def.kind !== 'pipe' && def.kind !== 'platform'){
     // machines/poles: drag lays a spaced line (tunnels stay click-only)
     P.lastTile = t;
     if (def.kind === 'ubelt') return;
@@ -392,7 +393,16 @@ function dragPlace(px, py){
 function removeAt(t){
   if (!t) return;
   const e = F.entAt(UI.S, t[0], t[1]);
-  if (!e || e.kind === 'core') return;
+  if (!e){
+    // bare platform deck → lift it (only when nothing stands on it)
+    if (F.removePlatform(UI.S, t[0], t[1])){
+      R.platTile(UI.S, t[0], t[1]);
+      A.sfx.remove();
+      buildBarAfford();
+    }
+    return;
+  }
+  if (e.kind === 'core') return;
   if (UI.selection === e) select(null);
   F.remove(UI.S, t[0], t[1]);
   A.sfx.remove();
@@ -1594,6 +1604,7 @@ const TREE_LANES = [
     [1, 'fastBelts', null, 'magRails', 'gravBelts'],
     [1, 'tunnels', null, 'deepTunnels'],
     [1, 'depots', 'massStorage'],
+    [1, 'platforms'],
     [2, 'reservoirs']],
   ['Production',
     [1, 'up:metallurgy'],
@@ -2087,6 +2098,9 @@ function renderHowTo(){
   <div class="selSection">Growing the factory</div>
   <p class="howP">Ore near the Core is humble; <b>quartz and teal chromite wait in the middle distance,
   titanium and oil at the world's edge</b> — every age pushes your logistics farther out.
+  Dark <b>lakes</b> lie between you and the good deposits: nothing builds on open water until you
+  research <b>Pontoon platforms</b>, then drag a line of decking across and belt right over it —
+  platforms carry machines and power poles too (tunnels dive underneath, and drones simply fly).
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
   researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
