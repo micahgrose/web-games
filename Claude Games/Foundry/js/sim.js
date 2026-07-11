@@ -166,6 +166,7 @@ F.genWorld = function(S){
       Math.round(S.h / 2 + Math.sin(a) * d),
       rng.int(50, 160));
   }
+  fillWaterIslands(S);   // drunk-walk blobs (and near-touching lakes) can leave dry pockets — drown them
 
   /* near field — the starter kit (12..24 tiles out) */
   placePatch(S, rng, 13, 21, 1, rng.int(34, 46), 350, 700);   // iron
@@ -216,6 +217,30 @@ function paintLake(S, rng, cx, cy, count){
     const d = Math.floor(rng() * 4);
     x = b[0] + DX[d]; y = b[1] + DY[d];
   }
+}
+
+/* the drunk-walk blob (and near-touching lakes) can leave dry pockets wholly
+   ringed by water — flood land connectivity in from the map border (always
+   dry — lakes stay 3+ tiles off every edge) and drown anything that never
+   reaches out, i.e. every landlocked "island" */
+function fillWaterIslands(S){
+  const seen = new Uint8Array(S.w * S.h);
+  const stack = [];
+  const push = (x, y) => {
+    const i = idx(S, x, y);
+    if (seen[i] || S.water[i]) return;
+    seen[i] = 1; stack.push([x, y]);
+  };
+  for (let x = 0; x < S.w; x++){ push(x, 0); push(x, S.h - 1); }
+  for (let y = 0; y < S.h; y++){ push(0, y); push(S.w - 1, y); }
+  while (stack.length){
+    const [x, y] = stack.pop();
+    if (x > 0) push(x - 1, y);
+    if (x < S.w - 1) push(x + 1, y);
+    if (y > 0) push(x, y - 1);
+    if (y < S.h - 1) push(x, y + 1);
+  }
+  for (let i = 0; i < S.water.length; i++) if (!S.water[i] && !seen[i]) S.water[i] = 1;
 }
 
 function stamp(S, e){
