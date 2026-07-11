@@ -63,9 +63,6 @@
     <button class="menuBtn" id="mQuit">Save &amp; quit to title</button>
   </div>
 
-  <!-- Tooltip -->
-  <div id="tooltip" class="hidden"></div>
-
   <!-- Build-mode hint banner -->
   <div id="modeHint" class="hidden"></div>
 
@@ -96,6 +93,10 @@
     <div id="bigBody"></div>
   </div>
 </div>
+
+<!-- Tooltip — lives at body level so it floats above the big panel too
+     (inside #hud it was trapped under the panel's stacking context) -->
+<div id="tooltip" class="hidden"></div>
 
 <!-- ======= Title screen ======= -->
 <div id="title">

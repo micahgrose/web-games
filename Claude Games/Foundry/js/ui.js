@@ -780,7 +780,9 @@ function positionTip(px, py){
   const r = tt.getBoundingClientRect();
   let x = px + 14, y = py - r.height - 10;
   if (x + r.width > innerWidth - 8) x = innerWidth - r.width - 8;
-  if (y < 8) y = py + 18;
+  if (y < 8) y = py + 18;                                    // no room above → below cursor
+  if (y + r.height > innerHeight - 8) y = innerHeight - r.height - 8;  // keep the bottom on-screen
+  if (y < 8) y = 8;                                          // …and the top, for tall tips in the tree
   tt.style.left = x + 'px';
   tt.style.top = y + 'px';
 }
