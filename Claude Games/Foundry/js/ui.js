@@ -572,6 +572,7 @@ function bindKeys(){
         else openMenu();
         break;
       case 'KeyH': toggleBig('howto'); break;
+      case 'KeyT': toggleBig('tree'); break;
       case 'Space': e.preventDefault(); togglePause(); break;
       case 'Equal': case 'NumpadAdd': setSpeed(clamp(UI.speed + 1, 1, 3)); break;
       case 'Minus': case 'NumpadSubtract': setSpeed(clamp(UI.speed - 1, 1, 3)); break;
@@ -597,7 +598,7 @@ function bindHud(){
   });
   $('btnFoundry').addEventListener('click', () => toggleBig('milestones'));
   $('btnInv').addEventListener('click', () => toggleBig('inventory'));
-  $('techChip').addEventListener('click', () => { toggleBig('research'); });
+  $('techChip').addEventListener('click', () => { toggleBig('tree'); });
   bindMinimap();
   $('btnSound').addEventListener('click', () => {
     A.init(); A.resume();
@@ -878,7 +879,7 @@ function dynVals(e){
       break;
     case 'lab': {
       const RS = S.research;
-      d.res = RS.cur ? F.TECHS[RS.cur].name : '<span class="ghostTxt">none — open Research</span>';
+      d.res = RS.cur ? F.TECHS[RS.cur].name : '<span class="ghostTxt">none — open the Tech tree</span>';
       d.read = e.workItem ? F.ITEMS[e.workItem].name : 'idle';
       break;
     }
@@ -1143,7 +1144,7 @@ function buildSelPanel(e){
     box.addEventListener('contextmenu', ev => ev.preventDefault());
   });
   const orb = p.querySelector('[data-openres]');
-  if (orb) orb.addEventListener('click', () => { openBig('research'); });
+  if (orb) orb.addEventListener('click', () => { openBig('tree'); });
   p.querySelectorAll('[data-mod]').forEach(b => {
     b.addEventListener('click', () => {
       const k = b.dataset.mod;
@@ -1401,8 +1402,7 @@ function refreshPower(){
 const BIG_TABS = [
   { id:'inventory', name:'Inventory' },
   { id:'milestones', name:'Milestones' },
-  { id:'research', name:'Research' },
-  { id:'upgrades', name:'Upgrades' },
+  { id:'tree', name:'Tech tree' },
   { id:'compendium', name:'Recipes' },
   { id:'howto', name:'How to play' },
   { id:'stats', name:'Stats' },
@@ -1415,6 +1415,7 @@ function toggleBig(tab){
 function openBig(tab){
   UI.bigTab = tab;
   $('bigPanelWrap').classList.remove('hidden');
+  $('bigPanel').classList.toggle('wide', tab === 'tree');   // the tree needs room to branch
   const bt = $('bigTabs');
   bt.innerHTML = '';
   for (const t of BIG_TABS){
@@ -1480,40 +1481,8 @@ function renderBig(){
       body.innerHTML = h;
       break;
     }
-    case 'upgrades': {
-      let h = '<div class="upGrid">';
-      for (const id in F.UPGRADES){
-        const up = F.UPGRADES[id];
-        const rank = S.upgrades[id] || 0;
-        const maxed = rank >= up.max;
-        h += `<div class="upCard${maxed ? ' maxed' : ''}">
-          <div class="upHead"><span class="upName">${up.name}</span><span class="upRank">${maxed ? 'MAX' : `rank ${rank} / ${up.max}`}</span></div>
-          <div class="upDesc">${up.desc}</div>
-          <div class="upPips">${Array.from({length: up.max}, (_, i) => `<div class="upPip${i < rank ? ' filled' : ''}"></div>`).join('')}</div>`;
-        if (!maxed){
-          const cost = up.costs[rank];
-          const can = F.canAfford(S, cost);
-          h += `<button class="upBuy" data-up="${id}" ${can ? '' : 'disabled'}>` +
-            Object.entries(cost).map(([k, n]) =>
-              `<span class="${F.invCount(S, k) < n ? 'lack' : ''}">${iconImg(k, 14)} ${n}</span>`).join('') +
-            '</button>';
-        }
-        h += '</div>';
-      }
-      body.innerHTML = h + '</div>';
-      body.querySelectorAll('[data-up]').forEach(b => {
-        b.addEventListener('click', () => {
-          if (F.buyUpgrade(S, b.dataset.up)){
-            A.sfx.buy();
-            renderBig();
-            buildBarAfford();
-          } else A.sfx.error();
-        });
-      });
-      break;
-    }
-    case 'research': {
-      renderResearchTab(body);
+    case 'tree': {
+      renderTreeTab(body);
       break;
     }
     case 'compendium': {
@@ -1586,22 +1555,198 @@ function fillSparks(body){
 }
 
 /* ==================================================================== */
-/* RESEARCH TAB                                                         */
-/* Built once per structural change (project switch / tech completed /  */
-/* new packs unlocked), then progress numbers are poked in place so     */
-/* buttons stay hoverable while labs chew through packs.                */
+/* TECH TREE TAB                                                        */
+/* One map of everything that grows from the Engine: permanent upgrade  */
+/* ranks (paid instantly in goods) and lab technologies (researched     */
+/* with science packs) hang off a single root as branching lanes.       */
+/* Rebuilt only on structural change (project switched / tech done /    */
+/* rank bought / new packs); progress + affordability are poked in      */
+/* place so nodes stay hoverable while labs chew through packs.         */
 /* ==================================================================== */
-function techCostChip(id, pk, sp, n, done){
-  return `${iconImg(pk, 14)} <span data-tcost="${id}:${pk}">${done ? n : Math.min(sp, n)} / ${n}</span>`;
+const TREE_COLW = 158, TREE_ROWH = 58, TREE_NW = 140, TREE_NH = 46, TREE_PAD = 14;
+const TREE_ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+const TREE_UP_ICON = { logistics:'gear', extraction:'ironOre', metallurgy:'ironIngot',
+  fabrication:'circuit', gridOutput:'wire', efficiency:'glass', prospecting:'stone', capacitors:'copperIngot' };
+
+/* hand-authored lanes: [groupLabel, [startCol, spec…]…]. A spec is a
+   tech id, 'up:track' (expands to five chained rank nodes) or null
+   (skip a column so a child lines up with its era). */
+const TREE_LANES = [
+  ['The coal age',
+    [1, 'stokers', 'coalHoppers', 'forcedDraft'],
+    [1, 'combustion']],
+  ['The grid',
+    [2, 'electrification', 'pylons', 'substations'],
+    [3, 'solarPower', 'solarTowers', 'helios'],
+    [4, 'accumulators'],
+    [3, 'fuelTurbines', null, 'chromeTurbines'],
+    [4, 'drones'],
+    [1, 'up:gridOutput'],
+    [1, 'up:efficiency']],
+  ['Extraction',
+    [1, 'up:extraction'],
+    [1, 'up:prospecting'],
+    [3, 'electricDrills', 'plasmaBores', 'quantumDrills'],
+    [1, 'crushing', null, 'crushing2']],
+  ['Logistics',
+    [1, 'up:logistics'],
+    [1, 'up:capacitors'],
+    [1, 'fastBelts', null, 'magRails', 'gravBelts'],
+    [1, 'tunnels', null, 'deepTunnels'],
+    [1, 'depots', 'massStorage'],
+    [2, 'reservoirs']],
+  ['Production',
+    [1, 'up:metallurgy'],
+    [1, 'up:fabrication'],
+    [3, 'arcFurnaces', 'plasmaForges'],
+    [3, 'poweredAssembly', 'nanoForges'],
+    [2, 'modules', null, 'prodModules'],
+    [4, 'beacons'],
+    [3, 'chromeworks', null, 'sunforge'],
+    [4, 'tarSynthesis']],
+];
+
+let TREE_CACHE = null;
+function treeLayout(){
+  if (TREE_CACHE) return TREE_CACHE;
+  const nodes = {}, edges = [], groups = [];
+  nodes.root = { key:'root', root:true, x: TREE_PAD, y: TREE_PAD, h: 52 };
+  let y = TREE_PAD + 52 + 16;
+  for (const lane of TREE_LANES){
+    groups.push({ name: lane[0], y });
+    y += 24;
+    for (let li = 1; li < lane.length; li++){
+      const row = lane[li];
+      let col = row[0];
+      for (let i = 1; i < row.length; i++){
+        const spec = row[i];
+        if (spec === null){ col++; continue; }
+        if (spec.startsWith('up:')){
+          const track = spec.slice(3);
+          for (let r = 0; r < F.UPGRADES[track].max; r++){
+            const key = spec + ':' + r;
+            nodes[key] = { key, up: track, rank: r, x: TREE_PAD + col * TREE_COLW, y };
+            edges.push([r ? spec + ':' + (r - 1) : 'root', key]);
+            col++;
+          }
+        } else {
+          nodes[spec] = { key: spec, tech: spec, x: TREE_PAD + col * TREE_COLW, y };
+          const req = F.TECHS[spec].req;
+          if (req && req.length) for (const r of req) edges.push([r, spec]);
+          else edges.push(['root', spec]);
+          col++;
+        }
+      }
+      y += TREE_ROWH;
+    }
+    y += 14;
+  }
+  TREE_CACHE = { nodes, edges, groups,
+    W: TREE_PAD * 2 + 5 * TREE_COLW + TREE_NW, H: y + TREE_PAD };
+  return TREE_CACHE;
 }
 
-function renderResearchTab(body){
+function treeEdgePath(s, d){
+  const tx = d.x, ty = d.y + TREE_NH / 2;
+  if (s.root){
+    const sx = s.x + 34, sy = s.y + s.h;
+    return `M ${sx} ${sy} C ${sx} ${ty}, ${tx - 60} ${ty}, ${tx} ${ty}`;
+  }
+  const sx = s.x + TREE_NW, sy = s.y + TREE_NH / 2;
+  return `M ${sx} ${sy} C ${sx + 52} ${sy}, ${tx - 52} ${ty}, ${tx} ${ty}`;
+}
+
+function treeTechNode(S, n){
+  const id = n.tech, tk = F.TECHS[id], RS = S.research;
+  const done = !!RS.done[id], cur = RS.cur === id;
+  const reqMet = (tk.req || []).every(r => RS.done[r]);
+  const sp = RS.prog[id] || {};
+  let got = 0, tot = 0;
+  for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
+  const cls = done ? 'done' : cur ? 'cur' : reqMet ? 'avail' : 'tlock';
+  return `<div class="tnode tech ${cls}" data-node="${id}" style="left:${n.x}px;top:${n.y}px">
+    <div class="tnTop">${iconImg(tk.icon, 15)}<span class="tnName">${tk.name}</span>${
+      done ? '<span class="tnTag">✓</span>' : cur ? '<span class="tnTag cur">⚗</span>' : ''}</div>
+    <div class="tnCost">${Object.entries(tk.cost).map(([pk, nn]) =>
+      `<span>${iconImg(pk, 12)}<i data-tcost="${id}:${pk}">${done ? nn : Math.min(sp[pk] || 0, nn)}</i>/${nn}</span>`).join('')}</div>
+    <div class="tnBar"><i data-tnbar="${id}" style="width:${done ? 100 : tot ? (got / tot * 100).toFixed(1) : 0}%"></i></div>
+  </div>`;
+}
+
+function treeUpNode(S, n){
+  const up = F.UPGRADES[n.up], have = S.upgrades[n.up] || 0;
+  const owned = n.rank < have, next = n.rank === have;
+  const cost = up.costs[n.rank];
+  const cls = owned ? 'done' : next ? 'avail' + (F.canAfford(S, cost) ? ' can' : '') : 'tlock';
+  return `<div class="tnode up ${cls}" data-node="${n.key}" style="left:${n.x}px;top:${n.y}px">
+    <div class="tnTop">${iconImg(TREE_UP_ICON[n.up], 15)}<span class="tnName">${up.name} ${TREE_ROMAN[n.rank]}</span>${
+      owned ? '<span class="tnTag">✓</span>' : ''}</div>
+    <div class="tnCost">${Object.entries(cost).map(([k, nn]) =>
+      `<span data-need="${k}:${nn}" class="${!owned && F.invCount(S, k) < nn ? 'lack' : ''}">${iconImg(k, 12)}${nn}</span>`).join('')}</div>
+  </div>`;
+}
+
+function showTreeTip(ev, key){
+  const S = UI.S, tt = $('tooltip');
+  let html;
+  if (key.startsWith('up:')){
+    const parts = key.split(':'), track = parts[1], r = +parts[2];
+    const up = F.UPGRADES[track], have = S.upgrades[track] || 0;
+    html = `<div class="tt-name">${up.name} ${TREE_ROMAN[r]} <span class="tt-kind tkUp">upgrade</span></div>
+      <div class="tt-desc">${up.desc}</div>
+      <div class="tt-cost">` + Object.entries(up.costs[r]).map(([k, n]) => {
+        const hv = F.invCount(S, k);
+        return `<span class="${hv < n ? 'lack' : ''}">${iconImg(k, 14)} ${n} <span class="have">(${F.fmt(hv)})</span></span>`;
+      }).join('') + `</div>
+      <div class="tt-stat">${r < have ? 'owned ✓' : r === have ? 'click to buy — instant, paid from stock' : `buy ${up.name} ${TREE_ROMAN[have]} first`}</div>`;
+  } else {
+    const tk = F.TECHS[key], RS = S.research;
+    html = `<div class="tt-name">${tk.name} <span class="tt-kind tkRes">research</span></div>
+      <div class="tt-desc">${tk.desc}</div>`;
+    const names = (tk.unlocks || []).map(u => u.startsWith('r:')
+      ? F.ITEMS[F.RECIPES[u.slice(2)].out].name : F.BUILDINGS[u].name);
+    if (names.length) html += `<div class="tt-stat">unlocks: ${[...new Set(names)].join(', ')}</div>`;
+    html += `<div class="tt-cost">` + Object.entries(tk.cost).map(([pk, n]) =>
+      `<span>${iconImg(pk, 14)} ${n} ${F.ITEMS[pk].name}</span>`).join('') + `</div>`;
+    if (RS.done[key]) html += `<div class="tt-stat">researched ✓</div>`;
+    else if (RS.cur === key) html += `<div class="tt-stat">labs are on it — click to pause</div>`;
+    else if (!(tk.req || []).every(r => RS.done[r]))
+      html += `<div class="tt-lock">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
+    else html += `<div class="tt-stat">click to set as the lab project</div>`;
+  }
+  tt.innerHTML = html;
+  tt.classList.remove('hidden');
+  positionTip(ev.clientX, ev.clientY);
+}
+
+function treeClick(key, body){
+  const S = UI.S;
+  if (key.startsWith('up:')){
+    const parts = key.split(':'), track = parts[1], r = +parts[2];
+    if (r !== (S.upgrades[track] || 0)){ A.sfx.error(); return; }
+    if (F.buyUpgrade(S, track)){ A.sfx.buy(); buildBarAfford(); }
+    else { A.sfx.error(); return; }
+  } else {
+    const RS = S.research;
+    if (RS.done[key]) return;
+    if (RS.cur === key){ F.setResearch(S, null); A.sfx.click(); }
+    else if (F.setResearch(S, key)) A.sfx.click();
+    else { A.sfx.error(); return; }
+  }
+  hideTip();
+  UI._treeSig = null;
+  renderTreeTab(body);
+}
+
+function renderTreeTab(body){
   const S = UI.S;
   const RS = S.research;
+  const L = treeLayout();
   const sig = [RS.cur || '', Object.keys(RS.done).sort().join(','),
+    Object.keys(F.UPGRADES).map(k => S.upgrades[k] || 0).join(''),
     F.PACKS.filter(p => F.recipeUnlocked(S, p)).join(',')].join('|');
-  if (UI._resSig !== sig || !body.querySelector('.techGrid')){
-    UI._resSig = sig;
+  if (UI._treeSig !== sig || !body.querySelector('.treeWrap')){
+    UI._treeSig = sig;
     let h = '<div class="resHead">';
     if (RS.cur){
       const tk = F.TECHS[RS.cur];
@@ -1610,51 +1755,58 @@ function renderResearchTab(body){
         <div class="resCurPacks" data-respacks></div>
         <button class="resStop" data-stop>Pause project</button>`;
     } else {
-      h += `<div class="ghostNote">No active project. Craft science packs in a fabricator, belt them into
-        <b>laboratories</b>, and pick a technology below — every tech is an optional bonus, never a gate.
-        Switching projects keeps all progress.</div>`;
-    }
-    h += '</div><div class="techGrid">';
-    for (const id of F.TECH_ORDER){
-      const tk = F.TECHS[id];
-      const done = !!RS.done[id];
-      const cur = RS.cur === id;
-      const reqMet = (tk.req || []).every(r => RS.done[r]);
-      const started = !!RS.prog[id];
-      h += `<div class="techCard${done ? ' done' : cur ? ' cur' : !reqMet ? ' tlocked' : ''}">
-        <div class="techHead">${iconImg(tk.icon, 18)}<span class="techName">${tk.name}</span>
-          ${done ? '<span class="techState tsDone">✓ researched</span>' : cur ? '<span class="techState tsCur">in progress</span>' : ''}</div>
-        <div class="techDesc">${tk.desc}</div>`;
-      if (!reqMet && !done)
-        h += `<div class="techReq">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
-      const sp = RS.prog[id] || {};
-      h += `<div class="techCost">` + Object.entries(tk.cost).map(([pk, n]) =>
-        `<span class="techPack">${techCostChip(id, pk, sp[pk] || 0, n, done)}</span>`).join('') + `</div>`;
-      if (!done)
-        h += `<button class="techBtn" data-tech="${id}" ${reqMet && !cur ? '' : 'disabled'}>${cur ? 'Researching…' : started ? 'Resume' : 'Research'}</button>`;
-      h += '</div>';
+      h += `<div class="ghostNote">Everything grows from the Engine. <b>Amber nodes</b> are upgrade ranks —
+        click to buy on the spot with parts. <b>Violet nodes</b> are technologies — click one to make it the
+        lab project, then belt science packs into <b>laboratories</b>. Switching projects never loses progress.</div>`;
     }
     h += '</div>';
+    /* edges */
+    let sv = `<svg class="treeSvg" width="${L.W}" height="${L.H}" viewBox="0 0 ${L.W} ${L.H}">`;
+    for (const [a, b] of L.edges){
+      const s = L.nodes[a], d = L.nodes[b];
+      const srcOn = s.root ? true : s.tech ? !!RS.done[s.tech] : (S.upgrades[s.up] || 0) > s.rank;
+      const dstOn = d.tech ? !!RS.done[d.tech] : (S.upgrades[d.up] || 0) > d.rank;
+      const cls = dstOn ? 'eOwn' : d.tech && RS.cur === d.tech ? 'eCur' : srcOn ? 'eOpen' : 'eLock';
+      sv += `<path class="${cls}" d="${treeEdgePath(s, d)}"/>`;
+    }
+    sv += '</svg>';
+    /* nodes + group labels */
+    const rn = L.nodes.root;
+    let nh = `<div class="tnode root" style="left:${rn.x}px;top:${rn.y}px">
+      <div class="tnTop"><span class="tnName">THE ENGINE</span></div>
+      <div class="tnSub">…all of it grows from the flame…</div></div>`;
+    for (const k in L.nodes){
+      if (k === 'root') continue;
+      const n = L.nodes[k];
+      nh += n.tech ? treeTechNode(S, n) : treeUpNode(S, n);
+    }
+    const gh = L.groups.map(g =>
+      `<div class="treeGroup" style="left:${TREE_PAD + TREE_COLW}px;top:${g.y}px">${g.name}</div>`).join('');
+    h += `<div class="treeScroll"><div class="treeWrap" style="width:${L.W}px;height:${L.H}px">${sv}${gh}${nh}</div></div>`;
     body.innerHTML = h;
-    body.querySelectorAll('[data-tech]').forEach(b => {
-      b.addEventListener('click', () => {
-        if (F.setResearch(S, b.dataset.tech)){ A.sfx.click(); UI._resSig = null; renderResearchTab(body); }
-        else A.sfx.error();
-      });
+    body.querySelectorAll('.tnode[data-node]').forEach(nd => {
+      const key = nd.dataset.node;
+      nd.addEventListener('click', () => treeClick(key, body));
+      nd.addEventListener('mouseenter', ev => showTreeTip(ev, key));
+      nd.addEventListener('mousemove', ev => positionTip(ev.clientX, ev.clientY));
+      nd.addEventListener('mouseleave', hideTip);
     });
     const stop = body.querySelector('[data-stop]');
     if (stop) stop.addEventListener('click', () => {
-      F.setResearch(S, null); A.sfx.click(); UI._resSig = null; renderResearchTab(body);
+      F.setResearch(S, null); A.sfx.click(); UI._treeSig = null; renderTreeTab(body);
     });
   }
-  /* in-place pokes */
+  /* in-place pokes: header progress, current node's bar + counts, affordability */
   if (RS.cur){
     const tk = F.TECHS[RS.cur];
     const sp = RS.prog[RS.cur] || {};
     let tot = 0, got = 0;
     for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
+    const pct = (got / tot * 100).toFixed(1) + '%';
     const bar = body.querySelector('[data-resbar]');
-    if (bar) bar.style.width = (got / tot * 100).toFixed(1) + '%';
+    if (bar) bar.style.width = pct;
+    const nb = body.querySelector(`[data-tnbar="${RS.cur}"]`);
+    if (nb) nb.style.width = pct;
     const pkEl = body.querySelector('[data-respacks]');
     if (pkEl){
       const t = Object.entries(tk.cost).map(([pk, n]) =>
@@ -1671,10 +1823,20 @@ function renderResearchTab(body){
     body.querySelectorAll('[data-tcost]').forEach(el2 => {
       const [id, pk] = el2.dataset.tcost.split(':');
       if (id !== RS.cur || !tk.cost[pk]) return;
-      const t = `${Math.min(sp[pk] || 0, tk.cost[pk])} / ${tk.cost[pk]}`;
+      const t = '' + Math.min(sp[pk] || 0, tk.cost[pk]);
       if (el2.textContent !== t) el2.textContent = t;
     });
   }
+  body.querySelectorAll('.tnode.up.avail').forEach(nd => {
+    let ok = true;
+    nd.querySelectorAll('[data-need]').forEach(sp2 => {
+      const [k, n] = sp2.dataset.need.split(':');
+      const lack = F.invCount(S, k) < +n;
+      sp2.classList.toggle('lack', lack);
+      if (lack) ok = false;
+    });
+    nd.classList.toggle('can', ok);
+  });
 }
 
 /* ==================================================================== */
@@ -1896,12 +2058,14 @@ function renderHowTo(){
   <b>accumulators</b>: grid batteries that bank surplus by day and feed it back through the dark.
   <b>Lamps</b> (cheap, with Electrification) light the night in a warm circle around your factory floors.</p>
 
-  <div class="selSection">Research</div>
+  <div class="selSection">The tech tree</div>
   <p class="howP">From tier 3 the <b>laboratory</b> is the road onward: milestones hand out only the
-  most basic machines, and <b>everything else lives in the tech tree</b> — coal-fired machinery, the
-  power grid, every Mk2+ machine, faster belts, depots and tunnels. Craft ${ic('pack1')}
+  most basic machines, and <b>everything else lives in the tech tree</b> (${kb('T')}) — coal-fired
+  machinery, the power grid, every Mk2+ machine, faster belts, depots and tunnels. The tree holds two
+  kinds of node: <b>upgrade ranks</b> (amber) are bought instantly with parts from stock, while
+  <b>technologies</b> (violet) are lab projects — craft ${ic('pack1')}
   <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
-  belt them into any side of a lab, and pick a project in the <b>Research</b> tab (${kb('U')}).
+  belt them into any side of a lab, and click a node to set the project.
   Branches include ${ic('ironDust')} ore-doubling <b>crushers</b>, the 240-item
   <b>vault</b>, area-powering <b>substations</b>, <b>grav-belts</b>, <b>solar towers</b>.
   Later milestones unlock richer packs (${ic('pack2')} volt, ${ic('pack3')} polymer,
@@ -1926,9 +2090,9 @@ function renderHowTo(){
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
   researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
-  feels polite. The <b>Foundry panel</b> (${kb('U')}) sells permanent upgrades — belt speed, drill
-  speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk versions to
-  rebuild with. Check <b>Stats</b> to see production per minute — each item now has a 5-minute
+  feels polite. The <b>tech tree</b> (${kb('T')}) sells permanent upgrade ranks — belt speed, drill
+  speed, furnace heat, grid output — paid in parts on the spot, and each machine family has faster Mk
+  versions to research and rebuild with. Check <b>Stats</b> to see production per minute — each item now has a 5-minute
   <b>graph</b>, so a flatlining line points straight at your bottleneck. The <b>minimap</b>
   (bottom-left) shows the whole world — click or drag on it to fly anywhere — and the <b>alert
   chips</b> above it count machines that are out of fuel, unpowered or jammed; click a chip to jump
@@ -1949,6 +2113,7 @@ function renderHowTo(){
     <tr><td>Quick-select from build bar</td><td>${kb('1')}–${kb('9')}</td></tr>
     <tr><td>Inventory</td><td>${kb('E')}</td></tr>
     <tr><td>Foundry panel</td><td>${kb('U')}</td></tr>
+    <tr><td>Tech tree</td><td>${kb('T')}</td></tr>
     <tr><td>This guide</td><td>${kb('H')}</td></tr>
     <tr><td>Centre on the Core</td><td>${kb('F')}</td></tr>
     <tr><td>Mute</td><td>${kb('M')}</td></tr>
@@ -2289,8 +2454,8 @@ function drainEvents(){
         toast(`<b style="color:#c07ae8">⚗ ${ev.name} — researched</b>` +
           (names.length ? `<br>unlocked: ${[...new Set(names)].join(', ')}` : ''), '', 9000);
         buildBar();
-        UI._resSig = null;
-        if (UI.bigTab === 'research') renderBig();
+        UI._treeSig = null;
+        if (UI.bigTab === 'tree') renderBig();
         UI.save();
         break;
       }
@@ -2434,7 +2599,7 @@ UI.update = function(dt){
     refreshAlerts();
     if (UI.selection) refreshSelPanel();
     buildBarAfford();
-    if (UI.bigTab === 'stats' || UI.bigTab === 'inventory' || UI.bigTab === 'research') renderBig();
+    if (UI.bigTab === 'stats' || UI.bigTab === 'inventory' || UI.bigTab === 'tree') renderBig();
     refreshTechChip();
     updateArrow();
   }
