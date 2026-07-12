@@ -186,7 +186,7 @@ const B = F.BUILDINGS = {
   smelter4:{ name:'Sunforge',        cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:7,   power:40, cost:{chromsteel:40, advCircuit:20, brick:50}, tech:'sunforge',
              desc:'A caged fragment of dawn. The final word in smelting.' },
   alloy:   { name:'Alloy furnace',   cat:'pro', kind:'machine', fam:'alloy', w:2, h:2, speed:1.6, power:10, cost:{brick:20, plate:18, wire:14}, unlock:4,
-             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — grid-fed, or stoked with coal once researched.' },
+             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — run it off a grid, or drop coal straight into its hopper.' },
   asm1:    { name:'Fabricator',      cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:1,   fuel:true, cost:{brick:8, ironIngot:8}, unlock:2,
              desc:'Crafts parts from a chosen recipe. Burns coal.' },
   asm2:    { name:'Assembler',       cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:2.2, power:10, cost:{steel:12, gear:16, circuit:8}, tech:'poweredAssembly',
@@ -265,13 +265,13 @@ F.MILESTONES = [
     req:{ gear:30, wire:40 },
     unlocks:['r:glass'],
     grant:{ plate:10, coal:20 },
-    hint:'Fabricators craft a chosen recipe — click one to set it. The tree branches here: <b>Coal stokers</b> lets electric machines burn coal straight from a hopper; <b>Electrification</b> wakes a true grid.' },
+    hint:'Fabricators craft a chosen recipe — click one to set it. From here the tech tree carries everything ahead — and <b>Electrification</b> wakes the power grid.' },
   { id:'m4', name:'Vitreous Earth',
     flavor:'Quartz sleeps in the middle distance. Melt it to glass, fuse it to silicon — the factory must reach outward.',
     req:{ glass:45, plate:90 },
     unlocks:['alloy','r:steel','r:silicon','r:circuit','r:pack2'],
     grant:{ steel:6 },
-    hint:'Quartz deposits lie beyond your starting field. The alloy furnace is electric — put it on a grid, or research Coal stokers and shovel coal straight into it.' },
+    hint:'Quartz deposits lie beyond your starting field. The alloy furnace is electric — put it on a grid, or shovel coal straight into its hopper.' },
   { id:'m5', name:'The First Circuit',
     flavor:'Wire and silicon, etched into thought.',
     req:{ circuit:60, steel:45 },
@@ -324,15 +324,12 @@ F.MILESTONES = [
    effect: engine-level bonus flag (checked in sim) */
 F.TECHS = {
   /* --- the coal age --- */
-  stokers:     { name:'Coal stokers', icon:'coal',
-    desc:'Bolt a firebox onto anything: electric machines, drills and pumpjacks accept coal into a hopper and run at full speed off the flame — no grid needed. They burn their coal before drawing grid power.',
-    cost:{ pack1:5 }, req:[], effect:'stoke' },
   combustion:  { name:'Efficient combustion', icon:'coal',
     desc:'Refined firebox airflow — coal burns 35% longer in every burner machine and generator.',
     cost:{ pack1:8 }, req:[], effect:'burn' },
   coalHoppers: { name:'Coal hoppers', icon:'coal',
     desc:'Triple bunkers: every coal-burning building holds 36 coal instead of 12 — far fewer refuelling runs.',
-    cost:{ pack1:12 }, req:['stokers'], effect:'hopper' },
+    cost:{ pack1:12 }, req:[], effect:'hopper' },
   forcedDraft: { name:'Forced draft', icon:'brick',
     desc:'Superheated fireboxes: every coal-fired building works 30% faster — and eats coal 60% faster. Keep the belts black.',
     cost:{ pack1:18 }, req:['coalHoppers'], effect:'draft' },
@@ -358,7 +355,7 @@ F.TECHS = {
   /* --- the electric age --- */
   electrification:{ name:'Electrification', icon:'wire',
     desc:'The grid: burner generators feed power poles, and each pole energises everything around it — no more hauling coal to every machine. Also unlocks lamps to hold back the night.',
-    cost:{ pack1:25 }, req:['stokers'], unlocks:['gen1','pole1','lamp'] },
+    cost:{ pack1:25 }, req:[], unlocks:['gen1','pole1','lamp'] },
   electricDrills:{ name:'Electric drills', icon:'ironOre',
     desc:'A drill with no firebox at all — 2.2× base speed, fed by the grid.',
     cost:{ pack1:12 }, req:['electrification'], unlocks:['miner2'] },
@@ -457,13 +454,13 @@ F.techOf = function(u){
 /* burn-time multiplier from the combustion tech */
 F.burnMul = S => (S.research && S.research.done.combustion) ? 1.35 : 1;
 
-/* ---- coal-fired machinery (the stoker line) ----
-   stokers: electric machines/drills/pumpjacks accept coal and run off it
-   (coal burns BEFORE grid power is drawn). One coal direct-fired is worth
-   STOKE_PS P·s of work — a generator gets 180 P·s from the same coal, so
-   electrifying eventually pays. */
+/* ---- coal-fired machinery (innate) ----
+   Electric machines, drills and pumpjacks can always accept coal and run
+   off it, burning their hopper BEFORE they draw grid power. One coal
+   direct-fired is worth STOKE_PS P·s of work — a generator gets 180 P·s
+   from the same coal, so building out a grid still pays off. */
 F.STOKE_PS = 60;
-F.stoked   = S => !!(S.research && S.research.done.stokers);
+F.stoked   = () => true;
 F.stokable = e => e.kind === 'miner' || e.kind === 'machine' || e.kind === 'pump';
 F.fuelCap  = S => (S.research && S.research.done.coalHoppers) ? 36 : F.FUEL_CAP;
 F.draftSpd  = S => (S.research && S.research.done.forcedDraft) ? 1.3 : 1;
@@ -539,9 +536,9 @@ F.TIPS = {
   firstBelt:    'Belts carry items in the direction of the chevrons. Point a belt INTO a machine or the Core to feed it.',
   firstFuelLow: 'A machine is out of coal — click it and move coal from your pocket into its fuel slot, or belt coal into its side.',
   firstBrownout:'Power demand exceeds supply — everything electric is running slow. Build more generators.',
-  firstUnpowered:'An electric machine has no power pole in range. String poles from a generator to it — or, with <b>Coal stokers</b> researched, drop coal straight into its hopper.',
+  firstUnpowered:'An electric machine has no power pole in range. String poles from a generator to it — or drop coal straight into its hopper to run it off the flame.',
   firstBlocked: 'A machine\'s output is jammed — give it an empty belt to push onto.',
-  firstUpgrade: 'The Tech tree (T) is one map of everything: amber <b>upgrade ranks</b> bought instantly with parts, violet <b>technologies</b> researched by labs. It all grows from the Engine.',
+  firstUpgrade: 'The Tech tree (T) is one map of everything: amber <b>upgrade ranks</b> bought with parts, violet <b>technologies</b> researched by labs. It all grows from the Engine.',
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',
   firstLab:     'Belt science packs into any side of the laboratory, then pick a project in the <b>Tech tree</b> (T) — nearly every machine, belt and generator in the game grows from that tree.',
   firstModule:  'Modules boost the machine they\'re slotted in. Speed costs extra power, efficiency saves it — and a <b>beacon</b> broadcasts its modules to every machine around it.',

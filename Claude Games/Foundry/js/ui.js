@@ -652,16 +652,10 @@ function bindHud(){
 /* BUILD BAR                                                            */
 /* ==================================================================== */
 function catBuildings(cat){
-  // tech-gated buildings appear (locked) once their tech is researchABLE —
-  // an advert for the tree; deeper branches stay hidden until their prereqs land
+  // only what you can actually build — everything still to come lives in the
+  // tech tree (and the milestone list), not as greyed-out ads in the bar
   const S = UI.S;
-  return F.BUILD_ORDER.filter(k => {
-    const d = F.BUILDINGS[k];
-    if (d.cat !== cat) return false;
-    if (d.tech && !(S && (S.unlocked[k] || F.techAvailable(S, d.tech) ||
-        (S.research && S.research.cur === d.tech)))) return false;
-    return true;
-  });
+  return F.BUILD_ORDER.filter(k => F.BUILDINGS[k].cat === cat && S && S.unlocked[k]);
 }
 
 function buildTabs(){
@@ -684,28 +678,18 @@ function buildBar(){
   const S = UI.S;
   const list = catBuildings(UI.activeCat);
   if (!list.length){
-    const note = el('span', 'bname', 'Nothing yet — this age sleeps in the tech tree (U)');
+    const note = el('span', 'bname', 'Nothing here yet — the tech tree (T) opens more');
     note.style.cssText = 'opacity:.55;padding:8px 12px;align-self:center';
     bar.appendChild(note);
   }
   list.forEach((key, i) => {
     const def = F.BUILDINGS[key];
-    const unlocked = !!S.unlocked[key];
-    const b = el('button', 'buildBtn' + (UI.tool === key ? ' on' : '') + (unlocked ? '' : ' locked'));
+    const b = el('button', 'buildBtn' + (UI.tool === key ? ' on' : ''));
     b.dataset.key = key;
-    const ic = R.makeBuildingIcon(key, 34);
     b.appendChild(el('span', 'bkey', String(i + 1)));
-    b.appendChild(ic);
+    b.appendChild(R.makeBuildingIcon(key, 34));
     b.appendChild(el('span', 'bname', def.name));
-    b.addEventListener('click', () => {
-      if (!S.unlocked[key]){
-        A.sfx.error();
-        toast(def.tech ? 'Locked — research <b>' + F.TECHS[def.tech].name + '</b>'
-          : 'Locked — reach <b>' + (F.MILESTONES[def.unlock] ? F.MILESTONES[def.unlock].name : '?') + '</b>', 'warn', 3000);
-        return;
-      }
-      setTool(UI.tool === key ? null : key);
-    });
+    b.addEventListener('click', () => setTool(UI.tool === key ? null : key));
     b.addEventListener('pointerenter', (ev) => showBuildTip(ev, key));
     b.addEventListener('pointerleave', hideTip);
     bar.appendChild(b);
@@ -1093,7 +1077,7 @@ function buildSelPanel(e){
         </div>
       </div>
       <div class="ghostNote">click: pick up all · right-click: half · with a stack in hand, scroll over a box to move one at a time</div>`;
-    if (stokedHere) html += `<div class="ghostNote">Stoked: burns coal from this hopper before drawing on the grid.</div>`;
+    if (stokedHere) html += `<div class="ghostNote">Burns coal from this hopper before drawing on the grid.</div>`;
   }
 
   html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
@@ -1569,8 +1553,8 @@ function fillSparks(body){
 /* ==================================================================== */
 /* TECH TREE TAB                                                        */
 /* One map of everything that grows from the Engine: permanent upgrade  */
-/* ranks (paid instantly in goods) and lab technologies (researched     */
-/* with science packs) hang off a single root as branching lanes.       */
+/* ranks (bought with goods) and lab technologies (researched with      */
+/* science packs) hang off a single root as branching lanes.            */
 /* Rebuilt only on structural change (project switched / tech done /    */
 /* rank bought / new packs); progress + affordability are poked in      */
 /* place so nodes stay hoverable while labs chew through packs.         */
@@ -1585,8 +1569,8 @@ const TREE_UP_ICON = { logistics:'gear', extraction:'ironOre', metallurgy:'ironI
    (skip a column so a child lines up with its era). */
 const TREE_LANES = [
   ['The coal age',
-    [1, 'stokers', 'coalHoppers', 'forcedDraft'],
-    [1, 'combustion']],
+    [1, 'combustion'],
+    [1, 'coalHoppers', 'forcedDraft']],
   ['The grid',
     [2, 'electrification', 'pylons', 'substations'],
     [3, 'solarPower', 'solarTowers', 'helios'],
@@ -1711,7 +1695,7 @@ function showTreeTip(ev, key){
         const hv = F.invCount(S, k);
         return `<span class="${hv < n ? 'lack' : ''}">${iconImg(k, 14)} ${n} <span class="have">(${F.fmt(hv)})</span></span>`;
       }).join('') + `</div>
-      <div class="tt-stat">${r < have ? 'owned ✓' : r === have ? 'click to buy — instant, paid from stock' : `buy ${up.name} ${TREE_ROMAN[have]} first`}</div>`;
+      <div class="tt-stat">${r < have ? 'owned ✓' : r === have ? 'click to buy' : `buy ${up.name} ${TREE_ROMAN[have]} first`}</div>`;
   } else {
     const tk = F.TECHS[key], RS = S.research;
     html = `<div class="tt-name">${tk.name} <span class="tt-kind tkRes">research</span></div>
@@ -1769,8 +1753,8 @@ function renderTreeTab(body){
         <button class="resStop" data-stop>Pause project</button>`;
     } else {
       h += `<div class="ghostNote">Everything grows from the Engine. <b>Amber nodes</b> are upgrade ranks —
-        click to buy on the spot with parts. <b>Violet nodes</b> are technologies — click one to make it the
-        lab project, then belt science packs into <b>laboratories</b>. Switching projects never loses progress.</div>`;
+        click to buy with parts. <b>Violet nodes</b> are technologies — click one to make it the lab project,
+        then belt science packs into <b>laboratories</b>. Switching projects keeps their progress.</div>`;
     }
     h += '</div>';
     /* edges */
@@ -2038,17 +2022,16 @@ function renderHowTo(){
   contents; <b>fabricators and assemblers</b> craft one chosen recipe — click the machine and pick it.
   The <b>alloy furnace</b> fuses two inputs: iron ingots + coal → ${ic('steel')} steel,
   quartz + coal → ${ic('silicon')} silicon. Mk1 machines burn coal; electric machines are far
-  faster but need power — from the grid, or straight from a <b>coal hopper</b> once
-  <b>Coal stokers</b> is researched. A machine with a blinking <b>amber dot</b> is out of fuel;
+  faster but need power — either from the grid, or by dropping coal straight into their hopper,
+  which they burn before touching the grid. A machine with a blinking <b>amber dot</b> is out of fuel;
   a stalled machine usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
 
   <div class="selSection">Power</div>
-  <p class="howP">Every electric machine starts life unpowered — the tech tree offers two roads.
-  <b>Coal stokers</b> (cheap, early) bolts a firebox onto electric machines, drills and pumpjacks:
-  drop or belt coal in and they run at full speed, burning their hopper <b>before</b> touching any
-  grid. <b>Coal hoppers</b> triples the bunker and <b>Forced draft</b> makes every coal-fired
-  building 30% faster — while eating coal 60% faster. <b>Electrification</b> (deeper in the tree)
-  wakes the true grid: generators make power but <b>poles deliver it</b>. A ${ic('wire')}
+  <p class="howP">Electric machines run two ways. The simplest: drop or belt coal into any of them —
+  drills, furnaces, pumpjacks — and they burn their own hopper, at full speed, with no grid at all.
+  <b>Coal hoppers</b> triples that bunker and <b>Forced draft</b> makes every coal-fired building
+  30% faster while eating coal 60% faster. The other road is <b>Electrification</b>: it
+  wakes the true grid, where generators make power but <b>poles deliver it</b>. A ${ic('wire')}
   <b>power pole</b> links to poles within 7 tiles (wires draw automatically) and energises the 5×5
   area around it — generators must stand in a pole's area too. Separate pole clusters are
   <b>separate grids</b>, each with its own supply and demand. A blinking <b>red bolt</b> means no
@@ -2075,7 +2058,7 @@ function renderHowTo(){
   <p class="howP">From tier 3 the <b>laboratory</b> is the road onward: milestones hand out only the
   most basic machines, and <b>everything else lives in the tech tree</b> (${kb('T')}) — coal-fired
   machinery, the power grid, every Mk2+ machine, faster belts, depots and tunnels. The tree holds two
-  kinds of node: <b>upgrade ranks</b> (amber) are bought instantly with parts from stock, while
+  kinds of node: <b>upgrade ranks</b> (amber) are bought with parts, while
   <b>technologies</b> (violet) are lab projects — craft ${ic('pack1')}
   <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
   belt them into any side of a lab, and click a node to set the project.
@@ -2102,12 +2085,12 @@ function renderHowTo(){
   titanium and oil at the world's edge</b> — every age pushes your logistics farther out.
   Dark <b>lakes</b> lie between you and the good deposits: nothing builds on open water until you
   research <b>Pontoon platforms</b>, then drag a line of decking across and belt right over it —
-  platforms carry machines and power poles too (tunnels dive underneath, and drones simply fly).
+  platforms carry machines and power poles too (tunnels dive underneath, and drones fly straight over).
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
   researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
   feels polite. The <b>tech tree</b> (${kb('T')}) sells permanent upgrade ranks — belt speed, drill
-  speed, furnace heat, grid output — paid in parts on the spot, and each machine family has faster Mk
+  speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk
   versions to research and rebuild with. Check <b>Stats</b> to see production per minute — each item now has a 5-minute
   <b>graph</b>, so a flatlining line points straight at your bottleneck. The <b>minimap</b>
   (bottom-left) shows the whole world — click or drag on it to fly anywhere — and the <b>alert
