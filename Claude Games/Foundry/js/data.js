@@ -409,6 +409,16 @@ F.MILESTONES = [
     }
     return false;
   };
+  /* a belt pointed into any tile of e's footprint, carrying coal right now
+     (latching makes the moment count, however briefly the coal rides) */
+  const coalBeltInto = (S, e) => {
+    for (let j = 0; j < e.h; j++) for (let i = 0; i < e.w; i++)
+      for (let d = 0; d < 4; d++){
+        const b = F.entAt(S, e.x + i - F.DX[d], e.y + j - F.DY[d]);
+        if (b && b.kind === 'belt' && b.dir === d && b.item === 'coal') return true;
+      }
+    return false;
+  };
 
   F.GUIDES = {
     m0: [
@@ -444,6 +454,8 @@ F.MILESTONES = [
     m2: [
       { t:'Place a <b>Splitter</b> where one ore line must feed two kilns', pulse:'splitter',
         done: S => any(S, e => e.kind === 'splitter') },
+      { t:'Belt <b>coal</b> into your kilns\' sides — hand-feeding three fires doesn\'t scale', arrow:'ent:smelter',
+        done: S => any(S, e => fam(e, 'smelter') && coalBeltInto(S, e)) },
       { t:'Start a <b>copper</b> chain: drill → kiln → Core',
         done: S => (S.msProg.copperIngot || 0) > 0 },
       { t:'Smelt <b>stone into brick</b>',
