@@ -606,6 +606,12 @@ function bindHud(){
     $('objCard').classList.toggle('collapsed');
     A.sfx.click();
   });
+  // requirement rows are clickable "how do I make this?" links (delegated —
+  // the card body is rebuilt whenever counts change)
+  $('objBody').addEventListener('click', (ev) => {
+    const row = ev.target.closest && ev.target.closest('[data-goitem]');
+    if (row){ A.sfx.click(); jumpToRecipe(row.dataset.goitem); }
+  });
   $('btnFoundry').addEventListener('click', () => toggleBig('milestones'));
   $('btnInv').addEventListener('click', () => toggleBig('inventory'));
   $('techChip').addEventListener('click', () => { toggleBig('tree'); });
@@ -1275,6 +1281,26 @@ function recipeSection(S, e, def){
 /* ==================================================================== */
 /* OBJECTIVE CARD                                                       */
 /* ==================================================================== */
+/* Core deliveries per minute over the last-minute window (sim dbuckets) */
+function deliveryRate(k){
+  const db = UI.S.stats.dbuckets;
+  if (!db || !db.length) return 0;
+  let n = 0;
+  for (const b of db) n += b[k] || 0;
+  return n / (db.length * 5 / 60);
+}
+
+/* objective requirement clicked → open the recipe book at that item */
+function jumpToRecipe(item){
+  openBig('compendium');
+  const row = $('bigBody').querySelector(`[data-rk="${item}"]`);
+  if (row){
+    row.scrollIntoView({ block: 'center' });
+    row.classList.add('flash');
+    setTimeout(() => row.classList.remove('flash'), 2400);
+  }
+}
+
 function refreshObjective(){
   const S = UI.S;
   if (!S) return;
@@ -1316,15 +1342,53 @@ function refreshObjective(){
   for (const k in req){
     const cur = Math.min(S.msProg[k] || 0, req[k]);
     const done = cur >= req[k];
-    html += `<div class="objReq${done ? ' done' : ''}">
+    // live delivery rate → a quiet ETA, so long tiers read as progress not grind
+    let rateTxt = '';
+    if (!done && !ms.handMine){
+      const r = deliveryRate(k);
+      if (r > 0){
+        const mins = (req[k] - cur) / r;
+        rateTxt = ` · ${r < 10 ? r.toFixed(1) : Math.round(r)}/min` +
+          (mins < 90 ? ` · ~${mins < 1 ? '<1' : Math.round(mins)}m` : '');
+      }
+    }
+    html += `<div class="objReq${done ? ' done' : ''}" data-goitem="${k}" title="How is this made? Click to open its recipe.">
       <img src="${R.itemIcon(k, 36).toDataURL()}" width="18" height="18">
       <div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between">
           <span class="objReqName">${F.ITEMS[k].name}${ms.handMine ? ' (by hand)' : ''}</span>
-          <span class="objReqNum">${cur} / ${req[k]}</span>
+          <span class="objReqNum">${cur} / ${req[k]}<span class="objRate">${rateTxt}</span></span>
         </div>
         <div class="objBarOuter"><div class="objBarFill" style="width:${(cur / req[k] * 100).toFixed(1)}%"></div></div>
       </div></div>`;
+  }
+  if (ms.reqResearch){
+    const got = Math.min(Object.keys(S.research.done).length, ms.reqResearch);
+    const done = got >= ms.reqResearch;
+    html += `<div class="objReq${done ? ' done' : ''}">
+      <span style="width:18px;text-align:center;flex:none">⚗</span>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between">
+          <span class="objReqName">Any technology researched</span>
+          <span class="objReqNum">${got} / ${ms.reqResearch}</span>
+        </div>
+        <div class="objBarOuter"><div class="objBarFill" style="width:${(got / ms.reqResearch * 100).toFixed(1)}%"></div></div>
+      </div></div>`;
+  }
+  // the guide: a live checklist for this tier (early tiers + later firsts)
+  const steps = F.GUIDES[ms.id];
+  if (steps){
+    const bits = S.flags['g_' + ms.id] || 0;
+    if (steps.some((st, i) => !(bits & (1 << i)))){
+      html += '<div class="objGuide">';
+      steps.forEach((st, i) => {
+        const done = !!(bits & (1 << i));
+        const cur = i === UI.guideCur;
+        html += `<div class="gstep${done ? ' done' : cur ? ' cur' : ''}">
+          <span class="gtick">${done ? '✓' : cur ? '▸' : '·'}</span><span>${st.t}</span></div>`;
+      });
+      html += '</div>';
+    }
   }
   if (ms.hint) html += `<div class="objHint">${ms.hint}</div>`;
   const grants = Object.entries(ms.grant || {});
@@ -1348,8 +1412,20 @@ function refreshTechChip(){
   if (!chip) return;
   const RS = S && S.research;
   if (!S || !RS || !RS.cur){
-    chip.classList.add('hidden');
-    UI._chipSig = '';
+    // no project — but if the guide is pointing at the tree, surface the
+    // chip in an idle state so there's a visible thing to click
+    if (S && UI.pulseKey === 'tree'){
+      chip.classList.remove('hidden');
+      chip.style.top = ($('objCard').getBoundingClientRect().bottom + 8) + 'px';
+      if (UI._chipSig !== 'idle'){
+        UI._chipSig = 'idle';
+        chip.querySelector('span').textContent = '⚗ Tech tree (T) — pick a project';
+        chip.querySelector('#techChipFill').style.width = '0%';
+      }
+    } else {
+      chip.classList.add('hidden');
+      UI._chipSig = '';
+    }
     return;
   }
   const tk = F.TECHS[RS.cur];
@@ -1653,8 +1729,23 @@ function treeEdgePath(s, d){
   return `M ${sx} ${sy} C ${sx + 52} ${sy}, ${tx - 52} ${ty}, ${tx} ${ty}`;
 }
 
+/* fog of war: a tech draws in full only when every science pack it costs is
+   craftable AND its prereqs are at most one step from done (frontier + 1).
+   Anything deeper is a dim, nameless silhouette — the canopy keeps its
+   shape, but the map grows with the player. */
+function techVisible(S, id){
+  const tk = F.TECHS[id], RS = S.research;
+  if (RS.done[id] || RS.cur === id) return true;
+  for (const pk in tk.cost) if (!F.recipeUnlocked(S, pk)) return false;
+  return (tk.req || []).every(r =>
+    RS.done[r] || (F.TECHS[r].req || []).every(rr => RS.done[rr]));
+}
+
 function treeTechNode(S, n){
   const id = n.tech, tk = F.TECHS[id], RS = S.research;
+  if (!techVisible(S, id))
+    return `<div class="tnode tech tsil" style="left:${n.x}px;top:${n.y}px">
+      <div class="tnTop"><span class="tnName">?</span></div></div>`;
   const done = !!RS.done[id], cur = RS.cur === id;
   const reqMet = (tk.req || []).every(r => RS.done[r]);
   const sp = RS.prog[id] || {};
@@ -1763,7 +1854,9 @@ function renderTreeTab(body){
       const s = L.nodes[a], d = L.nodes[b];
       const srcOn = s.root ? true : s.tech ? !!RS.done[s.tech] : (S.upgrades[s.up] || 0) > s.rank;
       const dstOn = d.tech ? !!RS.done[d.tech] : (S.upgrades[d.up] || 0) > d.rank;
-      const cls = dstOn ? 'eOwn' : d.tech && RS.cur === d.tech ? 'eCur' : srcOn ? 'eOpen' : 'eLock';
+      const fogged = d.tech && !techVisible(S, d.tech);
+      const cls = fogged ? 'eLock'
+        : dstOn ? 'eOwn' : d.tech && RS.cur === d.tech ? 'eCur' : srcOn ? 'eOpen' : 'eLock';
       sv += `<path class="${cls}" d="${treeEdgePath(s, d)}"/>`;
     }
     sv += '</svg>';
@@ -1899,7 +1992,7 @@ function renderRecipeBook(S){
     ['chromite', 'Teal crystal in the middle and far rings. Alloys into chrome — the metal of the Sunforge.'],
   ];
   for (const [id, note] of RAW){
-    h += `<div class="compRow">
+    h += `<div class="compRow" data-rk="${id}">
       <img src="${R.itemIcon(id, 52).toDataURL()}" width="26" height="26">
       <div class="compMid">
         <div class="compName">${F.ITEMS[id].name}${needed[id] ? neededBadge() : ''}</div>
@@ -1930,7 +2023,7 @@ function renderRecipeBook(S){
       const locked = !F.recipeUnlocked(S, k);
       const msu = locked ? unlockMsOf(k) : null;
       const tkid = locked && !msu ? F.techOf('r:' + k) : null;
-      group += `<div class="compRow${locked ? ' compLocked' : ''}">
+      group += `<div class="compRow${locked ? ' compLocked' : ''}" data-rk="${r.out}">
         <img src="${R.itemIcon(r.out, 52).toDataURL()}" width="26" height="26">
         <div class="compMid">
           <div class="compName">${F.ITEMS[r.out].name}${r.outN > 1 ? ' ×' + r.outN : ''}${needed[r.out] ? neededBadge() : ''}${locked && msu ? `<span class="lockBadge">unlocks: ${msu.name}</span>` : tkid ? `<span class="lockBadge">research: ${F.TECHS[tkid].name}</span>` : ''}</div>
@@ -1992,12 +2085,16 @@ function renderHowTo(){
   becomes <b>construction material</b> in your inventory — deliveries literally fund every building,
   upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
   that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
-  Complete all twelve tiers to reignite the World Engine — and watch the land: <b>every finished tier
+  Complete all eighteen tiers to reignite the World Engine — and watch the land: <b>every finished tier
   heals a ring of the ash-waste around the Core back to green</b>. Even after Ignition the game
   goes on: the woken Engine asks for endless <b>tributes</b> — escalating baskets of goods, each
   one granting <b>+3% machine speed</b> (up to +30%).</p>
 
   <div class="selSection">First steps</div>
+  <p class="howP">The early tiers walk you through everything: the objective card (top-left) carries a
+  <b>guide checklist</b> that ticks itself off as you play, a gold arrow points at whatever the current
+  step needs, and clicking any required item opens its recipe. If you already know the genre, ignore
+  it all — the steps complete themselves in any order.</p>
   <p class="howP"><b>Hold left-click on an ore deposit</b> to hand-mine it — slow, but always available,
   and deposits never run dry. Use your first ore to place a <b>burner drill</b> on iron, feed it coal
   (click it and move coal from your pocket into its fuel slot — or belt coal into its side), and run a
@@ -2055,9 +2152,10 @@ function renderHowTo(){
   <b>Lamps</b> (cheap, with Electrification) light the night in a warm circle around your factory floors.</p>
 
   <div class="selSection">The tech tree</div>
-  <p class="howP">From tier 3 the <b>laboratory</b> is the road onward: milestones hand out only the
-  most basic machines, and <b>everything else lives in the tech tree</b> (${kb('T')}) — coal-fired
-  machinery, the power grid, every Mk2+ machine, faster belts, depots and tunnels. The tree holds two
+  <p class="howP">Once the <b>laboratory</b> arrives, it is the road onward: milestones hand out only the
+  most basic machines, and <b>everything else lives in the tech tree</b> (${kb('T')}) — the power grid,
+  every Mk2+ machine, faster belts, depots and tunnels. Distant branches show as dim outlines and
+  <b>draw in as you approach them</b>; the map grows with you. The tree holds two
   kinds of node: <b>upgrade ranks</b> (amber) are bought with parts, while
   <b>technologies</b> (violet) are lab projects — craft ${ic('pack1')}
   <b>science packs</b> in a fabricator (cog science = gear + copper ingot),
@@ -2222,6 +2320,7 @@ function refreshAlerts(){
     }
   }
   UI._alerts = { fuel, power, jam };
+  updateCallout(S, { fuel, power, jam });
   const sig = fuel.length + '|' + power.length + '|' + jam.length;
   if (UI._alertSig === sig) return;
   UI._alertSig = sig;
@@ -2232,6 +2331,36 @@ function refreshAlerts(){
   bar.innerHTML = h;
   bar.querySelectorAll('[data-alert]').forEach(b =>
     b.addEventListener('click', () => jumpAlert(b.dataset.alert)));
+}
+
+/* The first time each problem kind ever happens, anchor a label to the
+   troubled machine itself — a toast can be missed; this stays until the
+   player actually fixes it, then that kind never anchors again. */
+const CALLOUT_TEXT = {
+  fuel:  'out of coal — click me, add fuel',
+  power: 'no power — string poles here, or drop in coal',
+  jam:   'output jammed — give me an empty belt',
+};
+function updateCallout(S, lists){
+  const co = UI.callout;
+  if (co){
+    // resolved (or removed)? retire this kind for good
+    const still = lists[co.kind].some(e => e.id === co.entId);
+    if (!still){
+      S.flags['co_' + co.kind] = true;
+      UI.callout = null;
+    } else {
+      const e = S.ents.find(en => en.id === co.entId);
+      if (e){ co.x = e.x + e.w / 2; co.y = e.y; }
+    }
+    return;
+  }
+  for (const kind of ['fuel', 'power', 'jam']){
+    if (S.flags['co_' + kind] || !lists[kind].length) continue;
+    const e = lists[kind][0];
+    UI.callout = { kind, entId: e.id, x: e.x + e.w / 2, y: e.y, text: CALLOUT_TEXT[kind] };
+    return;
+  }
 }
 
 function jumpAlert(type){
@@ -2427,17 +2556,19 @@ function drainEvents(){
       case 'milestone': {
         A.sfx.milestone();
         A.sfx.engine();
+        const done = F.MILESTONES[ev.index];
         const next = F.MILESTONES[S.msIndex];
         const whisper = F.ENGINE_LINES[ev.index] || '';
         toast(`<b style="color:var(--accent)">◆ ${ev.name} complete</b>` +
+          (done && done.recap ? `<br>${done.recap}` : '') +
           (next ? `<br>Next: <b>${next.name}</b>` : '') +
           (whisper ? `<br><i style="color:#d9b8ef">${whisper}</i>` : '') +
-          `<br><span style="color:#8cdc96">The ash recedes — the land around the Core remembers green.</span>`, '', 8000);
+          `<br><span style="color:#8cdc96">The ash recedes — the land around the Core remembers green.</span>`, '', 9000);
         R.buildGround(S);            // the world heals a ring further
         R.healPulse = { t: 0 };
         refreshObjective();
         buildBar();
-        if (S.msIndex === 3) tipOnce('firstUpgrade');
+        if (next && next.id === 'mLab') tipOnce('firstUpgrade');   // the tree just opened
         UI.save();
         break;
       }
@@ -2504,25 +2635,78 @@ function startWin(){
 }
 
 /* ==================================================================== */
-/* TUTORIAL ARROW targets                                               */
+/* GUIDED STEPS + TUTORIAL ARROW                                        */
+/* Latches each guide step's predicate into S.flags (bitmask per tier)  */
+/* so transient conditions count once seen; the first open step drives  */
+/* the world arrow and any build-bar pulse.                             */
 /* ==================================================================== */
+function guideTick(){
+  const S = UI.S;
+  const ms = S && F.MILESTONES[S.msIndex];
+  UI.guideCur = -1;
+  UI.pulseKey = null;
+  const steps = ms && F.GUIDES[ms.id];
+  if (!steps) return;
+  const key = 'g_' + ms.id;
+  let bits = S.flags[key] || 0;
+  let ticked = false;
+  for (let i = 0; i < steps.length; i++){
+    if (bits & (1 << i)) continue;
+    let d = false;
+    try { d = !!steps[i].done(S); } catch (err) {}
+    if (d){ bits |= (1 << i); ticked = true; }
+  }
+  if (bits !== (S.flags[key] || 0)){
+    S.flags[key] = bits;
+    if (ticked) A.sfx.click();   // one tick even if several steps latch at once
+  }
+  for (let i = 0; i < steps.length; i++){
+    if (!(bits & (1 << i))){
+      UI.guideCur = i;
+      UI.pulseKey = steps[i].pulse || null;
+      return;
+    }
+  }
+}
+
+/* resolve the current guide step's arrow spec to a world point */
+function guideArrow(){
+  const S = UI.S;
+  const ms = F.MILESTONES[S.msIndex];
+  const steps = ms && F.GUIDES[ms.id];
+  if (!steps || UI.guideCur < 0) return null;
+  const spec = steps[UI.guideCur].arrow;
+  if (!spec) return null;
+  if (spec === 'core') return { x: S.core.x + S.core.w / 2, y: S.core.y };
+  if (spec.startsWith('ore:')) return nearestOre(+spec.slice(4));
+  if (spec.startsWith('ent:')){
+    const fam = (e, f) => e.kind === 'machine' && F.BUILDINGS[e.key].fam === f;
+    const match = {
+      miner:     e => e.kind === 'miner',
+      ironMiner: e => e.kind === 'miner' && S.oreType[e.y * S.w + e.x] === 1,
+      smelter:   e => fam(e, 'smelter'),
+      asm:       e => fam(e, 'asm'),
+      alloy:     e => fam(e, 'alloy'),
+      lab:       e => e.kind === 'lab',
+    }[spec.slice(4)];
+    const e = match && S.ents.find(match);
+    if (e) return { x: e.x + e.w / 2, y: e.y + e.h / 2 };
+  }
+  return null;
+}
+
 function updateArrow(){
   const S = UI.S;
   UI.arrow = null;
-  if (S.msIndex > 1 || S.won) return;
+  if (S.won) return;
+  // the guide knows best; otherwise fall back to the old tier-0 pointers
+  const g = guideArrow();
+  if (g){ UI.arrow = g; return; }
+  if (S.msIndex > 1) return;
   const ms = F.MILESTONES[S.msIndex];
-  if (S.msIndex === 0){
-    // point at the nearest needed ore
+  if (S.msIndex === 0 && ms.handMine){
     const need = Object.keys(ms.handMine).find(k => (S.msProg[k] || 0) < ms.handMine[k]);
-    if (!need) return;
-    UI.arrow = nearestOre(F.oreTypeByItem[need]);
-  } else if (S.msIndex === 1){
-    // until a miner exists, point at iron; then at the core if nothing delivered yet
-    const hasMiner = S.ents.some(e => e.kind === 'miner');
-    if (!hasMiner) UI.arrow = nearestOre(1);
-    else if (!Object.keys(S.delivered).length){
-      UI.arrow = { x: S.core.x + S.core.w / 2, y: S.core.y };
-    }
+    if (need) UI.arrow = nearestOre(F.oreTypeByItem[need]);
   }
 }
 function nearestOre(type){
@@ -2593,6 +2777,7 @@ UI.update = function(dt){
   UI.uiT += dt;
   if (UI.uiT >= .25){
     UI.uiT = 0;
+    guideTick();
     refreshObjective();
     refreshPower();
     refreshAlerts();
@@ -2601,6 +2786,10 @@ UI.update = function(dt){
     if (UI.bigTab === 'stats' || UI.bigTab === 'inventory' || UI.bigTab === 'tree') renderBig();
     refreshTechChip();
     updateArrow();
+    // pulse the build-bar button (or tech chip) the current guide step points at
+    for (const b of $('buildBar').children)
+      if (b.classList) b.classList.toggle('gpulse', !!b.dataset && b.dataset.key === UI.pulseKey);
+    $('techChip').classList.toggle('gpulse', UI.pulseKey === 'tree');
   }
 
   /* minimap at ~8 Hz */
@@ -2651,6 +2840,7 @@ UI.viewState = function(){
     hover: (UI.mode || UI.holdStack) ? null : UI.hover,
     selection: UI.selection,
     arrow: UI.arrow,
+    callout: UI.callout,
     beltPath: null,
   };
 };

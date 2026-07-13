@@ -575,6 +575,9 @@ function machineAccept(S, m, item){
 function deliverToCore(S, item){
   F.invAdd(S, item, 1);
   S.delivered[item] = (S.delivered[item] || 0) + 1;
+  const sd = S.stats;
+  if (!sd.dAcc) sd.dAcc = {};
+  sd.dAcc[item] = (sd.dAcc[item] || 0) + 1;   // feeds the objective's per-minute rate
   const ms = F.MILESTONES[S.msIndex];
   if (ms && ms.req && ms.req[item] && (S.msProg[item] || 0) < ms.req[item]){
     S.msProg[item] = (S.msProg[item] || 0) + 1;
@@ -834,6 +837,10 @@ F.tick = function(S, dt){
     st.buckets.push(st.bucketAcc);
     if (st.buckets.length > 60) st.buckets.shift(); // 5-minute window (feeds the stats graphs)
     st.bucketAcc = {};
+    if (!st.dbuckets) st.dbuckets = [];
+    st.dbuckets.push(st.dAcc || {});                // Core deliveries, same cadence
+    if (st.dbuckets.length > 12) st.dbuckets.shift(); // only the last minute matters
+    st.dAcc = {};
   }
 
   /* ---- milestones ---- */
@@ -1062,6 +1069,7 @@ function completeResearch(S){
   delete RS.prog[id];
   RS.resv = {};
   if (tk.unlocks) for (const u of tk.unlocks) S.unlocked[u] = true;
+  S.msDirty = true;   // a tier may be waiting on completed research
   F.emit(S, { type:'research', id, name: tk.name });
 }
 
@@ -1329,6 +1337,8 @@ function checkMilestone(S){
   if (!ms) return;
   const req = ms.req || ms.handMine;
   for (const k in req) if ((S.msProg[k] || 0) < req[k]) return;
+  // some tiers also demand completed research (The Laboratory)
+  if (ms.reqResearch && Object.keys(S.research.done).length < ms.reqResearch) return;
   // complete!
   for (const u of ms.unlocks) S.unlocked[u] = true;
   for (const k in ms.grant) F.invAdd(S, k, ms.grant[k]);

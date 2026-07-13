@@ -238,83 +238,270 @@ F.CATS = [
 ];
 
 /* ================= MILESTONES =================
-   The spine. Tiers unlock only the most basic buildings + the spine recipes;
-   everything else is researched in the tech tree. IDs are stable keys — saves
-   store the id of the tier in progress, so inserting tiers is safe. */
+   The spine — eighteen tiers, one new idea at a time, each followed by
+   room to practise it. Tiers unlock only the most basic buildings + the
+   spine recipes; everything else is researched in the tech tree.
+   IDs are stable keys — saves store the id of the tier in progress, so
+   inserting tiers is safe. reqResearch: also requires N completed techs.
+   recap: the one-line lesson shown when the tier completes. */
 F.MILESTONES = [
   { id:'m0', name:'Strike the Earth',
     flavor:'The Core is dark. Everything begins with your own two hands: tear iron and stone from the ground.',
     handMine:{ ironOre:10, stone:6 },
     unlocks:['miner1','belt1'],
     grant:{ ironOre:20, stone:16, coal:10 },
-    hint:'Hold left-click on an ore deposit to hand-mine it.' },
-  { id:'m1', name:'The First Vein',
-    flavor:'Machines dig so you don\'t have to. Feed the Core by conveyor — only belted deliveries count.',
-    req:{ ironOre:25 },
+    hint:'Hold left-click on an ore deposit to hand-mine it.',
+    recap:'You can tear what you need from the ground — but hands are slow.' },
+  { id:'mFire', name:'First Fire',
+    flavor:'One machine, one flame, one line of rollers. This is the whole game — everything after is more of it.',
+    req:{ ironOre:15 },
+    unlocks:[],
+    grant:{ coal:15, ironOre:10 },
+    hint:'Drills do the digging. Place one on iron ore, click it and give it coal, then belt its ore into the Core.',
+    recap:'A drill, its fuel, and a belt to the Core — the loop that builds everything.' },
+  { id:'mVeins', name:'Parallel Veins',
+    flavor:'One line is a start. A factory is many lines that feed each other.',
+    req:{ ironOre:40, coal:25 },
     unlocks:['smelter1','r:ironIngot','r:copperIngot','r:brick'],
-    grant:{ stone:20, coal:15 },
-    hint:'Place a burner drill on iron ore, then run a conveyor from the drill into the Core. Drills burn coal — click one to fuel it.' },
-  { id:'m2', name:'The Ingot Age',
+    grant:{ stone:24, coal:12 },
+    hint:'Put a drill on coal and belt it INTO your iron drill\'s side — machines eat fuel straight off belts. Then send both ores to the Core.',
+    recap:'Machines can feed machines. You never have to shovel coal again.' },
+  { id:'m1', name:'The First Melt',
     flavor:'Raw ore is a promise, not a material. Smelt it.',
-    req:{ ironIngot:25, copperIngot:15 },
-    unlocks:['asm1','splitter','lab','r:gear','r:wire','r:plate','r:pack1'],
-    grant:{ ironIngot:10, brick:8, pack1:4 },
-    hint:'Belt ore into a kiln\'s side — ingots come out the marked front. New: the laboratory. Belt cog science into it and pick a project in the Tech tree (T) — nearly every machine, belt and generator now lives in that tree.' },
+    req:{ ironIngot:25 },
+    unlocks:['splitter'],
+    grant:{ ironIngot:8, stone:12 },
+    hint:'The stone kiln takes ore in any side and pours ingots out its marked front. Belt ore in, coal for its fire, ingots to the Core.',
+    recap:'Ore in the side, ingots out the front. Every machine works this way.' },
+  { id:'m2', name:'The Ingot Age',
+    flavor:'Iron, copper, brick — the three bones of every machine to come.',
+    req:{ ironIngot:40, copperIngot:20, brick:15 },
+    unlocks:['asm1','r:gear'],
+    grant:{ ironIngot:12, copperIngot:8 },
+    hint:'Three smelting lines at once. The new splitter divides one belt between two kilns — place it where a line must fork.',
+    recap:'Parallel smelting, split fairly. Your first real production floor.' },
+  { id:'mCog', name:'Cogwork',
+    flavor:'The first shaped part. From here, the factory makes pieces of itself.',
+    req:{ gear:25 },
+    unlocks:['r:wire','r:plate'],
+    grant:{ copperIngot:10 },
+    hint:'The fabricator crafts one chosen recipe — click it, pick Gear, and feed it iron ingots.',
+    recap:'Machines craft what you choose. Choosing well is the game.' },
   { id:'m3', name:'Cogs & Current',
     flavor:'Gears to turn, wire to carry the spark — when you learn how to make one.',
-    req:{ gear:30, wire:40 },
+    req:{ gear:40, wire:40 },
+    unlocks:['lab','r:pack1'],
+    grant:{ brick:8, wire:6, gear:4, pack1:4 },
+    hint:'Wire needs a copper chain. One fabricator keeps up with about two kilns — watch where lines starve and add machines there.',
+    recap:'Ratios rule the floor: roughly two kilns feed one fabricator.' },
+  { id:'mLab', name:'The Laboratory',
+    flavor:'Curiosity, bottled. The lab reads what you brew, and the tree of knowing grows.',
+    req:{ pack1:10 }, reqResearch: 1,
     unlocks:['r:glass'],
     grant:{ plate:10, coal:20 },
-    hint:'Fabricators craft a chosen recipe — click one to set it. From here the tech tree carries everything ahead — and <b>Electrification</b> wakes the power grid.' },
+    hint:'Cog science is crafted like any part (gear + copper ingot). Belt it into the lab, open the Tech tree (T), pick a project — and finish your first research.',
+    recap:'Science is just another product. Brew it, and the tree grows with you.' },
   { id:'m4', name:'Vitreous Earth',
-    flavor:'Quartz sleeps in the middle distance. Melt it to glass, fuse it to silicon — the factory must reach outward.',
+    flavor:'Quartz sleeps in the middle distance. Melt it to glass — the factory must reach outward.',
     req:{ glass:45, plate:90 },
     unlocks:['alloy','r:steel','r:silicon','r:circuit','r:pack2'],
     grant:{ steel:6 },
-    hint:'Quartz deposits lie beyond your starting field. The alloy furnace is electric — put it on a grid, or shovel coal straight into its hopper.' },
+    hint:'Quartz lies beyond your starting field — a real expedition. Kilns smelt it into glass; 90 plates means the iron line needs widening too.',
+    recap:'The factory reaches outward now. Distance is a resource.' },
+  { id:'mAlloy', name:'Alloys',
+    flavor:'Two things, made one, stronger than either.',
+    req:{ steel:30 },
+    unlocks:[],
+    grant:{ coal:20 },
+    hint:'The alloy furnace fuses two belts of input: iron ingots + coal → steel. It\'s electric — drop coal in its hopper, or research Electrification.',
+    recap:'Two inputs, one output. Steel will be in everything now.' },
   { id:'m5', name:'The First Circuit',
     flavor:'Wire and silicon, etched into thought.',
     req:{ circuit:60, steel:45 },
     unlocks:['r:motor'],
     grant:{ circuit:5, steel:5 },
-    hint:'The alloy furnace fuses two belts of input. Steel: iron ingots + coal. Silicon: quartz + coal.' },
+    hint:'Silicon comes off the alloy furnace too: quartz + coal. Circuits want wire and silicon — two chains meeting in one fabricator.',
+    recap:'Chains of chains: quartz to silicon, silicon to thought.' },
   { id:'mA', name:'Deep Prospects',
     flavor:'Your instruments taste something old beneath the waste. Follow the scent of tar.',
     req:{ pack2:25, motor:25 },
     unlocks:['pump','pipe'],
     grant:{ steel:8 },
-    hint:'The Core drinks science itself now — belt volt packs straight in. Pumpjacks sit on oil seeps and pipes carry the crude; nothing can crack it yet, so stockpile.' },
+    hint:'The Core drinks science itself now — belt volt packs straight in. Pumpjacks sit on oil seeps and pipes carry the crude; nothing can crack it yet, so stockpile.',
+    recap:'The Core drinks science. And something waits under the tar.' },
   { id:'mB', name:'Black Blood',
     flavor:'Deep in the waste, the ground weeps oil. Drink it.',
     req:{ steel:100, motor:40 },
     unlocks:['refinery','r:plastic','r:fuelCell','r:tarCoal'],
     grant:{ steel:10 },
-    hint:'Refineries crack crude into plastic and fuel cells — and always leave tar in the chute. Filter it aside and smelt it back into coal.' },
+    hint:'Oil seeps wait at the world\'s far edge. Pumpjacks draw the crude, pipes carry it — build the long road out.',
+    recap:'Oil flows in pipes, not on belts — a second bloodstream for the factory.' },
+  { id:'mCrack', name:'First Crack',
+    flavor:'The refinery does not give cleanly. Everything it makes, it makes with a cost.',
+    req:{ plastic:20 },
+    unlocks:[],
+    grant:{ plastic:6 },
+    hint:'Set the refinery to Plastic (crude + coal). Tar shares its chute — filter it aside with a splitter and smelt it back into coal, or it jams everything.',
+    recap:'Byproducts jam whatever ignores them. Tar tamed is coal regained.' },
   { id:'m6', name:'The Refined Age',
     flavor:'What burns can be tamed; what is tamed can think faster.',
     req:{ plastic:60, fuelCell:25 },
     unlocks:['r:advCircuit','r:pack3'],
     grant:{ plastic:8 },
-    hint:'Fuel cells also feed turbines — research Fuel turbines for serious power. Polymer science opens the deep branches of the tree.' },
+    hint:'Fuel cells also feed turbines — research Fuel turbines for serious power. Polymer science opens the deep branches of the tree.',
+    recap:'What burns is tamed. Fuel cells hold the fire for later.' },
   { id:'m7', name:'Polymer Mind',
     flavor:'Plastic and copper laid in impossible lattices. The machines improve the machines.',
     req:{ advCircuit:70, plastic:60 },
     unlocks:['r:titanIngot','r:frame'],
     grant:{ advCircuit:5 },
-    hint:'Titanium waits at the far edges of the world — a violet ore for the last age of machines.' },
+    hint:'Titanium waits at the far edges of the world — a violet ore for the last age of machines.',
+    recap:'The machines now improve the machines.' },
   { id:'m8', name:'Star Metal',
     flavor:'Titanium bones for a sleeping god.',
     req:{ titanIngot:70, frame:25 },
     unlocks:['r:processor','r:logicMatrix','r:powerCore','r:hullPlate','r:pack4'],
     grant:{},
-    hint:'Everything you have built converges here: processors, cores, hull. Three final components.' },
+    hint:'Everything you have built converges here: processors, cores, hull. Three final components.',
+    recap:'Star-metal bones. Everything converges.' },
   { id:'m9', name:'Ignition',
     flavor:'Mind, heart, body. Deliver the three works and the World Engine breathes again.',
     req:{ logicMatrix:12, powerCore:12, hullPlate:12 },
     unlocks:[],
     grant:{},
-    hint:'The dawn you build is the only dawn there is.' },
+    hint:'The dawn you build is the only dawn there is.',
+    recap:'The dawn you built.' },
 ];
+
+/* Derive every building/recipe's "Unlocks at" tier index from the spine —
+   the milestone unlock lists are the single source of truth, so any
+   hand-written unlock: numbers in the tables above are overwritten here
+   and inserting tiers can never leave stale labels behind. */
+{
+  const at = {};
+  F.MILESTONES.forEach((ms, i) => { for (const u of ms.unlocks) at[u] = i; });
+  for (const k in F.BUILDINGS) if (at[k] != null) F.BUILDINGS[k].unlock = at[k];
+  for (const k in F.RECIPES) if (at['r:' + k] != null) F.RECIPES[k].unlock = at['r:' + k];
+}
+
+/* ================= GUIDED STEPS =================
+   Live checklists on the objective card: full walkthroughs for the early
+   tiers, two-or-three-step mini-guides for later firsts. Each step is a
+   pure predicate over sim state — the UI latches a step once it has ever
+   been true, so transient conditions (a pack sitting in a lab buffer)
+   still count. Steps never block anything; do things out of order and
+   they tick themselves off.
+     t: step text (small HTML ok)
+     done(S): predicate
+     arrow: 'ore:N' | 'core' | 'ent:<matcher>' — aims the world arrow
+     pulse: build-bar key (or 'tree') to pulse while the step is current */
+{
+  const any = (S, f) => S.ents.some(f);
+  const fam = (e, f) => e.kind === 'machine' && F.BUILDINGS[e.key].fam === f;
+  const oreUnder = (S, e) => S.oreType[e.y * S.w + e.x];
+  const minerOn = (S, t) => any(S, e => e.kind === 'miner' && oreUnder(S, e) === t);
+  const fueled = e => (e.fuelBuf || 0) > 0 || (e.fuelT || 0) > 0;
+  /* a belt on any side of 1×1 entity e, pointed into it */
+  const beltInto = (S, e) => {
+    for (let d = 0; d < 4; d++){
+      const b = F.entAt(S, e.x - F.DX[d], e.y - F.DY[d]);
+      if (b && b.kind === 'belt' && b.dir === d) return true;
+    }
+    return false;
+  };
+
+  F.GUIDES = {
+    m0: [
+      { t:'Hold left-click on an <b>iron deposit</b> to mine it', arrow:'ore:1',
+        done: S => (S.handMined.ironOre || 0) > 0 },
+      { t:'Mine some <b>stone</b> the same way', arrow:'ore:4',
+        done: S => (S.handMined.stone || 0) > 0 },
+    ],
+    mFire: [
+      { t:'Place a <b>Burner drill</b> on iron ore', arrow:'ore:1', pulse:'miner1',
+        done: S => minerOn(S, 1) },
+      { t:'Click the drill and move <b>coal</b> into its fuel slot', arrow:'ent:miner',
+        done: S => any(S, e => e.kind === 'miner' && fueled(e)) },
+      { t:'Belt its ore into the <b>Core</b> — from the drill\'s chute to any Core side', arrow:'core', pulse:'belt1',
+        done: S => (S.msProg.ironOre || 0) > 0 },
+    ],
+    mVeins: [
+      { t:'Place a drill on <b>coal</b>', arrow:'ore:3', pulse:'miner1',
+        done: S => minerOn(S, 3) },
+      { t:'Point a coal belt into an iron drill\'s <b>side</b> — it feeds itself', arrow:'ent:ironMiner',
+        done: S => any(S, e => e.kind === 'miner' && oreUnder(S, e) === 1 && fueled(e) && beltInto(S, e)) },
+      { t:'Deliver both ores to the Core',
+        done: S => (S.msProg.ironOre || 0) > 0 && (S.msProg.coal || 0) > 0 },
+    ],
+    m1: [
+      { t:'Place a <b>Stone kiln</b>', pulse:'smelter1',
+        done: S => any(S, e => fam(e, 'smelter')) },
+      { t:'Belt <b>iron ore</b> into any side of the kiln, and keep <b>coal</b> in its fire', arrow:'ent:smelter',
+        done: S => any(S, e => fam(e, 'smelter') && (e.crafting || (e.outTotal || 0) > 0)) },
+      { t:'Belt the <b>ingots</b> from its front into the Core', arrow:'core',
+        done: S => (S.msProg.ironIngot || 0) > 0 },
+    ],
+    m2: [
+      { t:'Place a <b>Splitter</b> where one ore line must feed two kilns', pulse:'splitter',
+        done: S => any(S, e => e.kind === 'splitter') },
+      { t:'Start a <b>copper</b> chain: drill → kiln → Core',
+        done: S => (S.msProg.copperIngot || 0) > 0 },
+      { t:'Smelt <b>stone into brick</b>',
+        done: S => (S.msProg.brick || 0) > 0 },
+    ],
+    mCog: [
+      { t:'Place a <b>Fabricator</b>', pulse:'asm1',
+        done: S => any(S, e => fam(e, 'asm')) },
+      { t:'Click it and choose the <b>Gear</b> recipe', arrow:'ent:asm',
+        done: S => any(S, e => fam(e, 'asm') && e.recipe === 'gear') },
+      { t:'Feed it iron ingots; belt the <b>gears</b> to the Core', arrow:'core',
+        done: S => (S.msProg.gear || 0) > 0 },
+    ],
+    m3: [
+      { t:'Set a second fabricator to <b>Copper wire</b>',
+        done: S => any(S, e => fam(e, 'asm') && e.recipe === 'wire') },
+      { t:'Balance the ratio — about <b>two kilns per fabricator</b>',
+        done: S => (S.msProg.wire || 0) >= 10 },
+    ],
+    mLab: [
+      { t:'Place the <b>Laboratory</b> — your grant covers it', pulse:'lab',
+        done: S => any(S, e => e.kind === 'lab') },
+      { t:'Set a fabricator to <b>Cog science</b> (gear + copper ingot)',
+        done: S => any(S, e => fam(e, 'asm') && e.recipe === 'pack1') },
+      { t:'Belt cog science into the <b>lab</b> — and some into the Core', arrow:'ent:lab',
+        done: S => any(S, e => e.kind === 'lab' && ((e.inBuf.pack1 || 0) > 0 || e.workItem)) },
+      { t:'Open the <b>Tech tree</b> (T) and pick a project', pulse:'tree',
+        done: S => !!S.research.cur || Object.keys(S.research.done).length > 0 },
+      { t:'Finish your first <b>research</b>',
+        done: S => Object.keys(S.research.done).length > 0 },
+    ],
+    /* mini-guides for later firsts */
+    m4: [
+      { t:'Quartz waits in the <b>mid rings</b> — scout out and place a drill on it', arrow:'ore:5',
+        done: S => minerOn(S, 5) },
+    ],
+    mAlloy: [
+      { t:'Place the <b>Alloy furnace</b>; belt in iron ingots AND coal', pulse:'alloy',
+        done: S => any(S, e => fam(e, 'alloy')) },
+      { t:'It\'s electric — drop <b>coal in its hopper</b>, or put it on a powered grid', arrow:'ent:alloy',
+        done: S => any(S, e => fam(e, 'alloy') && (fueled(e) || e.netId)) },
+    ],
+    mA: [
+      { t:'Find an <b>oil seep</b> at the world\'s edge and place a pumpjack on it', arrow:'ore:7', pulse:'pump',
+        done: S => any(S, e => e.kind === 'pump') },
+      { t:'Run <b>pipes</b> from the pumpjack — stockpile crude for the refinery to come', pulse:'pipe',
+        done: S => any(S, e => e.kind === 'pipe' && e.fluid > 0) },
+    ],
+    mCrack: [
+      { t:'Place the <b>Refinery</b>, pipe in crude, and choose the <b>Plastic</b> recipe', pulse:'refinery',
+        done: S => any(S, e => fam(e, 'refinery') && e.recipe === 'plastic') },
+      { t:'<b>Tar</b> shares its chute — set a splitter filter to pull tar aside', pulse:'splitter',
+        done: S => any(S, e => e.kind === 'splitter' && e.filterItem === 'tar') },
+      { t:'Smelt the tar back into <b>coal</b> in any kiln',
+        done: S => any(S, e => fam(e, 'smelter') && ((e.inBuf.tar || 0) > 0 || e.activeRecipe === 'tarCoal')) },
+    ],
+  };
+}
 
 /* ================= TECHNOLOGIES =================
    The branches — and most of the arsenal. Milestones hand out only the
@@ -575,13 +762,19 @@ F.makeTribute = function(lvl){
 /* what the Engine whispers when each tier completes (index = finished milestone) */
 F.ENGINE_LINES = [
   '…warm. after so long, warm…',
+  '…the first flame. i felt it…',
   '…iron. i remember iron…',
+  '…ore becomes intent. good…',
   '…shapes. you make shapes of the world…',
+  '…small teeth, turning. i know this song…',
   '…current in old veins. yes…',
+  '…you ask questions. the best machines do…',
   '…glass and light. keep going…',
+  '…two made one. stronger. always stronger…',
   '…thought, etched small. clever hands…',
   '…you listen for the deep places. good…',
   '…the black blood still flows…',
+  '…even the waste has a use. waste nothing…',
   '…you tame what burns. careful hands…',
   '…you build faster than the ash falls…',
   '…star-metal bones. almost. almost…',
