@@ -688,15 +688,15 @@ function drawCrumbled(x, e, s, time){
   const N = 4, cw = W / N, ch = H / N;
   const sw = snap.width / N, sh = snap.height / N;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++){
-    const r1 = rnd(), r2 = rnd(), r3 = rnd(), r4 = rnd();
+    const r1 = rnd(), r2 = rnd(), r3 = rnd(), r4 = rnd(), r5 = rnd(), r6 = rnd();
     if (r1 < .16 && !(i === 1 && j === 1)) continue;          // torn-out hole
     const cx = (i + .5) / N - .5, cy = (j + .5) / N - .5;     // -.5...5 from center
     const d = Math.hypot(cx, cy);
-    const pull = .09 + r2 * .09;                              // inward collapse
-    const dx = -cx * pull * W;
-    const dy = -cy * pull * H + (1 - d) * H * .06 + r3 * H * .03;  // middle sinks deepest
-    const rot = (r4 - .5) * .26 * (d + .35);
-    const sc = .9 + r2 * .08;
+    const pull = .08 + r2 * .12;                              // inward collapse
+    const dx = -cx * pull * W + (r5 - .5) * W * .09;          // + sideways scatter
+    const dy = -cy * pull * H + (1 - d) * H * .07 + (r6 - .5) * H * .09;  // middle sinks deepest
+    const rot = (r4 - .5) * .55 * (d + .4);
+    const sc = .82 + r3 * .2;
     x.save();
     x.translate(i * cw + cw / 2 + dx, j * ch + ch / 2 + dy);
     x.rotate(rot);
