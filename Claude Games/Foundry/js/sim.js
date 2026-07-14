@@ -530,14 +530,10 @@ F.tryInsert = function(S, target, item, fromDir, t0){
     case 'turbine':
       if (item !== 'fuelCell' || target.fuelBuf >= F.fuelCap(S)) return false;
       target.fuelBuf++; return true;
-    case 'lab': {
-      // labs read science packs — and whatever materials the current
-      // project bills (deep techs demand piles of previous-age goods)
-      const proj = S.research.cur && F.TECHS[S.research.cur];
-      if (!F.PACKS.includes(item) && !(proj && proj.cost[item])) return false;
+    case 'lab':
+      if (!F.PACKS.includes(item)) return false;
       if ((target.inBuf[item] || 0) >= F.LAB_BUF) return false;
       target.inBuf[item] = (target.inBuf[item] || 0) + 1; return true;
-    }
     case 'port':
       // only providers take belt input, and only their configured item
       if (target.mode !== 'provide' || item !== target.portItem) return false;
@@ -1539,7 +1535,16 @@ F.deserialize = function(data){
   S.nextId = data.nextId || (Math.max(0, ...S.ents.map(e => e.id)) + 1);
   // rebuild pack reservations from labs that were saved mid-read
   for (const e of S.ents){
-    if (e.kind === 'lab' && e.workItem){
+    if (e.kind !== 'lab') continue;
+    // migration: labs briefly read raw materials too — hand any back
+    if (e.workItem && !F.PACKS.includes(e.workItem)){
+      F.invAdd(S, e.workItem, 1);
+      e.workItem = null; e.prog = 0;
+    }
+    for (const k in e.inBuf){
+      if (!F.PACKS.includes(k)){ F.invAdd(S, k, e.inBuf[k]); delete e.inBuf[k]; }
+    }
+    if (e.workItem){
       if (S.research.cur) S.research.resv[e.workItem] = (S.research.resv[e.workItem] || 0) + 1;
       else { e.inBuf[e.workItem] = (e.inBuf[e.workItem] || 0) + 1; e.workItem = null; e.prog = 0; }
     }
