@@ -1489,6 +1489,9 @@ F.deserialize = function(data){
   const rs = data.research || {};
   S.research = { cur: rs.cur || null, done: rs.done || {}, prog: rs.prog || {}, resv: {} };
   if (S.research.cur && !F.TECHS[S.research.cur]) S.research.cur = null;
+  // TEMP (user request 2026-07-14): reset Electric Drills research progress
+  // on every load — REMOVE THIS LINE when the user gives the word.
+  delete S.research.prog.electricDrills;
   // platform decks back onto the water before buildings land on them
   if (data.plat) for (const i of data.plat)
     if (i >= 0 && i < S.platform.length) S.platform[i] = 1;
