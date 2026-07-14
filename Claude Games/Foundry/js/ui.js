@@ -404,8 +404,13 @@ function removeAt(t){
   }
   if (e.kind === 'core') return;
   if (UI.selection === e) select(null);
-  F.remove(UI.S, t[0], t[1]);
+  const r = F.remove(UI.S, t[0], t[1]);
   A.sfx.remove();
+  if (r && r.broken){
+    const had = r.mods ? r.mods.length : 0;
+    toast(had ? `Scrapped the wreck — salvaged ${r._salvaged} of ${had} module${had > 1 ? 's' : ''}.`
+              : 'Scrapped the wreck — nothing worth keeping.', '', 2600);
+  }
   buildBarAfford();
 }
 
@@ -460,10 +465,17 @@ function entsInBox(b){
 function applyDecon(b){
   const list = entsInBox(b);
   if (!list.length){ A.sfx.error(); return; }
-  for (const e of list){ if (UI.selection === e) select(null); F.remove(UI.S, e.x, e.y); }
+  let wrecks = 0, saved = 0;
+  for (const e of list){
+    if (UI.selection === e) select(null);
+    const r = F.remove(UI.S, e.x, e.y);
+    if (r && r.broken){ wrecks++; saved += r._salvaged || 0; }
+  }
   A.sfx.remove();
   buildBarAfford();
-  toast(`Deconstructed ${list.length} building${list.length > 1 ? 's' : ''} (refunded).`, '', 2200);
+  toast(`Deconstructed ${list.length} building${list.length > 1 ? 's' : ''} (refunded)` +
+    (wrecks ? ` — ${wrecks} wreck${wrecks > 1 ? 's' : ''} scrapped for nothing${
+      saved ? ` (${saved} module${saved > 1 ? 's' : ''} salvaged)` : ''}.` : '.'), '', 2600);
 }
 
 function captureBlueprint(b){
@@ -971,7 +983,7 @@ function buildSelPanel(e){
     <div><div class="selTitle">${def.name}</div><div class="selSub">${kindLabel(def)}</div></div></div>`;
 
   if (e.broken){
-    html += `<div class="ghostNote" style="color:#ff9a76">⚙ <b>Broken down.</b> Worn out from a lifetime of service — it will never run again. Remove it (no refund) and place a fresh one. Durability research and hardened modules stretch machine lifetimes.</div>`;
+    html += `<div class="ghostNote" style="color:#ff9a76">⚙ <b>Broken down.</b> Worn out from a lifetime of service — it will never run again. Scrapping it returns <b>nothing</b>; each slotted module has a coin-flip chance to survive the salvage. Durability research and hardened modules stretch machine lifetimes.</div>`;
   }
 
   if (e.kind === 'miner'){
@@ -1174,6 +1186,7 @@ function buildSelPanel(e){
   if (orb) orb.addEventListener('click', () => { openBig('tree'); });
   p.querySelectorAll('[data-mod]').forEach(b => {
     b.addEventListener('click', () => {
+      if (e.broken){ A.sfx.error(); return; }   // no upgrading a corpse
       const k = b.dataset.mod;
       const slots = def.slots || F.MOD_SLOTS;
       if (!e.mods) e.mods = [];
@@ -1187,6 +1200,11 @@ function buildSelPanel(e){
   });
   p.querySelectorAll('[data-slot]').forEach(b => {
     b.addEventListener('click', () => {
+      if (e.broken){
+        A.sfx.error();
+        toast('The wreck\'s slots are fused shut — scrap it and hope the modules survive.', 'warn', 2600);
+        return;
+      }
       const i = +b.dataset.slot;
       if (!e.mods || !e.mods[i]){ A.sfx.click(); return; }
       F.invAdd(S, e.mods[i], 1);
@@ -1196,8 +1214,13 @@ function buildSelPanel(e){
     });
   });
   p.querySelector('[data-del]').addEventListener('click', () => {
-    F.remove(S, e.x, e.y);
+    const r = F.remove(S, e.x, e.y);
     A.sfx.remove();
+    if (r && r.broken){
+      const had = r.mods ? r.mods.length : 0;
+      toast(had ? `Scrapped the wreck — salvaged ${r._salvaged} of ${had} module${had > 1 ? 's' : ''}.`
+                : 'Scrapped the wreck — nothing worth keeping.', '', 2600);
+    }
     select(null);
     buildBarAfford();
   });
@@ -2167,7 +2190,8 @@ function renderHowTo(){
   (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
   buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
   Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.
-  (One exception: a machine that has <b>broken down</b> is scrap and refunds nothing.)</p>
+  (One exception: a machine that has <b>broken down</b> is scrap — no refund, contents lost,
+  and each slotted module only survives the salvage on a coin flip.)</p>
 
   <div class="selSection">Machines</div>
   <p class="howP">Machines accept ingredients from belts on <b>any side</b> and eject from their
@@ -2179,10 +2203,12 @@ function renderHowTo(){
   <b>amber dot</b> is out of fuel;
   a stalled machine usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
   <p class="howP">Nothing lasts forever: every drill, furnace, assembler, crusher, refinery and pumpjack
-  <b>wears out</b> as it works and one day <b>breaks down for good</b> — a charred husk you must remove
-  (no refund) and replace. Higher-mark machines endure longer, <b>Durability</b> ranks in the tech tree
-  add +12% life apiece, and the ${ic('durModule')} <b>hardened module</b> adds +50% to whatever it's
-  slotted in. How long exactly? The machines don't say.</p>
+  <b>wears out</b> as it works — past each stretch of service its survival is a <b>roll of the dice</b>,
+  and one day it <b>breaks down for good</b>: a crumbled, smoking wreck you must scrap (nothing comes
+  back; slotted modules survive on a coin flip) and replace. Higher-mark machines endure longer,
+  <b>Durability</b> ranks in the tech tree add +12% per rank to each service stretch, and the
+  ${ic('durModule')} <b>hardened module</b> adds +50% to whatever it's slotted in. How long exactly?
+  The machines don't say.</p>
 
   <div class="selSection">Power</div>
   <p class="howP">Coal serves the burner age: Mk1 drills, kilns, fabricators and crushers eat it
