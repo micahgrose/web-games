@@ -1490,10 +1490,13 @@ function refreshPower(){
   const S = UI.S;
   const st = S.stats;
   const sn = F.sunFactor(S);
-  // the world's clock: cycle mapped so noon sits mid-day, midnight mid-night
+  // the world's clock: cycle mapped so noon sits mid-day, midnight mid-night;
+  // 12-hour face that ticks in 10-minute jumps (1:20 PM → 1:30 PM)
   const h24 = ((((S.dayT || 0) / F.DAY_LEN) - .725) * 24 + 24) % 24;
-  const hh = Math.floor(h24), mm = Math.floor((h24 - hh) * 60);
-  $('clockTime').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  const tm = Math.floor(h24 * 6) * 10;          // total minutes, snapped to 10
+  const hh = Math.floor(tm / 60), mm = tm % 60;
+  const h12 = hh % 12 || 12, ap = hh >= 12 ? 'PM' : 'AM';
+  $('clockTime').textContent = `${h12}:${String(mm).padStart(2, '0')} ${ap}`;
   $('clockSky').textContent = sn >= .85 ? '☀' : sn <= .05 ? '☾' : '⛅';
   const fill = $('powerBarFill');
   if (st.powerSupply <= 0 && st.powerDemand <= 0){
