@@ -597,6 +597,7 @@ const FAM_ACCENT = {
 
 function drawEntBody(x, e, s, time, S){
   const def = F.BUILDINGS[e.key];
+  if (e.broken){ drawCrumbled(x, e, s, time); return; }
   switch (e.kind){
     case 'belt': drawBelt(x, e, s, time, S); break;
     case 'ubelt': drawTunnel(x, e, s, time, S); break;
@@ -642,35 +643,96 @@ function drawEntBody(x, e, s, time, S){
       x.fill(); x.stroke();
     }
   }
-  // worn out for good: a charred husk — dark veil + a scorched crack
-  if (e.broken){
-    x.fillStyle = 'rgba(10,8,8,.55)';
-    x.fillRect(0, 0, e.w * s, e.h * s);
-    x.strokeStyle = 'rgba(0,0,0,.85)';
-    x.lineWidth = Math.max(1.5, s * .07);
-    x.lineCap = 'round';
-    x.beginPath();
-    x.moveTo(e.w * s * .2, e.h * s * .16);
-    x.lineTo(e.w * s * .48, e.h * s * .5);
-    x.lineTo(e.w * s * .34, e.h * s * .62);
-    x.lineTo(e.w * s * .62, e.h * s * .88);
-    x.stroke();
-    x.strokeStyle = 'rgba(255,140,90,.28)';
-    x.lineWidth = Math.max(1, s * .03);
-    x.beginPath();
-    x.moveTo(e.w * s * .2, e.h * s * .16);
-    x.lineTo(e.w * s * .48, e.h * s * .5);
-    x.lineTo(e.w * s * .34, e.h * s * .62);
-    x.lineTo(e.w * s * .62, e.h * s * .88);
-    x.stroke();
-  }
   // disconnected from any pole network → blinking red bolt
-  else if (S && !e.netId &&
+  if (S && !e.netId &&
       (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc'))){
     drawBolt(x, s * .22, s * .24, s * .30, `rgba(255,110,110,${.55 + .35 * Math.sin(time * 5)})`);
   }
 }
 R.drawEntBody = drawEntBody;
+
+/* ---- broken machines: crumbled in on themselves ----
+   The wreck is built from a charred snapshot of the machine's OWN intact
+   art, sliced into shards that slump toward the middle with holes torn
+   out — so every machine crumbles as itself. Seeded by entity id, so each
+   ruin collapses its own way and stays that way. Smoke curls off it. */
+const _wreckSnaps = {};
+function brokenSnap(e, s){
+  const q = Math.max(8, Math.round(s / 8) * 8);   // quantize so zoom can't flood the cache
+  const key = `${e.key}_${e.dir}_${e.recipe || ''}_${q}`;
+  let cv = _wreckSnaps[key];
+  if (cv) return cv;
+  cv = document.createElement('canvas');
+  cv.width = e.w * q; cv.height = e.h * q;
+  const c = cv.getContext('2d');
+  const fake = Object.assign({}, e, { broken: false, active: false, crafting: false, mods: [] });
+  drawEntBody(c, fake, q, 0, null);
+  // char the whole body
+  c.globalCompositeOperation = 'source-atop';
+  c.fillStyle = 'rgba(24,18,14,.55)';
+  c.fillRect(0, 0, cv.width, cv.height);
+  c.globalCompositeOperation = 'source-over';
+  return _wreckSnaps[key] = cv;
+}
+
+function drawCrumbled(x, e, s, time){
+  const W = e.w * s, H = e.h * s;
+  const snap = brokenSnap(e, s);
+  // deterministic per-entity rng — the ruin keeps its shape frame to frame
+  let sd = ((e.id + 1) * 2654435761) >>> 0;
+  const rnd = () => (sd = (sd * 1664525 + 1013904223) >>> 0) / 4294967296;
+  // caved-in dark interior showing through the gaps
+  x.fillStyle = 'rgba(12,10,9,.92)';
+  x.fillRect(W * .07, H * .09, W * .86, H * .85);
+  // shards of the old body, slumped toward the middle
+  const N = 4, cw = W / N, ch = H / N;
+  const sw = snap.width / N, sh = snap.height / N;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++){
+    const r1 = rnd(), r2 = rnd(), r3 = rnd(), r4 = rnd();
+    if (r1 < .16 && !(i === 1 && j === 1)) continue;          // torn-out hole
+    const cx = (i + .5) / N - .5, cy = (j + .5) / N - .5;     // -.5...5 from center
+    const d = Math.hypot(cx, cy);
+    const pull = .09 + r2 * .09;                              // inward collapse
+    const dx = -cx * pull * W;
+    const dy = -cy * pull * H + (1 - d) * H * .06 + r3 * H * .03;  // middle sinks deepest
+    const rot = (r4 - .5) * .26 * (d + .35);
+    const sc = .9 + r2 * .08;
+    x.save();
+    x.translate(i * cw + cw / 2 + dx, j * ch + ch / 2 + dy);
+    x.rotate(rot);
+    x.scale(sc, sc);
+    x.drawImage(snap, i * sw, j * sh, sw, sh, -cw / 2, -ch / 2, cw, ch);
+    x.restore();
+  }
+  // rubble spilled along the base
+  x.fillStyle = '#26211c';
+  for (let k = 0; k < 3 + N; k++){
+    const rx = (rnd() * .9 + .05) * W, rw = (.06 + rnd() * .09) * s;
+    x.beginPath();
+    x.arc(rx, H - rw * .4, rw, Math.PI, 0);
+    x.fill();
+  }
+  // embers still breathing in the wreck
+  for (let k = 0; k < 3; k++){
+    const ex = (rnd() * .6 + .2) * W, ey = (rnd() * .5 + .3) * H;
+    const a = .18 + .26 * (0.5 + 0.5 * Math.sin(time * (2 + k * .7) + e.id * 1.7 + k * 2.1));
+    x.fillStyle = `rgba(255,130,60,${a.toFixed(3)})`;
+    x.beginPath();
+    x.arc(ex, ey, Math.max(1, s * .045), 0, Math.PI * 2);
+    x.fill();
+  }
+  // smoke curling off (throttled per wreck; only while on screen)
+  if (!e._smk || time > e._smk || time < e._smk - 2){
+    e._smk = time + .35 + Math.random() * .55;
+    R.spawnParticle({
+      x: e.x + .25 + Math.random() * (e.w - .5),
+      y: e.y + .15 + Math.random() * .4,
+      vx: (Math.random() - .5) * .25, vy: -.35 - Math.random() * .35,
+      life: 1.9, maxLife: 1.9, color: 'rgba(64,58,54,.4)',
+      size: .1 + Math.random() * .08, drag: .5,
+    });
+  }
+}
 
 /* small lightning bolt marker */
 function drawBolt(x, bx, by, sz, color){

@@ -380,23 +380,30 @@ F.remove = function(S, x, y){
   const e = F.entAt(S, x, y);
   if (!e || e.kind === 'core') return null;
   const def = F.BUILDINGS[e.key];
-  // a broken-down machine is scrap — no refund; contents still come back
-  if (!e.broken) F.refund(S, e.paid || def.cost);
-  // return contained items
-  const give = (o) => { for (const k in o) if (o[k] > 0) F.invAdd(S, k, Math.floor(o[k])); };
-  if (e.inBuf) give(e.inBuf);
-  if (e.outBuf) give(e.outBuf);
-  if (e.store) give(e.store);
-  if (e.item) F.invAdd(S, e.item, 1);
-  if (e.mods) for (const m of e.mods) F.invAdd(S, m, 1);
-  if (e.drones) for (const d of e.drones) if (d.cargo > 0 && d.item) F.invAdd(S, d.item, d.cargo);
-  if (e.workItem){
-    // a lab mid-consume: hand the pack back and release its reservation
-    F.invAdd(S, e.workItem, 1);
-    if (S.research.resv[e.workItem]) S.research.resv[e.workItem]--;
+  if (e.broken){
+    // scrapping a wreck returns NOTHING — no refund, contents lost with it.
+    // Each slotted module gets a coin-flip chance to be pried out intact.
+    e._salvaged = 0;
+    if (e.mods) for (const m of e.mods)
+      if (Math.random() < .5){ F.invAdd(S, m, 1); e._salvaged++; }
+  } else {
+    F.refund(S, e.paid || def.cost);
+    // return contained items
+    const give = (o) => { for (const k in o) if (o[k] > 0) F.invAdd(S, k, Math.floor(o[k])); };
+    if (e.inBuf) give(e.inBuf);
+    if (e.outBuf) give(e.outBuf);
+    if (e.store) give(e.store);
+    if (e.item) F.invAdd(S, e.item, 1);
+    if (e.mods) for (const m of e.mods) F.invAdd(S, m, 1);
+    if (e.drones) for (const d of e.drones) if (d.cargo > 0 && d.item) F.invAdd(S, d.item, d.cargo);
+    if (e.workItem){
+      // a lab mid-consume: hand the pack back and release its reservation
+      F.invAdd(S, e.workItem, 1);
+      if (S.research.resv[e.workItem]) S.research.resv[e.workItem]--;
+    }
+    if (e.fuelBuf) F.invAdd(S, e.kind === 'turbine' ? 'fuelCell' : 'coal', e.fuelBuf);
+    if (e.transit) for (const tr of e.transit) F.invAdd(S, tr.item, 1);
   }
-  if (e.fuelBuf) F.invAdd(S, e.kind === 'turbine' ? 'fuelCell' : 'coal', e.fuelBuf);
-  if (e.transit) for (const tr of e.transit) F.invAdd(S, tr.item, 1);
   if (e.kind === 'ubelt' && e.linkId){
     const other = F.entById(S, e.linkId);
     if (other){ other.linkId = 0; other.isExit = false; }
@@ -871,11 +878,17 @@ function minerWants(S, e){
   return S.oreType[i] !== 0 && S.oreType[i] !== F.OIL_TYPE && S.oreAmt[i] > 0;
 }
 
-/* every finished operation grinds the machine down a little; past its
-   (hidden) service life it breaks for good and must be replaced */
+/* every finished operation grinds the machine down a little. At the end of
+   each (hidden) service stretch — F.lifeOf ops — the machine rolls the dice:
+   F.BREAK_CHANCE that it breaks for good, otherwise the wear counter resets
+   and it soldiers on toward the next roll. */
 function wearDown(S, e, n){
+  if (e.broken) return;
   e.ops = (e.ops || 0) + (n || 1);
-  if (e.ops >= F.lifeOf(S, e) && !e.broken){
+  const life = F.lifeOf(S, e);
+  if (life === Infinity || e.ops < life) return;
+  e.ops = 0;   // checkpoint passed either way
+  if (Math.random() < F.BREAK_CHANCE){
     e.broken = true;
     e.active = false;
     e.crafting = false;

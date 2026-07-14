@@ -238,9 +238,10 @@ F.BUILD_ORDER = Object.keys(B);
    the grid is a thing you earn, not a thing you sprinkle. */
 for (const k in B){ if (B[k].power && B[k].kind !== 'lamp') B[k].power *= 5; }
 
-/* Hidden service life, in completed operations (ores dug, crafts finished,
-   crude drawn). Higher marks last longer. NEVER shown to the player — machines
-   simply break down one day and must be replaced. */
+/* Hidden service STRETCH, in completed operations (ores dug, crafts finished,
+   crude drawn). At the end of each stretch the machine rolls F.BREAK_CHANCE to
+   die for good; survive and the counter resets. Higher marks stretch longer.
+   NEVER shown to the player — machines simply break down one day. */
 {
   const LIFE = { miner1:500, miner2:800, miner3:1300, miner4:2000, pump:800,
     smelter1:500, smelter2:800, smelter3:1300, smelter4:2000, alloy:800,
@@ -821,7 +822,7 @@ F.handMul   = S => 1 + F.upRank(S,'prospecting')* F.UPGRADES.prospecting.per;
 F.bufBonus  = S => F.upRank(S,'capacitors') * 2;
 F.lifeMul   = S => 1 + F.upRank(S,'durability') * F.UPGRADES.durability.per;
 
-/* effective service life of an entity: base × research × hardened modules.
+/* effective service stretch of an entity: base × research × hardened modules.
    The number itself stays hidden from the player — only the multipliers
    are ever shown. */
 F.lifeOf = function(S, e){
@@ -831,6 +832,8 @@ F.lifeOf = function(S, e){
   if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) mul += F.MODULES[m].dur;
   return def.life * mul;
 };
+/* odds a machine dies at the end of each service stretch */
+F.BREAK_CHANCE = .25;
 
 /* ================= ONE-SHOT TIPS ================= */
 F.TIPS = {
