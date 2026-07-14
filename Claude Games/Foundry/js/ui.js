@@ -305,7 +305,7 @@ function placeAt(t, first){
       if (tryUpgradeLine(gx, gy, def)) return;
     }
     if (first){
-      if (chk.why === 'cost'){ A.sfx.error(); toastCost(def); }
+      if (chk.why === 'cost'){ A.sfx.error(); toastCost(UI.tool); }
       else if (chk.why !== 'occupied'){ A.sfx.error(); toast(cap(chk.why), 'warn', 2600); }
     }
     return;
@@ -332,7 +332,7 @@ function tryUpgradeLine(x, y, def){
   const old = F.entAt(S, x, y);
   if (!old || old.kind !== def.kind) return false;
   if (old.key === UI.tool) return false;                 // same tier — nothing to do
-  if (!F.canAfford(S, def.cost)){ return false; }
+  if (!F.canAfford(S, F.buildCost(S, UI.tool))){ return false; }
   // capture flow state
   const carry = { dir: old.dir, item: old.item, t: old.t, srcDir: old.srcDir,
                   fluid: old.fluid, isExit: old.isExit };
@@ -622,6 +622,15 @@ function bindHud(){
     $('btnSound').style.opacity = A.on ? 1 : .4;
   });
   $('btnSpeed').addEventListener('click', cycleSpeed);
+  $('btnSun').addEventListener('click', () => {
+    const S = UI.S;
+    if (!S || !S.research.done.sunAnchor) return;
+    S.sunFrozen = !S.sunFrozen;
+    $('btnSun').classList.toggle('on', S.sunFrozen);
+    toast(S.sunFrozen ? 'The Sun Anchor holds — the sky stands still.'
+                      : 'The Sun Anchor releases — the sky turns again.', '', 3200);
+    A.sfx.click();
+  });
   $('btnDecon').addEventListener('click', () => setMode(UI.mode === 'decon' ? null : 'decon'));
   $('btnBlueprint').addEventListener('click', () => setMode(UI.mode === 'copy' || UI.mode === 'stamp' ? null : 'copy'));
   $('btnMenu').addEventListener('click', toggleMenu);
@@ -709,7 +718,7 @@ function buildBarAfford(){
   for (const b of $('buildBar').children){
     const key = b.dataset.key;
     if (!key) continue;
-    b.classList.toggle('cant', S.unlocked[key] && !F.canAfford(S, F.BUILDINGS[key].cost));
+    b.classList.toggle('cant', S.unlocked[key] && !F.canAfford(S, F.buildCost(S, key)));
   }
 }
 
@@ -744,10 +753,10 @@ function showBuildTip(ev, key){
   if (def.cap && def.kind === 'chest') stats.push(`holds ${def.cap}`);
   if (def.kind === 'tank') stats.push(`buffers ${def.cap} crude`);
   if (def.kind === 'beacon') stats.push(`boosts a ${def.range * 2 + def.w}×${def.range * 2 + def.w} area`);
-  if (def.kind === 'acc') stats.push(`stores ${F.ACC_CAP} P·s · ${F.ACC_RATE} P rate`);
+  if (def.kind === 'acc') stats.push(`stores ${F.ACC_CAP} P·s · charges ${F.ACC_CHARGE} P, returns ${F.ACC_DISCHARGE} P`);
   if (def.kind === 'lamp') stats.push(`lights ${def.glow * 2} tiles at night`);
   if (stats.length) html += `<div class="tt-stat">${stats.join(' · ')}</div>`;
-  html += '<div class="tt-cost">' + Object.entries(def.cost).map(([k, n]) => {
+  html += '<div class="tt-cost">' + Object.entries(F.buildCost(S, key)).map(([k, n]) => {
     const have = F.invCount(S, k);
     return `<span class="${have < n ? 'lack' : ''}">${iconImg(k, 14)} ${n} <span class="have">(${F.fmt(have)})</span></span>`;
   }).join('') + '</div>';
@@ -881,7 +890,16 @@ function dynVals(e){
       break;
     case 'lab': {
       const RS = S.research;
-      d.res = RS.cur ? F.TECHS[RS.cur].name : '<span class="ghostTxt">none — open the Tech tree</span>';
+      if (RS.cur){
+        const tk = F.TECHS[RS.cur];
+        const sp = RS.prog[RS.cur] || {};
+        d.res = `⚗ Researching: <b>${tk.name}</b>`;
+        d.respk = Object.entries(tk.cost).map(([pk, n]) =>
+          `${iconImg(pk, 13)} ${Math.min(sp[pk] || 0, n)} / ${n}`).join(' · ');
+      } else {
+        d.res = '<span class="ghostTxt">No project — open the Tech tree (T) and pick one</span>';
+        d.respk = '';
+      }
       d.read = e.workItem ? F.ITEMS[e.workItem].name : 'idle';
       break;
     }
@@ -946,10 +964,15 @@ function buildSelPanel(e){
   const S = UI.S;
   const def = F.BUILDINGS[e.key];
   const p = $('selPanel');
+  UI._selBroken = !!e.broken;
   const dv = dynVals(e);
   let html = '';
   html += `<div class="selHead"><canvas data-icon="${e.key}" width="44" height="44"></canvas>
     <div><div class="selTitle">${def.name}</div><div class="selSub">${kindLabel(def)}</div></div></div>`;
+
+  if (e.broken){
+    html += `<div class="ghostNote" style="color:#ff9a76">⚙ <b>Broken down.</b> Worn out from a lifetime of service — it will never run again. Remove it (no refund) and place a fresh one. Durability research and hardened modules stretch machine lifetimes.</div>`;
+  }
 
   if (e.kind === 'miner'){
     const i = F.tileIdx(S, e.x, e.y);
@@ -985,7 +1008,7 @@ function buildSelPanel(e){
   if (e.kind === 'acc'){
     html += row('Charge', dv.charge, 'charge');
     html += row('Flow', dv.flow, 'flow');
-    html += `<div class="ghostNote">Charges when its grid runs a surplus, discharges to cover deficits — up to ${F.ACC_RATE} P either way.</div>`;
+    html += `<div class="ghostNote">Charges when its grid runs a surplus (a slow ${F.ACC_CHARGE} P trickle), discharges up to ${F.ACC_DISCHARGE} P to cover deficits.</div>`;
   }
   if (e.kind === 'lamp'){
     html += row('Status', dv.lit, 'lit');
@@ -1011,11 +1034,15 @@ function buildSelPanel(e){
       html += `<div class="ghostNote">Exits are relative to the arrow: ◀ left · ▲ front · ▶ right.</div>`;
   }
   if (e.kind === 'lab'){
-    html += row('Project', dv.res, 'res');
+    html += `<div class="labProj">
+      <div class="labProjName" data-dyn="res">${dv.res}</div>
+      <div class="resBarOuter" data-labbar-wrap style="display:none;margin:7px 0 5px"><div class="resBarFill" data-labbar style="width:0%"></div></div>
+      <div class="labProjPacks" data-dyn="respk">${dv.respk}</div>
+    </div>`;
     html += row('Reading', dv.read, 'read');
     html += `<div data-bufs>${bufsFor(e)}</div>`;
     html += `<div class="progOuter" data-prog-wrap style="display:none"><div class="progFill" data-prog style="width:0%"></div></div>`;
-    html += `<button class="menuBtn" data-openres style="margin-top:8px">⚗ Open research</button>`;
+    html += `<button class="menuBtn" data-openres style="margin-top:8px">⚗ Open the Tech tree</button>`;
     html += `<div class="ghostNote">Belt science packs into any side — all labs feed one shared project.</div>`;
   }
   if (e.kind === 'port'){
@@ -1061,9 +1088,8 @@ function buildSelPanel(e){
     html += `<div class="ghostNote">Powers everything in the ${def.cover * 2 + 1}×${def.cover * 2 + 1} area around it; links to poles within ${def.reach} tiles.</div>`;
   }
 
-  // fuel: two transfer slots — machine buffer ⇄ your pocket
-  const stokedHere = F.stoked(S) && def.power && F.stokable(e);
-  if (def.fuel || e.kind === 'gen' || e.kind === 'turbine' || stokedHere){
+  // fuel: two transfer slots — machine buffer ⇄ your pocket (burners only)
+  if (def.fuel || e.kind === 'gen' || e.kind === 'turbine'){
     const isT = e.kind === 'turbine';
     const item = isT ? 'fuelCell' : 'coal';
     html += `<div class="selDivider"></div><div class="selSection">Fuel — ${isT ? 'fuel cells' : 'coal'}</div>
@@ -1083,7 +1109,6 @@ function buildSelPanel(e){
         </div>
       </div>
       <div class="ghostNote">click: pick up all · right-click: half · with a stack in hand, scroll over a box to move one at a time</div>`;
-    if (stokedHere) html += `<div class="ghostNote">Burns coal from this hopper before drawing on the grid.</div>`;
   }
 
   html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
@@ -1182,6 +1207,8 @@ function updateSelPanel(e){
   const S = UI.S;
   const def = F.BUILDINGS[e.key];
   const p = $('selPanel');
+  // broke down while the panel was open → rebuild so the banner appears
+  if (!!e.broken !== !!UI._selBroken){ UI._selBroken = !!e.broken; buildSelPanel(e); return; }
   const dv = dynVals(e);
   p.querySelectorAll('[data-dyn]').forEach(el2 => {
     const v = dv[el2.dataset.dyn];
@@ -1192,6 +1219,20 @@ function updateSelPanel(e){
   if (bufs){
     const h = bufsFor(e);
     if (UI._bufsCache !== h){ UI._bufsCache = h; bufs.innerHTML = h; }
+  }
+  // lab: overall research progress bar
+  const lb = p.querySelector('[data-labbar]');
+  if (lb){
+    const RS = S.research;
+    const wrap = p.querySelector('[data-labbar-wrap]');
+    if (RS.cur){
+      const tk = F.TECHS[RS.cur];
+      const sp = RS.prog[RS.cur] || {};
+      let tot = 0, got = 0;
+      for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
+      wrap.style.display = '';
+      lb.style.width = (tot ? got / tot * 100 : 0).toFixed(1) + '%';
+    } else wrap.style.display = 'none';
   }
   // craft / read progress
   const pw = p.querySelector('[data-prog-wrap]');
@@ -1207,9 +1248,7 @@ function updateSelPanel(e){
   const fb = p.querySelector('[data-fbar]');
   if (fb){
     const isT = e.kind === 'turbine';
-    const perFuel = isT ? def.burn :
-      (def.fuel || e.kind === 'gen') ? F.COAL_BURN :
-      F.STOKE_PS / Math.max(1, def.power || 1);   // stoked electric machine
+    const perFuel = isT ? def.burn : F.COAL_BURN;
     fb.style.width = (clamp(e.fuelT / perFuel, 0, 1) * 100).toFixed(1) + '%';
     const item = isT ? 'fuelCell' : 'coal';
     const snM = p.querySelector('[data-sn="machine"]');
@@ -1450,6 +1489,12 @@ function refreshTechChip(){
 function refreshPower(){
   const S = UI.S;
   const st = S.stats;
+  const sn = F.sunFactor(S);
+  // the world's clock: cycle mapped so noon sits mid-day, midnight mid-night
+  const h24 = ((((S.dayT || 0) / F.DAY_LEN) - .725) * 24 + 24) % 24;
+  const hh = Math.floor(h24), mm = Math.floor((h24 - hh) * 60);
+  $('clockTime').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  $('clockSky').textContent = sn >= .85 ? '☀' : sn <= .05 ? '☾' : '⛅';
   const fill = $('powerBarFill');
   if (st.powerSupply <= 0 && st.powerDemand <= 0){
     fill.style.width = '0%';
@@ -1462,9 +1507,7 @@ function refreshPower(){
   fill.id = 'powerBarFill';
   if (st.powerRatio < .999) fill.classList.add('brown');
   else if (frac > .8) fill.classList.add('strain');
-  const sn = F.sunFactor(S);
-  const sky = sn >= .85 ? '☀' : sn <= .05 ? '☾' : '⛅';
-  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P ${sky}` +
+  $('powerText').textContent = `${Math.round(st.powerDemand)} / ${Math.round(st.powerSupply)} P` +
     (st.unpowered ? ` · ${st.unpowered} no pole` : '');
 }
 
@@ -1638,7 +1681,8 @@ function fillSparks(body){
 const TREE_COLW = 158, TREE_ROWH = 58, TREE_NW = 140, TREE_NH = 46, TREE_PAD = 14;
 const TREE_ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const TREE_UP_ICON = { logistics:'gear', extraction:'ironOre', metallurgy:'ironIngot',
-  fabrication:'circuit', gridOutput:'wire', efficiency:'glass', prospecting:'stone', capacitors:'copperIngot' };
+  fabrication:'circuit', gridOutput:'wire', efficiency:'glass', prospecting:'stone', capacitors:'copperIngot',
+  durability:'steel' };
 
 /* hand-authored lanes: [groupLabel, [startCol, spec…]…]. A spec is a
    tech id, 'up:track' (expands to five chained rank nodes) or null
@@ -1651,6 +1695,7 @@ const TREE_LANES = [
     [2, 'electrification', 'pylons', 'substations'],
     [3, 'solarPower', 'solarTowers', 'helios'],
     [4, 'accumulators'],
+    [4, 'sunAnchor'],
     [3, 'fuelTurbines', null, 'chromeTurbines'],
     [4, 'drones'],
     [1, 'up:gridOutput'],
@@ -1667,10 +1712,11 @@ const TREE_LANES = [
     [1, 'tunnels', null, 'deepTunnels'],
     [1, 'depots', 'massStorage'],
     [1, 'platforms'],
-    [2, 'reservoirs']],
+    [2, 'pumpjacks', 'reservoirs']],
   ['Production',
     [1, 'up:metallurgy'],
     [1, 'up:fabrication'],
+    [1, 'up:durability'],
     [3, 'arcFurnaces', 'plasmaForges'],
     [3, 'poweredAssembly', 'nanoForges'],
     [2, 'modules', null, 'prodModules'],
@@ -1980,7 +2026,7 @@ function renderRecipeBook(S){
   const needed = (ms && (ms.req || ms.handMine)) || {};
   let h = '';
 
-  /* --- raw materials --- */
+  /* --- raw materials — only ones you've touched or need right now --- */
   h += `<div class="selSection">Raw materials — dug from deposits (endless)</div>`;
   const RAW = [
     ['ironOre',  'Grey-blue boulders near the Core. Your first metal.'],
@@ -1991,7 +2037,10 @@ function renderRecipeBook(S){
     ['titanOre', 'Violet boulders at the far edges of the world. The last age of machines.'],
     ['chromite', 'Teal crystal in the middle and far rings. Alloys into chrome — the metal of the Sunforge.'],
   ];
+  const rawSeen = id => needed[id] || S.inv[id] || S.delivered[id] || S.handMined[id] || S.stats.made[id];
+  let rawHidden = 0;
   for (const [id, note] of RAW){
+    if (!rawSeen(id)){ rawHidden++; continue; }
     h += `<div class="compRow" data-rk="${id}">
       <img src="${R.itemIcon(id, 52).toDataURL()}" width="26" height="26">
       <div class="compMid">
@@ -2002,14 +2051,17 @@ function renderRecipeBook(S){
       <span class="compMachine">Drill / hand</span>
     </div>`;
   }
-  h += `<div class="compRow">
-    <div style="width:26px;height:26px;border-radius:50%;background:#141712;border:2px solid #3b3320;flex:none"></div>
-    <div class="compMid">
-      <div class="compName">Crude oil</div>
-      <div class="compChain"><span>Black seeps in the far wastes. Pumpjacks draw it; pipes carry it to refineries.</span></div>
-    </div>
-    <span class="compMachine">Pumpjack</span>
-  </div>`;
+  if (S.unlocked.pump){
+    h += `<div class="compRow">
+      <div style="width:26px;height:26px;border-radius:50%;background:#141712;border:2px solid #3b3320;flex:none"></div>
+      <div class="compMid">
+        <div class="compName">Crude oil</div>
+        <div class="compChain"><span>Black seeps in the far wastes. Pumpjacks draw it; pipes carry it to refineries.</span></div>
+      </div>
+      <span class="compMachine">Pumpjack</span>
+    </div>`;
+  } else rawHidden++;
+  if (rawHidden) h += `<div class="ghostNote">…${rawHidden} more raw material${rawHidden > 1 ? 's' : ''} wait${rawHidden > 1 ? '' : 's'} farther out…</div>`;
 
   /* --- recipes, grouped by tier --- */
   const TIER_NAMES = { 1:'Smelting & basic parts', 2:'Industrial parts', 3:'Advanced fabrication', 4:'The three works' };
@@ -2111,7 +2163,8 @@ function renderHowTo(){
   overflow spilling to the others. <b>Tunnels</b> dive under up to 4 tiles
   (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
   buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
-  Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.</p>
+  Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.
+  (One exception: a machine that has <b>broken down</b> is scrap and refunds nothing.)</p>
 
   <div class="selSection">Machines</div>
   <p class="howP">Machines accept ingredients from belts on <b>any side</b> and eject from their
@@ -2119,22 +2172,29 @@ function renderHowTo(){
   contents; <b>fabricators and assemblers</b> craft one chosen recipe — click the machine and pick it.
   The <b>alloy furnace</b> fuses two inputs: iron ingots + coal → ${ic('steel')} steel,
   quartz + coal → ${ic('silicon')} silicon. Mk1 machines burn coal; electric machines are far
-  faster but need power — either from the grid, or by dropping coal straight into their hopper,
-  which they burn before touching the grid. A machine with a blinking <b>amber dot</b> is out of fuel;
+  faster but only run on <b>grid power</b> — coal means nothing to them. A machine with a blinking
+  <b>amber dot</b> is out of fuel;
   a stalled machine usually has a jammed chute or missing ingredients — click it to see its buffers.</p>
+  <p class="howP">Nothing lasts forever: every drill, furnace, assembler, crusher, refinery and pumpjack
+  <b>wears out</b> as it works and one day <b>breaks down for good</b> — a charred husk you must remove
+  (no refund) and replace. Higher-mark machines endure longer, <b>Durability</b> ranks in the tech tree
+  add +12% life apiece, and the ${ic('durModule')} <b>hardened module</b> adds +50% to whatever it's
+  slotted in. How long exactly? The machines don't say.</p>
 
   <div class="selSection">Power</div>
-  <p class="howP">Electric machines run two ways. The simplest: drop or belt coal into any of them —
-  drills, furnaces, pumpjacks — and they burn their own hopper, at full speed, with no grid at all.
-  <b>Coal hoppers</b> triples that bunker and <b>Forced draft</b> makes every coal-fired building
-  30% faster while eating coal 60% faster. The other road is <b>Electrification</b>: it
-  wakes the true grid, where generators make power but <b>poles deliver it</b>. A ${ic('wire')}
+  <p class="howP">Coal serves the burner age: Mk1 drills, kilns, fabricators and crushers eat it
+  directly (<b>Coal hoppers</b> triples their bunker, <b>Forced draft</b> runs them 30% faster while
+  eating coal 60% faster). Everything beyond runs on electricity, and electricity means
+  <b>Electrification</b>: it wakes the grid, where generators make power but <b>poles deliver it</b>.
+  A ${ic('wire')}
   <b>power pole</b> links to poles within 7 tiles (wires draw automatically) and energises the 5×5
   area around it — generators must stand in a pole's area too. Separate pole clusters are
   <b>separate grids</b>, each with its own supply and demand. A blinking <b>red bolt</b> means no
   pole in range; when demand exceeds supply everything electric slows down proportionally (a
   brown-out — the top-right bar turns red). Generators idle when nothing draws power, so fuel is
-  never wasted. Later: <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn
+  never wasted. And power is <b>scarce</b>: machines are hungry and generators modest, so budget the
+  grid like any other production line — banks of generators, whole fields of solar. Later:
+  <b>solar arrays</b> trickle free power and <b>fuel turbines</b> burn
   ${ic('fuelCell')} fuel cells for serious output; the <b>pylon</b> spans 14 tiles.</p>
 
   <div class="selSection">Air freight</div>
@@ -2145,11 +2205,13 @@ function renderHowTo(){
   depot chest. Both ends need grid power to dispatch; airborne drones always finish their run.</p>
 
   <div class="selSection">Day & night</div>
-  <p class="howP">The world turns: every eleven minutes a full <b>day/night cycle</b> passes (the sun
-  icon by the power bar shows where you are). <b>Solar power follows the sun</b> — full output at
+  <p class="howP">The world turns: every eleven minutes a full <b>day/night cycle</b> passes (the
+  <b>clock</b> in the top-right corner shows the hour — ☀ by day, ☾ after dark). <b>Solar power follows the sun</b> — full output at
   noon, nothing at night — so a solar-heavy factory browns out after dusk unless you research
-  <b>accumulators</b>: grid batteries that bank surplus by day and feed it back through the dark.
-  <b>Lamps</b> (cheap, with Electrification) light the night in a warm circle around your factory floors.</p>
+  <b>accumulators</b>: grid batteries that bank surplus by day — slowly, a thin trickle per unit,
+  so start charging long before dusk — and feed it back through the dark.
+  <b>Lamps</b> (cheap, with Electrification) light the night in a warm circle around your factory floors.
+  And deep in the solar branch waits <b>The Sun Anchor</b> — a toggle to hold the sky still.</p>
 
   <div class="selSection">The tech tree</div>
   <p class="howP">Once the <b>laboratory</b> arrives, it is the road onward: milestones hand out only the
@@ -2170,7 +2232,8 @@ function renderHowTo(){
   machine to slot modules into it.</p>
 
   <div class="selSection">Oil</div>
-  <p class="howP">Black seeps in the far wastes hold crude. A <b>pumpjack</b> placed over a seep draws
+  <p class="howP">Black seeps in the far wastes hold crude. Research <b>Oil prospecting</b> for the
+  tools: a <b>pumpjack</b> placed over a seep draws
   it endlessly; <b>pipes</b> carry it to a <b>refinery</b>, which cracks it into ${ic('plastic')}
   plastic (with coal) or ${ic('fuelCell')} fuel cells (with steel). Pipes only connect pumpjacks,
   refineries, <b>reservoirs</b> (a researchable 240-crude buffer tank) and other pipes.
@@ -2185,7 +2248,9 @@ function renderHowTo(){
   research <b>Pontoon platforms</b>, then drag a line of decking across and belt right over it —
   platforms carry machines and power poles too (tunnels dive underneath, and drones fly straight over).
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
-  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Ratios matter: one
+  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Prices climb as you do:
+  every completed tier makes all buildings dearer, and once you own one of an electric building,
+  every further copy of it costs <b>five times</b> as much. Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
   feels polite. The <b>tech tree</b> (${kb('T')}) sells permanent upgrade ranks — belt speed, drill
   speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk
@@ -2295,7 +2360,7 @@ function bindMinimap(){
 function refreshAlerts(){
   const S = UI.S;
   const bar = $('alertBar');
-  const fuel = [], power = [], jam = [];
+  const fuel = [], power = [], jam = [], broken = [];
   // a machine only counts as jammed after sitting at a FULL output buffer
   // for 3+ seconds — brief cap-touches while still ejecting don't flicker it
   if (!UI._jamSince) UI._jamSince = {};
@@ -2303,13 +2368,11 @@ function refreshAlerts(){
   for (const e of S.ents){
     const def = F.BUILDINGS[e.key];
     if (!def) continue;
-    const stokable = F.stoked(S) && def.power && F.stokable(e);
-    const hasCoal = e.fuelT > 0 || e.fuelBuf > 0;
-    if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine' || (stokable && !e.netId)) &&
+    if (e.broken){ broken.push(e); continue; }   // dead machines get one alert, not three
+    if ((def.fuel || e.kind === 'gen' || e.kind === 'turbine') &&
         e.fuelT <= 0 && e.fuelBuf <= 0) fuel.push(e);
-    // an off-grid machine happily burning its hopper is not a power problem
     if ((def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar') &&
-        !e.netId && !(stokable && hasCoal)) power.push(e);
+        !e.netId) power.push(e);
     const atCap = (e.kind === 'machine' && e.outTotal >= 6 + F.bufBonus(S)) ||
                   (e.kind === 'miner' && e.outTotal >= 4 + F.bufBonus(S));
     if (atCap){
@@ -2319,15 +2382,16 @@ function refreshAlerts(){
       delete UI._jamSince[e.id];
     }
   }
-  UI._alerts = { fuel, power, jam };
-  updateCallout(S, { fuel, power, jam });
-  const sig = fuel.length + '|' + power.length + '|' + jam.length;
+  UI._alerts = { fuel, power, jam, broken };
+  updateCallout(S, { fuel, power, jam, broken });
+  const sig = fuel.length + '|' + power.length + '|' + jam.length + '|' + broken.length;
   if (UI._alertSig === sig) return;
   UI._alertSig = sig;
   let h = '';
   if (fuel.length) h += `<button class="alertChip aFuel" data-alert="fuel" title="Click to jump to one">🔥 ${fuel.length} out of fuel</button>`;
   if (power.length) h += `<button class="alertChip aPower" data-alert="power" title="Click to jump to one">⚡ ${power.length} no power pole</button>`;
   if (jam.length) h += `<button class="alertChip aJam" data-alert="jam" title="Click to jump to one">⛔ ${jam.length} output jammed</button>`;
+  if (broken.length) h += `<button class="alertChip aFuel" data-alert="broken" title="Click to jump to one">⚙ ${broken.length} broken down</button>`;
   bar.innerHTML = h;
   bar.querySelectorAll('[data-alert]').forEach(b =>
     b.addEventListener('click', () => jumpAlert(b.dataset.alert)));
@@ -2337,9 +2401,10 @@ function refreshAlerts(){
    troubled machine itself — a toast can be missed; this stays until the
    player actually fixes it, then that kind never anchors again. */
 const CALLOUT_TEXT = {
-  fuel:  'out of coal — click me, add fuel',
-  power: 'no power — string poles here, or drop in coal',
-  jam:   'output jammed — give me an empty belt',
+  fuel:  'Out of coal',
+  power: 'No power',
+  jam:   'Output jammed',
+  broken:'Broken down — replace it',
 };
 function updateCallout(S, lists){
   const co = UI.callout;
@@ -2355,7 +2420,7 @@ function updateCallout(S, lists){
     }
     return;
   }
-  for (const kind of ['fuel', 'power', 'jam']){
+  for (const kind of ['fuel', 'power', 'jam', 'broken']){
     if (S.flags['co_' + kind] || !lists[kind].length) continue;
     const e = lists[kind][0];
     UI.callout = { kind, entId: e.id, x: e.x + e.w / 2, y: e.y, text: CALLOUT_TEXT[kind] };
@@ -2402,9 +2467,9 @@ function tipOnce(id){
   }
 }
 
-function toastCost(def){
+function toastCost(key){
   const S = UI.S;
-  const lacks = Object.entries(def.cost)
+  const lacks = Object.entries(F.buildCost(S, key))
     .filter(([k, n]) => F.invCount(S, k) < n)
     .map(([k, n]) => `${iconImg(k, 13)} ${n - F.invCount(S, k)} more ${F.ITEMS[k].name}`);
   toast('Need ' + lacks.join(', '), 'warn', 3200);
@@ -2575,6 +2640,13 @@ function drainEvents(){
       case 'place':
         if (ev.key === 'lab') tipOnce('firstLab');
         break;
+      case 'broken': {
+        A.sfx.error();
+        toast(`<b style="color:#ff9a76">⚙ ${F.BUILDINGS[ev.key].name} has broken down</b><br>` +
+          `Worn out from service. It's scrap now — remove it and place a fresh one. ` +
+          `Durability research and hardened modules make them last longer.`, 'warn', 8000);
+        break;
+      }
       case 'research': {
         A.sfx.milestone();
         const tk = F.TECHS[ev.id];
@@ -2790,6 +2862,9 @@ UI.update = function(dt){
     for (const b of $('buildBar').children)
       if (b.classList) b.classList.toggle('gpulse', !!b.dataset && b.dataset.key === UI.pulseKey);
     $('techChip').classList.toggle('gpulse', UI.pulseKey === 'tree');
+    // the Sun Anchor toggle appears once researched
+    $('btnSun').classList.toggle('hidden', !S.research.done.sunAnchor);
+    $('btnSun').classList.toggle('on', !!S.sunFrozen);
   }
 
   /* minimap at ~8 Hz */

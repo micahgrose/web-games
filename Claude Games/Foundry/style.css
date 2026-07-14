@@ -142,6 +142,15 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
   display:flex; align-items:center; gap:8px;
   height:40px; padding:0 12px 0 8px;
 }
+#clockWrap{
+  display:flex; align-items:center; gap:7px;
+  height:40px; padding:0 12px;
+}
+#clockSky{ font-size:15px; line-height:1; }
+#clockTime{
+  font-size:13px; color:var(--ink);
+  font-variant-numeric:tabular-nums; letter-spacing:.06em;
+}
 #powerBars{ width:110px; }
 #powerBarOuter{ height:6px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; }
 #powerBarFill{ height:100%; width:0%; border-radius:4px; background:var(--accent2); transition:width .25s, background .25s; }
@@ -439,6 +448,19 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .msReqs{ display:flex; flex-wrap:wrap; gap:5px 14px; margin-top:7px; font-size:12px; color:var(--ink-dim); }
 .msReqs span{ display:inline-flex; align-items:center; gap:5px; font-variant-numeric:tabular-nums; }
 .msLocked{ font-size:11px; color:var(--ink-faint); font-style:italic; }
+
+/* Sun Anchor toggle */
+#btnSun.on{ color:var(--accent); border-color:rgba(255,180,84,.5); background:rgba(255,180,84,.1); }
+
+/* Lab panel: what this lab is researching, prominently */
+.labProj{
+  margin:4px 0 8px; padding:9px 10px; border-radius:8px;
+  border:1px solid rgba(192,122,232,.3); background:rgba(192,122,232,.06);
+}
+.labProjName{ font-size:12.5px; }
+.labProjName b{ color:#d9b8ef; }
+.labProjPacks{ font-size:11.5px; color:var(--ink-dim); display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+.labProjPacks:empty{ display:none; }
 
 /* Tech tree tab */
 #bigPanel.wide{ width:min(1120px, calc(100vw - 28px)); }

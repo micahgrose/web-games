@@ -30,6 +30,9 @@
 
   <!-- Top-right cluster -->
   <div id="topRight">
+    <div id="clockWrap" class="panel" title="The world's clock — an 11-minute day. Solar follows the sun.">
+      <span id="clockSky">☀</span><span id="clockTime">--:--</span>
+    </div>
     <div id="powerWrap" class="panel" title="Power grid">
       <canvas id="powerIcon" width="26" height="26"></canvas>
       <div id="powerBars">
@@ -37,6 +40,7 @@
         <div id="powerText">—</div>
       </div>
     </div>
+    <button id="btnSun" class="iconBtn panel hidden" title="The Sun Anchor — hold the day/night cycle still">☀</button>
     <button id="btnBlueprint" class="iconBtn panel" title="Blueprint — copy an area, stamp it elsewhere (C)">⧉</button>
     <button id="btnDecon" class="iconBtn panel" title="Deconstruct — drag a box to remove & refund (X)">✂</button>
     <button id="btnSpeed" class="iconBtn panel" title="Game speed — click to cycle, Space to pause">▶</button>

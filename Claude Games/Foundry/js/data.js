@@ -58,6 +58,7 @@ F.ITEMS = {
   speedModule:{ name:'Speed module',      tier:2, icon:{kind:'module', c1:'#ffd76e', c2:'#b06a20', g:'speed'} },
   effModule:  { name:'Efficiency module', tier:2, icon:{kind:'module', c1:'#8fe0b0', c2:'#3f7f5f', g:'eff'} },
   prodModule: { name:'Productivity module',tier:3, icon:{kind:'module', c1:'#cdbdf5', c2:'#7a68b0', g:'prod'} },
+  durModule:  { name:'Hardened module',   tier:2, icon:{kind:'module', c1:'#9fb8c8', c2:'#54707f', g:'dur'} },
   /* science packs (consumed by laboratories) */
   pack1:      { name:'Cog science',     tier:1, icon:{kind:'flask', c1:'#f0a26a', c2:'#a86038'} },
   pack2:      { name:'Volt science',    tier:2, icon:{kind:'flask', c1:'#6ec6ff', c2:'#2f6a94'} },
@@ -106,8 +107,9 @@ F.RECIPES = {
   powerCore:  { out:'powerCore',   outN:1, in:{fuelCell:2, frame:1, motor:1},    time:6.0, machine:'asm', unlock:8 },
   hullPlate:  { out:'hullPlate',   outN:1, in:{titanIngot:2, steel:2, glass:1},  time:6.0, machine:'asm', unlock:8 },
   /* modules */
-  speedModule:{ out:'speedModule', outN:1, in:{circuit:2, wire:4},     time:4.0, machine:'asm', tech:'modules' },
-  effModule:  { out:'effModule',   outN:1, in:{circuit:2, glass:2},    time:4.0, machine:'asm', tech:'modules' },
+  speedModule:{ out:'speedModule', outN:1, in:{circuit:18, wire:36},   time:36.0, machine:'asm', tech:'modules' },
+  effModule:  { out:'effModule',   outN:1, in:{circuit:18, glass:18},  time:36.0, machine:'asm', tech:'modules' },
+  durModule:  { out:'durModule',   outN:1, in:{steel:12, gear:18},     time:18.0, machine:'asm', tech:'modules' },
   prodModule: { out:'prodModule',  outN:1, in:{advCircuit:2, plastic:2},time:6.0, machine:'asm', tech:'prodModules' },
   /* science packs */
   pack1:      { out:'pack1', outN:1, in:{gear:1, copperIngot:1},    time:4.0, machine:'asm', unlock:2 },
@@ -157,7 +159,7 @@ const B = F.BUILDINGS = {
              desc:'Buffers up to 60 items, releases them out the front. Smooths surges.' },
   chest2:  { name:'Vault',           cat:'log', kind:'chest', w:1, h:1, cap:240, cost:{steel:12, plate:16},   tech:'massStorage',
              desc:'A reinforced depot holding 240 items. Feeds out the front like a depot.' },
-  pipe:    { name:'Pipe',            cat:'log', kind:'pipe', w:1, h:1, cap:40, cost:{plate:2},                unlock:6,
+  pipe:    { name:'Pipe',            cat:'log', kind:'pipe', w:1, h:1, cap:40, cost:{plate:2},                tech:'pumpjacks',
              desc:'Carries crude oil between pumpjacks and refineries.' },
   tank:    { name:'Reservoir',       cat:'log', kind:'tank', w:2, h:2, cap:240, cost:{steel:20, plate:16, glass:10}, tech:'reservoirs',
              desc:'Buffers 240 crude between connected pipes — fills when the line runs rich, feeds it when pumps fall behind.' },
@@ -174,8 +176,8 @@ const B = F.BUILDINGS = {
              desc:'Cuts ore with a plasma lance. Extremely fast.' },
   miner4:  { name:'Quantum drill',   cat:'ext', kind:'miner', w:1, h:1, speed:7, mineTime:2.4, power:24, cost:{frame:9, processor:5, motor:18}, tech:'quantumDrills',
              desc:'Folds the deposit through itself. Absurd yield, serious power draw.' },
-  pump:    { name:'Pumpjack',        cat:'ext', kind:'pump', w:2, h:2, rate:3, power:6, cost:{steel:20, gear:16, motor:5}, unlock:6,
-             desc:'Draws crude oil from a seep. Connect pipes to carry it away.' },
+  pump:    { name:'Pumpjack',        cat:'ext', kind:'pump', w:2, h:2, rate:3, power:6, cost:{steel:20, gear:16, motor:5}, tech:'pumpjacks',
+             desc:'Draws crude oil from a seep. Electric — needs the grid. Connect pipes to carry the crude away.' },
   /* --- production --- */
   smelter1:{ name:'Stone kiln',      cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:1,   fuel:true, cost:{stone:12}, unlock:1,
              desc:'Smelts ore into ingots. Burns coal.' },
@@ -186,7 +188,7 @@ const B = F.BUILDINGS = {
   smelter4:{ name:'Sunforge',        cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:7,   power:40, cost:{chromsteel:40, advCircuit:20, brick:50}, tech:'sunforge',
              desc:'A caged fragment of dawn. The final word in smelting.' },
   alloy:   { name:'Alloy furnace',   cat:'pro', kind:'machine', fam:'alloy', w:2, h:2, speed:1.6, power:10, cost:{brick:20, plate:18, wire:14}, unlock:4,
-             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — run it off a grid, or drop coal straight into its hopper.' },
+             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — needs a powered grid.' },
   asm1:    { name:'Fabricator',      cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:1,   fuel:true, cost:{brick:8, ironIngot:8}, unlock:2,
              desc:'Crafts parts from a chosen recipe. Burns coal.' },
   asm2:    { name:'Assembler',       cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:2.2, power:10, cost:{steel:12, gear:16, circuit:8}, tech:'poweredAssembly',
@@ -206,10 +208,10 @@ const B = F.BUILDINGS = {
   beacon:  { name:'Beacon',          cat:'pro', kind:'beacon', w:2, h:2, power:20, range:4, slots:2, cost:{steel:40, advCircuit:16, glass:24}, tech:'beacons',
              desc:'Broadcasts its slotted modules at half strength to every machine in its area. Productivity does not transmit.' },
   /* --- power --- */
-  lamp:    { name:'Lamp',            cat:'pow', kind:'lamp', w:1, h:1, power:1, glow:5, cost:{glass:3, wire:3, ironIngot:2}, tech:'electrification',
+  lamp:    { name:'Lamp',            cat:'pow', kind:'lamp', w:1, h:1, power:1, glow:15, cost:{glass:3, wire:3, ironIngot:2}, tech:'electrification',
              desc:'Pushes back the night in a warm circle. Needs a power pole in range; draws almost nothing.' },
   acc:     { name:'Accumulator',     cat:'pow', kind:'acc', w:1, h:1, cost:{steel:10, wire:20, glass:6}, tech:'accumulators',
-             desc:'Banks 900 P·s of surplus grid energy and feeds it back when demand outruns supply — the night-side of a solar farm.' },
+             desc:'Banks 900 P·s of surplus grid energy and feeds it back when demand outruns supply. Charges at a trickle — plan a long day for a short night.' },
   pole1:   { name:'Power pole',      cat:'pow', kind:'pole', w:1, h:1, reach:7, cover:2, cost:{ironIngot:3, wire:3}, tech:'electrification',
              desc:'Carries power. Links to poles within 7 tiles and powers machines in the 5×5 area around it. Generators must be in a pole\'s area too.' },
   pole2:   { name:'Pylon',           cat:'pow', kind:'pole', w:1, h:1, reach:14, cover:3, cost:{steel:10, wire:16}, tech:'pylons',
@@ -230,6 +232,39 @@ const B = F.BUILDINGS = {
              desc:'Chromsteel blades spinning near the speed of sound. 400 P at full load.' },
 };
 F.BUILD_ORDER = Object.keys(B);
+
+/* Power is precious: every electric consumer draws five times the draw
+   written above (lamps stay cheap). Generation was cut to a third to match —
+   the grid is a thing you earn, not a thing you sprinkle. */
+for (const k in B){ if (B[k].power && B[k].kind !== 'lamp') B[k].power *= 5; }
+
+/* Hidden service life, in completed operations (ores dug, crafts finished,
+   crude drawn). Higher marks last longer. NEVER shown to the player — machines
+   simply break down one day and must be replaced. */
+{
+  const LIFE = { miner1:500, miner2:800, miner3:1300, miner4:2000, pump:800,
+    smelter1:500, smelter2:800, smelter3:1300, smelter4:2000, alloy:800,
+    asm1:500, asm2:800, asm3:1300, asm4:2000, refinery:1000,
+    crusher1:500, crusher2:800 };
+  for (const k in LIFE) B[k].life = LIFE[k];
+}
+
+/* What a building costs to place RIGHT NOW: base cost +25% per completed
+   tier — and once you own one of an electric building, every further copy
+   of it costs five times as much. Platforms are terrain and stay flat.
+   The price actually paid rides the entity (e.paid) so removal refunds
+   exactly what it cost — broken machines refund nothing. */
+F.buildCost = function(S, key){
+  const def = B[key];
+  if (!def || def.kind === 'platform') return def && def.cost;
+  let mul = 1 + .25 * (S.msIndex || 0);
+  if (def.power && S.ents.some(e => e.key === key)) mul *= 5;
+  if (mul === 1) return def.cost;
+  const out = {};
+  for (const k in def.cost) out[k] = Math.ceil(def.cost[k] * mul);
+  return out;
+};
+
 F.CATS = [
   { id:'ext', name:'Extraction' },
   { id:'log', name:'Logistics' },
@@ -243,7 +278,10 @@ F.CATS = [
    spine recipes; everything else is researched in the tech tree.
    IDs are stable keys — saves store the id of the tier in progress, so
    inserting tiers is safe. reqResearch: also requires N completed techs.
-   recap: the one-line lesson shown when the tier completes. */
+   recap: the one-line lesson shown when the tier completes.
+   Material grants stop after the fifth tier — the training wheels come off —
+   and from Vitreous Earth on every requirement is five times what the early
+   game would suggest. The factory must scale or die. */
 F.MILESTONES = [
   { id:'m0', name:'Strike the Earth',
     flavor:'The Core is dark. Everything begins with your own two hands: tear iron and stone from the ground.',
@@ -284,89 +322,89 @@ F.MILESTONES = [
     flavor:'The first shaped part. From here, the factory makes pieces of itself.',
     req:{ gear:25 },
     unlocks:['r:wire','r:plate'],
-    grant:{ copperIngot:10 },
+    grant:{},
     hint:'The fabricator crafts one chosen recipe — click it, pick Gear, and feed it iron ingots.',
     recap:'Machines craft what you choose. Choosing well is the game.' },
   { id:'m3', name:'Cogs & Current',
     flavor:'Gears to turn, wire to carry the spark — when you learn how to make one.',
     req:{ gear:40, wire:40 },
     unlocks:['lab','r:pack1'],
-    grant:{ brick:8, wire:6, gear:4, pack1:4 },
+    grant:{},
     hint:'Wire needs a copper chain. One fabricator keeps up with about two kilns — watch where lines starve and add machines there.',
     recap:'Ratios rule the floor: roughly two kilns feed one fabricator.' },
   { id:'mLab', name:'The Laboratory',
     flavor:'Curiosity, bottled. The lab reads what you brew, and the tree of knowing grows.',
     req:{ pack1:10 }, reqResearch: 1,
     unlocks:['r:glass'],
-    grant:{ plate:10, coal:20 },
+    grant:{},
     hint:'Cog science is crafted like any part (gear + copper ingot). Belt it into the lab, open the Tech tree (T), pick a project — and finish your first research.',
     recap:'Science is just another product. Brew it, and the tree grows with you.' },
   { id:'m4', name:'Vitreous Earth',
     flavor:'Quartz sleeps in the middle distance. Melt it to glass — the factory must reach outward.',
-    req:{ glass:45, plate:90 },
+    req:{ glass:225, plate:450 },
     unlocks:['alloy','r:steel','r:silicon','r:circuit','r:pack2'],
-    grant:{ steel:6 },
-    hint:'Quartz lies beyond your starting field — a real expedition. Kilns smelt it into glass; 90 plates means the iron line needs widening too.',
+    grant:{},
+    hint:'Quartz lies beyond your starting field — a real expedition. Kilns smelt it into glass; 450 plates means the iron line needs widening too.',
     recap:'The factory reaches outward now. Distance is a resource.' },
   { id:'mAlloy', name:'Alloys',
     flavor:'Two things, made one, stronger than either.',
-    req:{ steel:30 },
+    req:{ steel:150 },
     unlocks:[],
-    grant:{ coal:20 },
-    hint:'The alloy furnace fuses two belts of input: iron ingots + coal → steel. It\'s electric — drop coal in its hopper, or research Electrification.',
+    grant:{},
+    hint:'The alloy furnace fuses two belts of input: iron ingots + coal → steel. It\'s electric — research Electrification, then generators and a power pole wake it. It drinks deep; build several.',
     recap:'Two inputs, one output. Steel will be in everything now.' },
   { id:'m5', name:'The First Circuit',
     flavor:'Wire and silicon, etched into thought.',
-    req:{ circuit:60, steel:45 },
+    req:{ circuit:300, steel:225 },
     unlocks:['r:motor'],
-    grant:{ circuit:5, steel:5 },
+    grant:{},
     hint:'Silicon comes off the alloy furnace too: quartz + coal. Circuits want wire and silicon — two chains meeting in one fabricator.',
     recap:'Chains of chains: quartz to silicon, silicon to thought.' },
   { id:'mA', name:'Deep Prospects',
     flavor:'Your instruments taste something old beneath the waste. Follow the scent of tar.',
-    req:{ pack2:25, motor:25 },
-    unlocks:['pump','pipe'],
-    grant:{ steel:8 },
-    hint:'The Core drinks science itself now — belt volt packs straight in. Pumpjacks sit on oil seeps and pipes carry the crude; nothing can crack it yet, so stockpile.',
+    req:{ pack2:125, motor:125 },
+    unlocks:[],
+    grant:{},
+    hint:'The Core drinks science itself now — belt volt packs straight in. Research <b>Oil prospecting</b>: pumpjacks and pipes for the seeps at the world\'s edge. Nothing can crack crude yet, so stockpile.',
     recap:'The Core drinks science. And something waits under the tar.' },
   { id:'mB', name:'Black Blood',
     flavor:'Deep in the waste, the ground weeps oil. Drink it.',
-    req:{ steel:100, motor:40 },
+    req:{ steel:500, motor:200 },
     unlocks:['refinery','r:plastic','r:fuelCell','r:tarCoal'],
-    grant:{ steel:10 },
+    grant:{},
     hint:'Oil seeps wait at the world\'s far edge. Pumpjacks draw the crude, pipes carry it — build the long road out.',
     recap:'Oil flows in pipes, not on belts — a second bloodstream for the factory.' },
   { id:'mCrack', name:'First Crack',
     flavor:'The refinery does not give cleanly. Everything it makes, it makes with a cost.',
-    req:{ plastic:20 },
+    req:{ plastic:100 },
     unlocks:[],
-    grant:{ plastic:6 },
+    grant:{},
     hint:'Set the refinery to Plastic (crude + coal). Tar shares its chute — filter it aside with a splitter and smelt it back into coal, or it jams everything.',
     recap:'Byproducts jam whatever ignores them. Tar tamed is coal regained.' },
   { id:'m6', name:'The Refined Age',
     flavor:'What burns can be tamed; what is tamed can think faster.',
-    req:{ plastic:60, fuelCell:25 },
+    req:{ plastic:300, fuelCell:125 },
     unlocks:['r:advCircuit','r:pack3'],
-    grant:{ plastic:8 },
+    grant:{},
     hint:'Fuel cells also feed turbines — research Fuel turbines for serious power. Polymer science opens the deep branches of the tree.',
     recap:'What burns is tamed. Fuel cells hold the fire for later.' },
   { id:'m7', name:'Polymer Mind',
     flavor:'Plastic and copper laid in impossible lattices. The machines improve the machines.',
-    req:{ advCircuit:70, plastic:60 },
+    req:{ advCircuit:350, plastic:300 },
     unlocks:['r:titanIngot','r:frame'],
-    grant:{ advCircuit:5 },
+    grant:{},
     hint:'Titanium waits at the far edges of the world — a violet ore for the last age of machines.',
     recap:'The machines now improve the machines.' },
   { id:'m8', name:'Star Metal',
     flavor:'Titanium bones for a sleeping god.',
-    req:{ titanIngot:70, frame:25 },
+    req:{ titanIngot:350, frame:125 },
     unlocks:['r:processor','r:logicMatrix','r:powerCore','r:hullPlate','r:pack4'],
     grant:{},
     hint:'Everything you have built converges here: processors, cores, hull. Three final components.',
     recap:'Star-metal bones. Everything converges.' },
   { id:'m9', name:'Ignition',
     flavor:'Mind, heart, body. Deliver the three works and the World Engine breathes again.',
-    req:{ logicMatrix:12, powerCore:12, hullPlate:12 },
+    req:{ logicMatrix:60, powerCore:60, hullPlate:60 },
     unlocks:[],
     grant:{},
     hint:'The dawn you build is the only dawn there is.',
@@ -476,7 +514,7 @@ F.MILESTONES = [
         done: S => (S.msProg.wire || 0) >= 10 },
     ],
     mLab: [
-      { t:'Place the <b>Laboratory</b> — your grant covers it', pulse:'lab',
+      { t:'Craft brick, wire and gear — then place the <b>Laboratory</b>', pulse:'lab',
         done: S => any(S, e => e.kind === 'lab') },
       { t:'Set a fabricator to <b>Cog science</b> (gear + copper ingot)',
         done: S => any(S, e => fam(e, 'asm') && e.recipe === 'pack1') },
@@ -493,12 +531,16 @@ F.MILESTONES = [
         done: S => minerOn(S, 5) },
     ],
     mAlloy: [
+      { t:'Research <b>Electrification</b> if you haven\'t — the alloy furnace is electric', pulse:'tree',
+        done: S => !!S.research.done.electrification },
       { t:'Place the <b>Alloy furnace</b>; belt in iron ingots AND coal', pulse:'alloy',
         done: S => any(S, e => fam(e, 'alloy')) },
-      { t:'It\'s electric — drop <b>coal in its hopper</b>, or put it on a powered grid', arrow:'ent:alloy',
-        done: S => any(S, e => fam(e, 'alloy') && (fueled(e) || e.netId)) },
+      { t:'Power it: fueled <b>generators</b> and a <b>pole</b> whose area covers them — it drinks deep, expect to build several', arrow:'ent:alloy',
+        done: S => any(S, e => fam(e, 'alloy') && e.netId) },
     ],
     mA: [
+      { t:'Research <b>Oil prospecting</b> — the pumpjack and the pipe', pulse:'tree',
+        done: S => !!S.research.done.pumpjacks },
       { t:'Find an <b>oil seep</b> at the world\'s edge and place a pumpjack on it', arrow:'ore:7', pulse:'pump',
         done: S => any(S, e => e.kind === 'pump') },
       { t:'Run <b>pipes</b> from the pumpjack — stockpile crude for the refinery to come', pulse:'pipe',
@@ -574,12 +616,15 @@ F.TECHS = {
     desc:'Silent, fuel-free panels — 12 P in full sun, nothing at night.',
     cost:{ pack2:14 }, req:['electrification'], unlocks:['solar'] },
   accumulators:{ name:'Accumulators', icon:'fuelCell',
-    desc:'Grid batteries: bank surplus power by day, spend it through the night. Each stores 900 P·s and moves up to 45 P.',
+    desc:'Grid batteries: bank surplus power by day, spend it through the night. Each stores 900 P·s — they charge at a trickle, so start banking early.',
     cost:{ pack2:16 }, req:['solarPower'], unlocks:['acc'] },
+  sunAnchor:   { name:'The Sun Anchor', icon:'glass',
+    desc:'The Engine grips the sky itself: a toggle appears by the power bar to hold the day-night cycle still — freeze the sun wherever it stands, release it when you choose.',
+    cost:{ pack2:5, pack3:4 }, req:['solarPower'], effect:'sunAnchor' },
   /* --- mid logistics & industry --- */
   modules:     { name:'Machine modules', icon:'speedModule',
-    desc:'Slottable inserts for drills and machines: speed modules (+35% speed, +40% power) and efficiency modules (−30% power). Two slots per machine.',
-    cost:{ pack2:16 }, req:[], unlocks:['r:speedModule','r:effModule'] },
+    desc:'Slottable inserts for drills and machines: speed modules (+35% speed — at ×11.2 power draw), efficiency modules (huge power savings; they tame a speed module down to ×2.3) and hardened modules (machines last 50% longer per module). Two slots per machine.',
+    cost:{ pack2:16 }, req:[], unlocks:['r:speedModule','r:effModule','r:durModule'] },
   crushing2:   { name:'Ball mills', icon:'titanDust',
     desc:'An electric mill that crushes 2.4× faster — and is hard enough to crack titanium.',
     cost:{ pack1:10, pack2:15 }, req:['crushing'], unlocks:['crusher2','r:titanDust','r:titanIngotD'] },
@@ -589,9 +634,12 @@ F.TECHS = {
   deepTunnels: { name:'Deep tunnels', icon:'steel',
     desc:'A longer, faster tunnel — 8 tiles under, at mag-rail speed.',
     cost:{ pack2:12 }, req:['tunnels'], unlocks:['ubelt2'] },
+  pumpjacks:   { name:'Oil prospecting', icon:'motor',
+    desc:'The pumpjack and the pipe: machines to drink the black blood of the deep waste and carry it home. Pumpjacks are electric — bring the grid with you.',
+    cost:{ pack2:10 }, req:[], unlocks:['pump','pipe'] },
   reservoirs:  { name:'Reservoirs', icon:'plate',
     desc:'A 240-crude buffer tank for pipe networks — banks oil when pumps run rich, feeds refineries when they fall behind.',
-    cost:{ pack2:14 }, req:[], unlocks:['tank'] },
+    cost:{ pack2:14 }, req:['pumpjacks'], unlocks:['tank'] },
   /* --- the oil age & beyond --- */
   fuelTurbines:{ name:'Fuel turbines', icon:'fuelCell',
     desc:'Burns refinery fuel cells for 150 P a machine — five burner generators in one footprint.',
@@ -641,6 +689,39 @@ F.TECHS = {
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
+/* Research costs compound HARD with depth. Techs with no prerequisites keep
+   the prices written above; every layer beyond that triples the whole cost
+   (×3, ×9, ×27 …) and non-root layers pay a further ×5 on their science.
+   On top of the packs, every non-root tech also demands a MASSIVE pile of
+   previous-age materials (doubling per layer) — labs read those goods the
+   same way they read science. Computed from the req chains so re-wiring
+   the tree re-prices itself. */
+{
+  const depth = {};
+  const dep = id => {
+    if (depth[id] != null) return depth[id];
+    const rq = F.TECHS[id].req || [];
+    return depth[id] = rq.length ? 1 + Math.max(...rq.map(dep)) : 0;
+  };
+  /* the material bill, keyed by the deepest science a tech drinks */
+  const MATS = {
+    pack1: { plate:60,  gear:50,       brick:40 },
+    pack2: { steel:50,  circuit:40,    wire:100 },
+    pack3: { plastic:80,advCircuit:30, motor:35 },
+    pack4: { titanIngot:60, processor:20, frame:15 },
+  };
+  for (const id of F.TECH_ORDER){
+    const tk = F.TECHS[id], d = dep(id);
+    if (d < 1) continue;
+    const mul = Math.pow(3, d) * 5;
+    let top = 'pack1';
+    for (const pk of ['pack2', 'pack3', 'pack4']) if (tk.cost[pk]) top = pk;
+    for (const pk in tk.cost) tk.cost[pk] *= mul;
+    const mm = Math.pow(2, d - 1);
+    for (const k in MATS[top]) tk.cost[k] = (tk.cost[k] || 0) + MATS[top][k] * mm;
+  }
+}
+
 /* which tech (if any) unlocks a building / 'r:recipe' key */
 F.techOf = function(u){
   for (const id of F.TECH_ORDER){
@@ -653,14 +734,8 @@ F.techOf = function(u){
 /* burn-time multiplier from the combustion tech */
 F.burnMul = S => (S.research && S.research.done.combustion) ? 1.35 : 1;
 
-/* ---- coal-fired machinery (innate) ----
-   Electric machines, drills and pumpjacks can always accept coal and run
-   off it, burning their hopper BEFORE they draw grid power. One coal
-   direct-fired is worth STOKE_PS P·s of work — a generator gets 180 P·s
-   from the same coal, so building out a grid still pays off. */
-F.STOKE_PS = 60;
-F.stoked   = () => true;
-F.stokable = e => e.kind === 'miner' || e.kind === 'machine' || e.kind === 'pump';
+/* Electric machines take no fuel — the grid or nothing. Coal belongs to
+   burner machines (def.fuel) and generators only. */
 F.fuelCap  = S => (S.research && S.research.done.coalHoppers) ? 36 : F.FUEL_CAP;
 F.draftSpd  = S => (S.research && S.research.done.forcedDraft) ? 1.3 : 1;
 F.draftBurn = S => (S.research && S.research.done.forcedDraft) ? 1.6 : 1;
@@ -670,9 +745,13 @@ F.draftBurn = S => (S.research && S.research.done.forcedDraft) ? 1.6 : 1;
    Beacons rebroadcast speed/efficiency at half strength to machines in range;
    productivity is machine-only. */
 F.MODULES = {
-  speedModule: { spd:.35, pow:.40 },
-  effModule:   { pow:-.30 },
+  /* speed is a devil's bargain: one module alone drives draw to ×11.2.
+     Efficiency pulls it back down — a speed+efficiency pair lands at ×2.3
+     (the ×0.2 floor in modEffects catches an efficiency module running solo). */
+  speedModule: { spd:.35, pow:10.2 },
+  effModule:   { pow:-8.9 },
   prodModule:  { prod:.12 },
+  durModule:   { dur:.50 },   // +50% service life; slotted only, never broadcast
 };
 F.MOD_SLOTS = 2;
 F.BEACON_FACTOR = .5;
@@ -716,7 +795,19 @@ F.UPGRADES = {
     costs:[ {stone:20, coal:10}, {ironIngot:20, brick:10}, {gear:15, plate:10}, {steel:10, circuit:5}, {motor:8, advCircuit:4} ] },
   capacitors: { name:'Capacitors',  desc:'Machine input buffers +2 and depots +20 capacity per rank.', per:2, max:5,
     costs:[ {copperIngot:20, wire:10}, {plate:15, circuit:5}, {glass:12, circuit:12}, {steel:15, plastic:10}, {advCircuit:12, frame:4} ] },
+  durability: { name:'Durability',  desc:'All drills and machines last +12% longer before wearing out per rank.', per:.12, max:5,
+    costs:[ {plate:25, gear:20}, {steel:20, circuit:10}, {steel:40, motor:12}, {advCircuit:12, plastic:20}, {processor:5, frame:5} ] },
 };
+
+/* Upgrade rank costs compound like the tech tree — triple per rank — and
+   then the whole science-free ledger is doubled on top:
+   I ×2, II ×6, III ×18, IV ×54, V ×162 of the base prices written above. */
+for (const id in F.UPGRADES){
+  F.UPGRADES[id].costs.forEach((cost, i) => {
+    const mul = 2 * Math.pow(3, i);
+    for (const k in cost) cost[k] *= mul;
+  });
+}
 
 /* upgrade-derived multipliers */
 F.upRank = (S, id) => S.upgrades[id] || 0;
@@ -728,6 +819,18 @@ F.powerMul  = S => 1 + F.upRank(S,'gridOutput') * F.UPGRADES.gridOutput.per;
 F.powerUseMul = S => Math.max(.2, 1 - F.upRank(S,'efficiency') * F.UPGRADES.efficiency.per);
 F.handMul   = S => 1 + F.upRank(S,'prospecting')* F.UPGRADES.prospecting.per;
 F.bufBonus  = S => F.upRank(S,'capacitors') * 2;
+F.lifeMul   = S => 1 + F.upRank(S,'durability') * F.UPGRADES.durability.per;
+
+/* effective service life of an entity: base × research × hardened modules.
+   The number itself stays hidden from the player — only the multipliers
+   are ever shown. */
+F.lifeOf = function(S, e){
+  const def = F.BUILDINGS[e.key];
+  if (!def || !def.life) return Infinity;
+  let mul = F.lifeMul(S);
+  if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) mul += F.MODULES[m].dur;
+  return def.life * mul;
+};
 
 /* ================= ONE-SHOT TIPS ================= */
 F.TIPS = {
@@ -735,12 +838,12 @@ F.TIPS = {
   firstBelt:    'Belts carry items in the direction of the chevrons. Point a belt INTO a machine or the Core to feed it.',
   firstFuelLow: 'A machine is out of coal — click it and move coal from your pocket into its fuel slot, or belt coal into its side.',
   firstBrownout:'Power demand exceeds supply — everything electric is running slow. Build more generators.',
-  firstUnpowered:'An electric machine has no power pole in range. String poles from a generator to it — or drop coal straight into its hopper to run it off the flame.',
+  firstUnpowered:'An electric machine has no power pole in range. String poles out from a generator until one covers it.',
   firstBlocked: 'A machine\'s output is jammed — give it an empty belt to push onto.',
   firstUpgrade: 'The Tech tree (T) is one map of everything: amber <b>upgrade ranks</b> bought with parts, violet <b>technologies</b> researched by labs. It all grows from the Engine.',
   firstSplitter:'Splitters deal items evenly to every open exit — perfect for feeding rows of machines.',
   firstLab:     'Belt science packs into any side of the laboratory, then pick a project in the <b>Tech tree</b> (T) — nearly every machine, belt and generator in the game grows from that tree.',
-  firstModule:  'Modules boost the machine they\'re slotted in. Speed costs extra power, efficiency saves it — and a <b>beacon</b> broadcasts its modules to every machine around it.',
+  firstModule:  'Modules boost the machine they\'re slotted in. Speed costs a FORTUNE in power — pair it with efficiency to tame the bill — and a <b>beacon</b> broadcasts its modules to every machine around it.',
   firstTar:     'Cracking crude leaves <b>tar</b> — it shares the refinery\'s output chute, and a chute full of tar jams the plastic. Filter it aside with a splitter and <b>smelt it back into coal</b>, or research Tar synthesis to re-polymerise it.',
   firstPipe:    'Pipes only connect to pumpjacks, refineries and other pipes.',
   coreFull:     'Deliveries fund construction: everything you belt into the Core becomes buildable material.',
@@ -814,9 +917,11 @@ F.sunFactor = function(S){
   return (t - .9) / .1;
 };
 
-/* accumulator behaviour (per unit) */
-F.ACC_CAP = 900;    // stored energy, P·s
-F.ACC_RATE = 45;    // max charge/discharge, P
+/* accumulator behaviour (per unit) — they fill at a trickle (12× slower
+   than they once did) and give back at half their old rate */
+F.ACC_CAP = 900;         // stored energy, P·s
+F.ACC_CHARGE = 3.75;     // max charge, P
+F.ACC_DISCHARGE = 22.5;  // max discharge, P
 
 /* cargo drones */
 F.DRONE_CAP = 10;      // items per trip

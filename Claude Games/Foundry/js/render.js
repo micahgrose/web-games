@@ -470,6 +470,15 @@ function drawItemIcon(x, id, s){
         x.quadraticCurveTo(4 * u, -1 * u, 0, 3.8 * u);
         x.quadraticCurveTo(-4 * u, -1 * u, 0, -3.8 * u);
         x.closePath(); x.fill();
+      } else if (g2 === 'dur'){   // shield
+        x.beginPath();
+        x.moveTo(0, -3.8 * u);
+        x.lineTo(3.2 * u, -2.2 * u);
+        x.lineTo(3.2 * u, .6 * u);
+        x.quadraticCurveTo(3.2 * u, 2.8 * u, 0, 4 * u);
+        x.quadraticCurveTo(-3.2 * u, 2.8 * u, -3.2 * u, .6 * u);
+        x.lineTo(-3.2 * u, -2.2 * u);
+        x.closePath(); x.stroke();
       } else {                    // prod: plus
         x.beginPath();
         x.moveTo(-3.2 * u, 0); x.lineTo(3.2 * u, 0);
@@ -633,11 +642,31 @@ function drawEntBody(x, e, s, time, S){
       x.fill(); x.stroke();
     }
   }
+  // worn out for good: a charred husk — dark veil + a scorched crack
+  if (e.broken){
+    x.fillStyle = 'rgba(10,8,8,.55)';
+    x.fillRect(0, 0, e.w * s, e.h * s);
+    x.strokeStyle = 'rgba(0,0,0,.85)';
+    x.lineWidth = Math.max(1.5, s * .07);
+    x.lineCap = 'round';
+    x.beginPath();
+    x.moveTo(e.w * s * .2, e.h * s * .16);
+    x.lineTo(e.w * s * .48, e.h * s * .5);
+    x.lineTo(e.w * s * .34, e.h * s * .62);
+    x.lineTo(e.w * s * .62, e.h * s * .88);
+    x.stroke();
+    x.strokeStyle = 'rgba(255,140,90,.28)';
+    x.lineWidth = Math.max(1, s * .03);
+    x.beginPath();
+    x.moveTo(e.w * s * .2, e.h * s * .16);
+    x.lineTo(e.w * s * .48, e.h * s * .5);
+    x.lineTo(e.w * s * .34, e.h * s * .62);
+    x.lineTo(e.w * s * .62, e.h * s * .88);
+    x.stroke();
+  }
   // disconnected from any pole network → blinking red bolt
-  // (unless it's a stoked machine happily burning coal from its hopper)
-  if (S && !e.netId &&
-      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc')) &&
-      !(def.power && F.stoked(S) && F.stokable(e) && (e.fuelT > 0 || e.fuelBuf > 0))){
+  else if (S && !e.netId &&
+      (def && (def.power || e.kind === 'gen' || e.kind === 'turbine' || e.kind === 'solar' || e.kind === 'acc'))){
     drawBolt(x, s * .22, s * .24, s * .30, `rgba(255,110,110,${.55 + .35 * Math.sin(time * 5)})`);
   }
 }
@@ -2018,6 +2047,19 @@ R.onEvent = function(S, ev){
         });
       }
       break;
+    case 'broken': {
+      // a machine dies: one dark cough of smoke and soot
+      const bdef = F.BUILDINGS[ev.key];
+      for (let i = 0; i < 14; i++){
+        R.spawnParticle({
+          x: ev.x + (bdef ? bdef.w / 2 : .5) + (Math.random() - .5) * (bdef ? bdef.w : 1),
+          y: ev.y + (bdef ? bdef.h / 2 : .5) + (Math.random() - .5) * (bdef ? bdef.h : 1),
+          vx: (Math.random() - .5) * .8, vy: -.4 - Math.random() * .9,
+          life: 1.6, maxLife: 1.6, color: 'rgba(62,56,52,.6)', size: .12 + Math.random() * .08, drag: .6,
+        });
+      }
+      break;
+    }
     case 'handmine':
       for (let i = 0; i < 5; i++){
         R.spawnParticle({
@@ -2328,11 +2370,21 @@ R.draw = function(S, dt, U){
   const NIGHT_MAX = .84;
   const dark = (1 - sun) * NIGHT_MAX;
   if (dark > .01){
-    x.fillStyle = `rgba(6,9,20,${dark})`;
-    x.fillRect(0, 0, R.W, R.H);
     const s2 = R.tilePx();
-    x.save();
-    x.globalCompositeOperation = 'lighter';
+    /* The darkness lives on its own layer, and lamps punch holes in it —
+       so lamplight REVEALS the ground as it looks by day instead of
+       painting foggy amber over it. Overlapping holes just merge (erasing
+       twice is still erased), so clumps of lamps can never blow out. */
+    if (!R._nightCv) R._nightCv = document.createElement('canvas');
+    const nc = R._nightCv;
+    if (nc.width !== R.W || nc.height !== R.H){ nc.width = R.W; nc.height = R.H; }
+    const nx = nc.getContext('2d');
+    nx.globalCompositeOperation = 'source-over';
+    nx.clearRect(0, 0, R.W, R.H);
+    nx.fillStyle = `rgba(6,9,20,${dark})`;
+    nx.fillRect(0, 0, R.W, R.H);
+    nx.globalCompositeOperation = 'destination-out';
+    const lamps = [];
     for (const e of S.ents){
       if (e.kind !== 'lamp') continue;
       if (!e.netId || !S._netRatio || (S._netRatio[e.netId] || 0) <= 0) continue;
@@ -2340,24 +2392,49 @@ R.draw = function(S, dt, U){
       const [lx, ly] = R.worldToScreen(e.x + .5, e.y + .24);
       const rad = glow * s2;
       if (lx < -rad || ly < -rad || lx > R.W + rad || ly > R.H + rad) continue;
-      const lg = x.createRadialGradient(lx, ly, 0, lx, ly, rad);
-      const flicker = .9 + .1 * Math.sin(time * 6 + e.id * 1.7);
-      const k2 = dark / NIGHT_MAX;
-      lg.addColorStop(0, `rgba(255,205,120,${.5 * k2 * flicker})`);
-      lg.addColorStop(.4, `rgba(255,180,90,${.22 * k2})`);
-      lg.addColorStop(1, 'rgba(255,160,60,0)');
-      x.fillStyle = lg;
-      x.beginPath(); x.arc(lx, ly, rad, 0, 7); x.fill();
+      lamps.push([lx, ly, rad, e.id]);
+      const hole = nx.createRadialGradient(lx, ly, 0, lx, ly, rad);
+      hole.addColorStop(0, 'rgba(0,0,0,.55)');    // half the dark lifted at the heart…
+      hole.addColorStop(.45, 'rgba(0,0,0,.4)');
+      hole.addColorStop(1, 'rgba(0,0,0,0)');
+      nx.fillStyle = hole;
+      nx.beginPath(); nx.arc(lx, ly, rad, 0, 7); nx.fill();
     }
     // the Core itself holds back the dark a little
     const [ccx2, ccy2] = R.worldToScreen(S.core.x + S.core.w / 2, S.core.y + S.core.h / 2);
     const crad = 7 * s2;
-    const cg = x.createRadialGradient(ccx2, ccy2, 0, ccx2, ccy2, crad);
-    cg.addColorStop(0, `rgba(255,190,110,${.2 * dark / NIGHT_MAX})`);
-    cg.addColorStop(1, 'rgba(255,160,60,0)');
-    x.fillStyle = cg;
-    x.beginPath(); x.arc(ccx2, ccy2, crad, 0, 7); x.fill();
-    x.restore();
+    if (ccx2 > -crad && ccy2 > -crad && ccx2 < R.W + crad && ccy2 < R.H + crad){
+      const ch = nx.createRadialGradient(ccx2, ccy2, 0, ccx2, ccy2, crad);
+      ch.addColorStop(0, 'rgba(0,0,0,.4)');
+      ch.addColorStop(1, 'rgba(0,0,0,0)');
+      nx.fillStyle = ch;
+      nx.beginPath(); nx.arc(ccx2, ccy2, crad, 0, 7); nx.fill();
+    }
+    x.drawImage(nc, 0, 0);
+    /* …and half the light given back as warm amber, pooled with
+       per-channel MAX so it never stacks toward white */
+    if (lamps.length){
+      if (!R._lightCv) R._lightCv = document.createElement('canvas');
+      const lc = R._lightCv;
+      if (lc.width !== R.W || lc.height !== R.H){ lc.width = R.W; lc.height = R.H; }
+      const lx2 = lc.getContext('2d');
+      lx2.clearRect(0, 0, R.W, R.H);
+      lx2.globalCompositeOperation = 'lighten';
+      const k2 = dark / NIGHT_MAX;
+      for (const [lx, ly, rad, id] of lamps){
+        const flicker = .85 + .15 * Math.sin(time * 6 + id * 1.7);
+        const lg = lx2.createRadialGradient(lx, ly, 0, lx, ly, rad);
+        lg.addColorStop(0, `rgba(255,200,110,${.25 * k2 * flicker})`);
+        lg.addColorStop(.5, `rgba(255,180,90,${.12 * k2})`);
+        lg.addColorStop(1, 'rgba(255,160,60,0)');
+        lx2.fillStyle = lg;
+        lx2.beginPath(); lx2.arc(lx, ly, rad, 0, 7); lx2.fill();
+      }
+      x.save();
+      x.globalCompositeOperation = 'lighter';
+      x.drawImage(lc, 0, 0);
+      x.restore();
+    }
   }
 
   /* weather — occasional rain showers (screen-space streaks + audio bed) */
