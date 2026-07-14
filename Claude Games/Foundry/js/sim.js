@@ -290,14 +290,15 @@ F.canPlace = function(S, key, x, y, dir){
   if (def.kind === 'miner' && ore < 1) return { ok:false, why:'needs an ore deposit' };
   if (def.kind === 'pump' && oil < 1) return { ok:false, why:'needs an oil seep' };
   if (def.kind !== 'pump' && oil > 0) return { ok:false, why:'blocked by oil seep' };
-  if (!F.canAfford(S, def.cost)) return { ok:false, why:'cost' };
+  if (!F.canAfford(S, F.buildCost(S, key))) return { ok:false, why:'cost' };
   return { ok:true };
 };
 
 F.place = function(S, key, x, y, dir, free){
   const chk = F.canPlace(S, key, x, y, dir);
   if (!chk.ok) return null;
-  if (!free && !F.pay(S, F.BUILDINGS[key].cost)) return null;
+  const price = F.buildCost(S, key);
+  if (!free && !F.pay(S, price)) return null;
   const def = F.BUILDINGS[key];
   if (def.kind === 'platform'){
     // platforms are tile FLAGS, not entities: the deck becomes the ground,
@@ -307,6 +308,7 @@ F.place = function(S, key, x, y, dir, free){
     return { key, kind:'platform', x, y, w:1, h:1, dir:0, platform:true };
   }
   const e = { id: S.nextId++, key, kind: def.kind, x, y, w: def.w, h: def.h, dir: dir & 3 };
+  if (!free) e.paid = price;   // refund exactly what was paid, prices drift
   initEnt(S, e, def);
   S.ents.push(e);
   stamp(S, e);
@@ -340,7 +342,7 @@ function initEnt(S, e, def){
     case 'turbine':  e.fuelT = 0; e.fuelBuf = 0; e.load = 0; break;
     case 'solar':    break;
     case 'pole':     e.links = []; e.netId = 0; break;
-    case 'pump':     e.tank = 0; e.prog = 0; e.fuelT = 0; e.fuelBuf = 0; break;
+    case 'pump':     e.tank = 0; e.prog = 0; break;
   }
 }
 
@@ -378,7 +380,8 @@ F.remove = function(S, x, y){
   const e = F.entAt(S, x, y);
   if (!e || e.kind === 'core') return null;
   const def = F.BUILDINGS[e.key];
-  F.refund(S, def.cost);
+  // a broken-down machine is scrap — no refund; contents still come back
+  if (!e.broken) F.refund(S, e.paid || def.cost);
   // return contained items
   const give = (o) => { for (const k in o) if (o[k] > 0) F.invAdd(S, k, Math.floor(o[k])); };
   if (e.inBuf) give(e.inBuf);
@@ -485,6 +488,7 @@ F.computePowerNetworks = function(S){
    (the direction of travel)? If yes, consume it. */
 F.tryInsert = function(S, target, item, fromDir, t0){
   if (!target) return false;
+  if (target.broken) return false;   // dead machines eat nothing
   switch (target.kind){
     case 'belt':
       if (target.item) return false;
@@ -511,22 +515,22 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       deliverToCore(S, item);
       return true;
     case 'miner': case 'gen':
+      // only burners take coal — electric machines run on the grid, full stop
       if (item !== 'coal') return false;
-      if (target.kind === 'miner' && !F.BUILDINGS[target.key].fuel &&
-          !(F.stoked(S) && F.BUILDINGS[target.key].power)) return false;
+      if (target.kind === 'miner' && !F.BUILDINGS[target.key].fuel) return false;
       if (target.fuelBuf >= F.fuelCap(S)) return false;
-      target.fuelBuf++; return true;
-    case 'pump':
-      // stoked pumpjacks take coal like any other fired machine
-      if (item !== 'coal' || !F.stoked(S) || target.fuelBuf >= F.fuelCap(S)) return false;
       target.fuelBuf++; return true;
     case 'turbine':
       if (item !== 'fuelCell' || target.fuelBuf >= F.fuelCap(S)) return false;
       target.fuelBuf++; return true;
-    case 'lab':
-      if (!F.PACKS.includes(item)) return false;
+    case 'lab': {
+      // labs read science packs — and whatever materials the current
+      // project bills (deep techs demand piles of previous-age goods)
+      const proj = S.research.cur && F.TECHS[S.research.cur];
+      if (!F.PACKS.includes(item) && !(proj && proj.cost[item])) return false;
       if ((target.inBuf[item] || 0) >= F.LAB_BUF) return false;
       target.inBuf[item] = (target.inBuf[item] || 0) + 1; return true;
+    }
     case 'port':
       // only providers take belt input, and only their configured item
       if (target.mode !== 'provide' || item !== target.portItem) return false;
@@ -564,9 +568,8 @@ function machineAccept(S, m, item){
       if ((m.inBuf[item] || 0) < lim){ m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true; }
     }
   }
-  // overflow / non-ingredient coal → the firebox (burners, or stoked electrics)
-  if (item === 'coal' && m.fuelBuf < F.fuelCap(S) &&
-      (def.fuel || (def.power && F.stoked(S)))){
+  // overflow / non-ingredient coal → the firebox (burner machines only)
+  if (item === 'coal' && def.fuel && m.fuelBuf < F.fuelCap(S)){
     m.fuelBuf++; return true;
   }
   return false;
@@ -692,7 +695,8 @@ function famMul(S, fam){
 F.tick = function(S, dt){
   S.tick++;
   S.time += dt;
-  S.dayT = ((S.dayT || 0) + dt) % F.DAY_LEN;
+  // the Sun Anchor (researched toggle) can hold the sky still
+  if (!S.sunFrozen) S.dayT = ((S.dayT || 0) + dt) % F.DAY_LEN;
   const ents = S.ents;
 
   /* ---- pass A: power book-keeping (per pole-network) ---- */
@@ -718,11 +722,9 @@ F.tick = function(S, dt){
       else if (e.kind === 'beacon') wants = !!(e.mods && e.mods.length);
       else if (e.kind === 'lamp') wants = sun < .85;
       else if (e.kind === 'port') wants = !!e.mode;
+      if (e.broken) wants = false;   // worn out — draws nothing, does nothing
       e._want = wants;
-      // stoked (coal-fired) machines run off their firebox this tick:
-      // no grid demand, and being off-grid is fine
-      e._stoke = wants && F.stoked(S) && F.stokable(e) && (e.fuelT > 0 || e.fuelBuf > 0);
-      if (wants && !e._stoke){
+      if (wants){
         // module power multiplier (beacon field uses last tick's ratio — converges)
         const pm = (e.mods || e._bcn) ? F.modEffects(S, e).pow : 1;
         const draw = def.power * useMul * pm;
@@ -747,7 +749,7 @@ F.tick = function(S, dt){
       let surplus = s0 - d0;
       for (const a of accsByNet[nid]){
         if (surplus <= 0) break;
-        const take = Math.min(F.ACC_RATE, (F.ACC_CAP - a.charge) / dt, surplus);
+        const take = Math.min(F.ACC_CHARGE, (F.ACC_CAP - a.charge) / dt, surplus);
         if (take > 0){
           a.charge += take * dt;
           a.flow = take;
@@ -759,7 +761,7 @@ F.tick = function(S, dt){
       let need = d0 - s0;
       for (const a of accsByNet[nid]){
         if (need <= 0) break;
-        const give = Math.min(F.ACC_RATE, a.charge / dt, need);
+        const give = Math.min(F.ACC_DISCHARGE, a.charge / dt, need);
         if (give > 0){
           a.charge -= give * dt;
           a.flow = -give;
@@ -869,28 +871,25 @@ function minerWants(S, e){
   return S.oreType[i] !== 0 && S.oreType[i] !== F.OIL_TYPE && S.oreAmt[i] > 0;
 }
 
-/* run a stoked electric machine off its firebox: one coal buys
-   STOKE_PS / power-draw seconds of full-speed work */
-function stokeBurn(S, e, def, dt){
-  if (e.fuelT <= 0){
-    if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.STOKE_PS / Math.max(1, def.power) * F.burnMul(S); }
-    else return false;
+/* every finished operation grinds the machine down a little; past its
+   (hidden) service life it breaks for good and must be replaced */
+function wearDown(S, e, n){
+  e.ops = (e.ops || 0) + (n || 1);
+  if (e.ops >= F.lifeOf(S, e) && !e.broken){
+    e.broken = true;
+    e.active = false;
+    e.crafting = false;
+    F.emit(S, { type:'broken', x: e.x, y: e.y, key: e.key });
   }
-  e.fuelT -= dt * F.draftBurn(S);
-  return true;
 }
 
 function tickMiner(S, e, def, dt, ratio){
   tryEject(S, e);
+  if (e.broken){ e.active = false; return; }
   if (!minerWants(S, e)){ e.active = false; return; }
   const fx = F.modEffects(S, e);
   let mul = def.speed * F.mineMul(S) * fx.spd * F.tributeMul(S);
-  if (def.power){
-    if (e._stoke){
-      if (!stokeBurn(S, e, def, dt)){ e.active = false; return; }
-      mul *= F.draftSpd(S);
-    } else mul *= ratio;
-  }
+  if (def.power) mul *= ratio;
   else {
     // burner
     if (e.fuelT <= 0){
@@ -919,11 +918,13 @@ function tickMiner(S, e, def, dt, ratio){
     e.outBuf[item] = (e.outBuf[item] || 0) + n; e.outTotal += n;
     S.stats.made[item] = (S.stats.made[item] || 0) + n;
     S.stats.bucketAcc[item] = (S.stats.bucketAcc[item] || 0) + n;
+    wearDown(S, e, 1);
   }
 }
 
 function tickMachine(S, e, def, dt, ratio){
   tryEject(S, e);
+  if (e.broken){ e.active = false; return; }
   if (!e.crafting){
     const rk = machineCanStart(S, e, def);
     if (rk){
@@ -944,12 +945,7 @@ function tickMachine(S, e, def, dt, ratio){
   if (!rc){ e.crafting = false; return; }
   const fx = F.modEffects(S, e);
   let mul = def.speed * famMul(S, def.fam) * fx.spd * F.tributeMul(S);
-  if (def.power){
-    if (e._stoke){
-      if (!stokeBurn(S, e, def, dt)){ e.active = false; return; }
-      mul *= F.draftSpd(S);
-    } else mul *= ratio;
-  }
+  if (def.power) mul *= ratio;
   else {
     if (e.fuelT <= 0){
       if (e.fuelBuf > 0){ e.fuelBuf--; e.fuelT += F.COAL_BURN * F.burnMul(S); }
@@ -983,10 +979,12 @@ function tickMachine(S, e, def, dt, ratio){
       if (bk === 'tar' && !S.flags.tarSeen){ S.flags.tarSeen = true; F.emit(S, { type:'tip', id:'firstTar' }); }
     }
     F.emit(S, { type:'craft', x: e.x, y: e.y, item: rc.out });
+    wearDown(S, e, 1);
   }
 }
 
 function tickPump(S, e, def, dt, ratio){
+  if (e.broken){ e.active = false; return; }
   // is there oil under the footprint?
   let oil = null;
   for (let j = 0; j < e.h && !oil; j++) for (let i = 0; i < e.w; i++){
@@ -994,13 +992,16 @@ function tickPump(S, e, def, dt, ratio){
     if (S.oreType[t] === F.OIL_TYPE && S.oreAmt[t] > 0){ oil = t; break; }
   }
   e.active = false;
-  if (oil != null && e.tank < 30){
-    // stoked pumps run on coal at full rate; otherwise the grid decides
-    const r = e._stoke ? (stokeBurn(S, e, def, dt) ? F.draftSpd(S) : 0) : ratio;
-    if (r > 0){
-      const drawn = Math.min(def.rate * r * dt, 30 - e.tank);
-      e.tank += drawn;   // seeps are endless
-      e.active = drawn > 0;
+  if (oil != null && e.tank < 30 && ratio > 0){
+    const drawn = Math.min(def.rate * ratio * dt, 30 - e.tank);
+    e.tank += drawn;   // seeps are endless
+    e.active = drawn > 0;
+    // wear accrues per whole unit of crude drawn
+    e.opAcc = (e.opAcc || 0) + drawn;
+    if (e.opAcc >= 1){
+      const n = Math.floor(e.opAcc);
+      e.opAcc -= n;
+      wearDown(S, e, n);
     }
   }
   // push into adjacent pipes and reservoirs
@@ -1374,8 +1375,7 @@ F.addFuel = function(S, e, n){
   const def = F.BUILDINGS[e.key];
   const isTurbine = e.kind === 'turbine';
   const item = isTurbine ? 'fuelCell' : 'coal';
-  if (!(def.fuel || e.kind === 'gen' || isTurbine ||
-        (F.stoked(S) && def.power && F.stokable(e)))) return 0;
+  if (!(def.fuel || e.kind === 'gen' || isTurbine)) return 0;
   let moved = 0;
   while (moved < n && F.invCount(S, item) > 0 && e.fuelBuf < F.fuelCap(S)){
     F.invAdd(S, item, -1); e.fuelBuf++; moved++;
@@ -1412,6 +1412,10 @@ F.serialize = function(S){
     if (e.workItem) o.wk = e.workItem;
     if (e.mods && e.mods.length) o.md = e.mods.slice();
     if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
+    if (e.ops) o.op = e.ops;
+    if (e.opAcc) o.oa = +e.opAcc.toFixed(3);
+    if (e.broken) o.bk = 1;
+    if (e.paid) o.pd = e.paid;
     if (e.charge) o.ch = +e.charge.toFixed(2);
     if (e.mode) o.pm = e.mode;
     if (e.portItem) o.pi = e.portItem;
@@ -1427,6 +1431,7 @@ F.serialize = function(S){
     v: 4, genVer: S.genVer, seed: S.seed, time: +S.time.toFixed(2), tick: S.tick,
     plat,
     dayT: +(S.dayT || 0).toFixed(2),
+    sunF: S.sunFrozen ? 1 : 0,
     inv: S.inv, delivered: S.delivered, handMined: S.handMined,
     // milestones are saved BY ID so tiers can be inserted without breaking saves
     msId: S.msIndex < F.MILESTONES.length ? F.MILESTONES[S.msIndex].id : 'won',
@@ -1444,6 +1449,7 @@ F.deserialize = function(data){
   const S = F.newGame(data.seed, data.genVer || 1);
   S.time = data.time; S.tick = data.tick;
   S.dayT = data.dayT != null ? data.dayT : 20;
+  S.sunFrozen = !!data.sunF;
   S.inv = data.inv || {};
   S.delivered = data.delivered || {};
   S.handMined = data.handMined || {};
@@ -1486,7 +1492,11 @@ F.deserialize = function(data){
     if (o.ar){ e.activeRecipe = o.ar; e.crafting = true; e.prog = o.pg || 0; }
     if (o.it){ e.item = o.it; e.t = o.tt || 0; e.srcDir = o.sd != null ? o.sd : e.dir; }
     if (o.ft) e.fuelT = o.ft;
-    if (o.fb) e.fuelBuf = o.fb;
+    if (o.fb){
+      // electric machines no longer take coal — hand any stranded fuel back
+      if (def.fuel || def.kind === 'gen' || def.kind === 'turbine') e.fuelBuf = o.fb;
+      else F.invAdd(S, 'coal', o.fb);
+    }
     if (o.ib) e.inBuf = o.ib;
     if (o.ob){ e.outBuf = o.ob; e.outTotal = o.ot || 0; }
     if (o.st){ e.store = o.st; e.total = o.tl || 0; }
@@ -1502,6 +1512,10 @@ F.deserialize = function(data){
     if (o.wk) e.workItem = o.wk;
     if (o.md) e.mods = o.md.filter(m => F.MODULES[m]);
     if (o.pa) e.prodAcc = o.pa;
+    if (o.op) e.ops = o.op;
+    if (o.oa) e.opAcc = o.oa;
+    if (o.bk) e.broken = true;
+    if (o.pd) e.paid = o.pd;
     if (o.ch) e.charge = o.ch;
     if (o.pm) e.mode = o.pm;
     if (o.pi) e.portItem = o.pi;
