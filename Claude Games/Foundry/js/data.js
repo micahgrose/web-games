@@ -234,9 +234,17 @@ const B = F.BUILDINGS = {
 F.BUILD_ORDER = Object.keys(B);
 
 /* Power is precious: every electric consumer draws five times the draw
-   written above (lamps stay cheap). Generation was cut to a third to match —
-   the grid is a thing you earn, not a thing you sprinkle. */
+   written above (lamps stay cheap) — the grid is a thing you earn, not a
+   thing you sprinkle. */
 for (const k in B){ if (B[k].power && B[k].kind !== 'lamp') B[k].power *= 5; }
+
+/* Everything past the milestone basics — anything the tech tree sells —
+   costs a THIRD of its sticker price. Research is the real gate; the
+   wallet needn't gate it twice. (Tier scaling still applies on top.) */
+for (const k in B){
+  const d = B[k];
+  if (d.tech) for (const c in d.cost) d.cost[c] = Math.max(1, Math.round(d.cost[c] / 3));
+}
 
 /* Hidden service STRETCH, in completed operations (ores dug, crafts finished,
    crude drawn). At the end of each stretch the machine rolls F.BREAK_CHANCE to
