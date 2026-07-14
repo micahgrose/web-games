@@ -690,13 +690,11 @@ F.TECHS = {
 };
 F.TECH_ORDER = Object.keys(F.TECHS);
 
-/* Research costs compound HARD with depth. Techs with no prerequisites keep
-   the prices written above; every layer beyond that triples the whole cost
-   (×3, ×9, ×27 …) and non-root layers pay a further ×5 on their science.
-   On top of the packs, every non-root tech also demands a MASSIVE pile of
-   previous-age materials (doubling per layer) — labs read those goods the
-   same way they read science. Computed from the req chains so re-wiring
-   the tree re-prices itself. */
+/* Research costs compound HARD with depth — in science packs and nothing
+   else. Techs with no prerequisites keep the prices written above; every
+   layer beyond that triples the whole cost (×3, ×9, ×27 …) and non-root
+   layers pay a further ×5. Computed from the req chains so re-wiring the
+   tree re-prices itself. */
 {
   const depth = {};
   const dep = id => {
@@ -704,22 +702,11 @@ F.TECH_ORDER = Object.keys(F.TECHS);
     const rq = F.TECHS[id].req || [];
     return depth[id] = rq.length ? 1 + Math.max(...rq.map(dep)) : 0;
   };
-  /* the material bill, keyed by the deepest science a tech drinks */
-  const MATS = {
-    pack1: { plate:60,  gear:50,       brick:40 },
-    pack2: { steel:50,  circuit:40,    wire:100 },
-    pack3: { plastic:80,advCircuit:30, motor:35 },
-    pack4: { titanIngot:60, processor:20, frame:15 },
-  };
   for (const id of F.TECH_ORDER){
     const tk = F.TECHS[id], d = dep(id);
     if (d < 1) continue;
     const mul = Math.pow(3, d) * 5;
-    let top = 'pack1';
-    for (const pk of ['pack2', 'pack3', 'pack4']) if (tk.cost[pk]) top = pk;
     for (const pk in tk.cost) tk.cost[pk] *= mul;
-    const mm = Math.pow(2, d - 1);
-    for (const k in MATS[top]) tk.cost[k] = (tk.cost[k] || 0) + MATS[top][k] * mm;
   }
 }
 
