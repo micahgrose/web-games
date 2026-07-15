@@ -15,7 +15,7 @@ const UI = F.ui = {
   bigTab: null,
   pointer: { x: 0, y: 0, down: false, btn: 0, id: null, panning: false, moved: 0,
              lastTile: null, mining: false, sx: 0, sy: 0, camx: 0, camy: 0 },
-  mouse: { x: 0, y: 0 },
+  mouse: { x: null, y: null },   // null until the pointer first moves — keeps the cursor lantern off
   holdStack: null,
   speed: 1, lastSpeed: 1,
   mode: null,            // null | 'decon' | 'copy' | 'stamp'
@@ -53,7 +53,9 @@ UI.init = function(){
   bindHud();
   initTitle();
 
-  // global mouse tracking for the cursor-held stack
+  // global mouse tracking for the cursor-held stack — the renderer shares
+  // the same object so the night pass can hang a little lantern on it
+  R.mouse = UI.mouse;
   root.addEventListener('pointermove', (e) => {
     UI.mouse.x = e.clientX; UI.mouse.y = e.clientY;
     positionHeld();
@@ -304,6 +306,10 @@ function placeAt(t, first){
     if (chk.why === 'occupied' && (def.kind === 'belt' || def.kind === 'pipe')){
       if (tryUpgradeLine(gx, gy, def)) return;
     }
+    // a splitter stamped onto a belt swaps in where the belt was
+    if (chk.why === 'occupied' && def.kind === 'splitter'){
+      if (trySplitterOnBelt(gx, gy)) return;
+    }
     if (first){
       if (chk.why === 'cost'){ A.sfx.error(); toastCost(UI.tool); }
       else if (chk.why !== 'occupied'){ A.sfx.error(); toast(cap(chk.why), 'warn', 2600); }
@@ -344,6 +350,26 @@ function tryUpgradeLine(x, y, def){
     F.invAdd(S, carry.item, -1);   // it was refunded by remove(); it's back on the belt now
   }
   if (def.kind === 'pipe' && carry.fluid) e.fluid = carry.fluid;
+  A.sfx.place();
+  buildBarAfford();
+  return true;
+}
+
+/* drop a splitter straight onto a belt — the belt folds into it, keeping
+   its direction and whatever item was riding it */
+function trySplitterOnBelt(x, y){
+  const S = UI.S;
+  const old = F.entAt(S, x, y);
+  if (!old || old.kind !== 'belt') return false;
+  if (!F.canAfford(S, F.buildCost(S, 'splitter'))) return false;
+  const carry = { dir: old.dir, item: old.item, t: old.t, srcDir: old.srcDir };
+  F.remove(S, old.x, old.y);                             // refunds the belt (incl. its item)
+  const e = F.place(S, 'splitter', x, y, carry.dir, false);
+  if (!e){ return false; }
+  if (carry.item){
+    e.item = carry.item; e.t = carry.t || 0; e.srcDir = carry.srcDir != null ? carry.srcDir : e.dir;
+    F.invAdd(S, carry.item, -1);
+  }
   A.sfx.place();
   buildBarAfford();
   return true;
@@ -2186,7 +2212,8 @@ function renderHowTo(){
   or another belt (side entries merge; head-on is refused). The <b>splitter</b> deals items evenly to
   every open exit — and click one to configure it: set a <b>filter</b> (that item always exits left —
   perfect for pulling coal out of a mixed line) and a <b>priority exit</b> that fills first with
-  overflow spilling to the others. <b>Tunnels</b> dive under up to 4 tiles
+  overflow spilling to the others. Stamp a splitter <b>directly onto a belt</b> and it swaps in,
+  keeping the belt's direction and cargo. <b>Tunnels</b> dive under up to 4 tiles
   (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
   buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
   Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.
