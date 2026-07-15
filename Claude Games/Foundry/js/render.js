@@ -2405,14 +2405,20 @@ R.draw = function(S, dt, U){
       if ((e.kind === 'belt' || e.kind === 'splitter' || e.kind === 'ubelt') && e.item){
         const [px, py] = R.worldToScreen(e.x, e.y);
         let ix, iy;
+        // any item at t < 0 is still crossing IN from the previous tile
+        // (a splitter hand-off): glide it straight along its entry line
+        // from that tile's center to this one's edge — no pops, ever
+        const d0 = e.srcDir != null ? e.srcDir : e.dir;
         if (e.kind === 'splitter'){
-          // ride straight from the entry edge to the CENTER; the receiving
-          // belt draws the exit half (its item starts at t = −.5)
-          const d0 = e.srcDir != null ? e.srcDir : e.dir;
-          [ix, iy] = beltPoint({ srcDir: d0, dir: d0 }, s, clamp(e.t, 0, .5));
+          const t2 = clamp(e.t, -.5, .5);
+          ix = s / 2 + DX[d0] * s * (t2 - .5);
+          iy = s / 2 + DY[d0] * s * (t2 - .5);
+        } else if (e.t < 0){
+          const t2 = Math.max(e.t, -.5);
+          ix = s / 2 + DX[d0] * s * (t2 - .5);
+          iy = s / 2 + DY[d0] * s * (t2 - .5);
         } else {
-          const lo = (e.kind === 'belt' && e.srcDir === e.dir) ? -.5 : 0;
-          [ix, iy] = beltPoint(e, s, clamp(e.t, lo, 1));
+          [ix, iy] = beltPoint(e, s, clamp(e.t, 0, 1));
         }
         const ic = R.itemIcon(e.item, isz);
         x.save();
