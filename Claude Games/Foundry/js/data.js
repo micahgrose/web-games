@@ -260,19 +260,16 @@ for (const k in B){
   for (const k in LIFE) B[k].life = LIFE[k];
 }
 
-/* What a building costs to place RIGHT NOW: base cost +25% per completed
-   tier — and once you own one of an electric building, every further copy
-   of it costs five times as much. Platforms are terrain and stay flat.
-   The price actually paid rides the entity (e.paid) so removal refunds
-   exactly what it cost — broken machines refund nothing. */
+/* What a building costs to place RIGHT NOW: sticker price — except that
+   once you own one of an electric building, every further copy of it costs
+   ×1.9. The price actually paid rides the entity (e.paid) so removal
+   refunds exactly what it cost — broken machines refund nothing. */
 F.buildCost = function(S, key){
   const def = B[key];
   if (!def || def.kind === 'platform') return def && def.cost;
-  let mul = 1 + .25 * (S.msIndex || 0);
-  if (def.power && S.ents.some(e => e.key === key)) mul *= 5;
-  if (mul === 1) return def.cost;
+  if (!(def.power && S.ents.some(e => e.key === key))) return def.cost;
   const out = {};
-  for (const k in def.cost) out[k] = Math.ceil(def.cost[k] * mul);
+  for (const k in def.cost) out[k] = Math.ceil(def.cost[k] * 1.9);
   return out;
 };
 

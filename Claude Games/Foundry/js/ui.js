@@ -2464,9 +2464,9 @@ function renderHowTo(){
   research <b>Pontoon platforms</b>, then drag a line of decking across and belt right over it —
   platforms carry machines and power poles too (tunnels dive underneath, and drones fly straight over).
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
-  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. Prices climb as you do:
-  every completed tier makes all buildings dearer, and once you own one of an electric building,
-  every further copy of it costs <b>five times</b> as much. Ratios matter: one
+  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. One price rule to know:
+  once you own one of an electric building, every further copy of it costs <b>nearly double</b>
+  (×1.9). Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
   feels polite. The <b>tech tree</b> (${kb('T')}) sells permanent upgrade ranks — belt speed, drill
   speed, furnace heat, grid output — paid in parts, and each machine family has faster Mk
