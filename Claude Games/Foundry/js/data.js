@@ -172,7 +172,7 @@ const B = F.BUILDINGS = {
   /* --- extraction --- */
   miner1:  { name:'Burner drill',    cat:'ext', kind:'miner', w:1, h:1, speed:1, mineTime:2.4, fuel:true, cost:{ironOre:6, stone:4}, unlock:0,
              desc:'Chews ore out of a deposit. Burns coal — feed it by belt or by hand.' },
-  miner2:  { name:'Electric drill',  cat:'ext', kind:'miner', w:1, h:1, speed:2.2, mineTime:2.4, power:5, cost:{plate:10, gear:8, wire:8}, tech:'electricDrills',
+  miner2:  { name:'Electric drill',  cat:'ext', kind:'miner', w:1, h:1, speed:2.2, mineTime:2.4, power:2.5, cost:{plate:10, gear:8, wire:8}, tech:'electricDrills',
              desc:'No fuel needed — draws from the power grid.' },
   miner3:  { name:'Plasma bore',     cat:'ext', kind:'miner', w:1, h:1, speed:4.4, mineTime:2.4, power:12, cost:{steel:26, motor:10, advCircuit:7}, tech:'plasmaBores',
              desc:'Cuts ore with a plasma lance. Extremely fast.' },
