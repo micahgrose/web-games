@@ -899,16 +899,19 @@ function drawSplitter(x, e, s, time, S){
   x.fillStyle = '#242b37';
   rrect(x, -s * .3, -s * .3, s * .6, s * .6, s * .08);
   x.fill();
-  // three-way fan arrows (0=front, -90°=left, +90°=right in local space)
-  const prioA = e.prioOut === 'front' ? 0 : e.prioOut === 'left' ? -Math.PI / 2 : e.prioOut === 'right' ? Math.PI / 2 : null;
+  // three-way fan arrows (0=front, -90°=left, +90°=right in local space):
+  // filtered lanes cyan, ranked lanes brighter the higher their priority
   x.lineWidth = Math.max(1, s * .05);
   x.lineCap = 'round';
-  for (const a of [0, -Math.PI / 2, Math.PI / 2]){
-    const isFilterLane = e.filterItem && a === -Math.PI / 2;
-    x.strokeStyle = isFilterLane ? 'rgba(120,220,255,.9)'
-      : a === prioA ? 'rgba(255,214,138,1)'
-      : 'rgba(255,214,138,.55)';
-    x.save(); x.rotate(a);
+  const LANE_A = { front: 0, left: -Math.PI / 2, right: Math.PI / 2 };
+  for (const n of ['front', 'left', 'right']){
+    const p = e.exPrio ? e.exPrio[n] : 0;
+    x.strokeStyle = (e.exFilt && e.exFilt[n]) ? 'rgba(120,220,255,.9)'
+      : p === 1 ? 'rgba(255,214,138,1)'
+      : p === 2 ? 'rgba(255,214,138,.8)'
+      : p === 3 ? 'rgba(255,214,138,.65)'
+      : 'rgba(255,214,138,.5)';
+    x.save(); x.rotate(LANE_A[n]);
     x.beginPath();
     x.moveTo(0, 0); x.lineTo(s * .22, 0);
     x.moveTo(s * .13, -s * .07); x.lineTo(s * .23, 0); x.lineTo(s * .13, s * .07);
@@ -916,26 +919,38 @@ function drawSplitter(x, e, s, time, S){
     x.restore();
   }
   x.restore();
-  // filter item badge, drawn upright over the left lane
-  if (e.filterItem){
-    const LEFT = (e.dir + 3) & 3;
-    const bx = c + DX[LEFT] * s * .3, by = c + DY[LEFT] * s * .3;
-    const ic = R.itemIcon(e.filterItem, Math.max(8, Math.round(s * .4)));
-    x.drawImage(ic, bx - ic.width / 2, by - ic.height / 2);
+  // filter badges, drawn upright over each reserved lane
+  if (e.exFilt){
+    const LANE_D = { front: e.dir, left: (e.dir + 3) & 3, right: (e.dir + 1) & 3 };
+    for (const n in LANE_D){
+      if (!e.exFilt[n]) continue;
+      const d = LANE_D[n];
+      const bx = c + DX[d] * s * .3, by = c + DY[d] * s * .3;
+      const ic = R.itemIcon(e.exFilt[n], Math.max(8, Math.round(s * .4)));
+      x.drawImage(ic, bx - ic.width / 2, by - ic.height / 2);
+    }
   }
 }
 
 /* ---- chest ---- */
 function drawChest(x, e, s){
   const pad = s * .1;
-  const vault = e.key === 'chest2';
-  x.fillStyle = vault ? '#3a4250' : '#4a4136';
+  const vault = e.key === 'chest2', tarp = !!F.BUILDINGS[e.key].tarOnly;
+  x.fillStyle = tarp ? '#33302a' : vault ? '#3a4250' : '#4a4136';
   x.strokeStyle = 'rgba(0,0,0,.55)';
   rrect(x, pad, pad, s - pad * 2, s - pad * 2, s * .12);
   x.fill(); x.stroke();
-  x.fillStyle = vault ? '#4b5567' : '#5d5344';
-  rrect(x, pad * 1.5, pad * 1.5, s - pad * 3, (s - pad * 3) * .45, s * .08);
-  x.fill();
+  if (tarp){
+    // an open brick-lined mouth, black and glossy
+    x.fillStyle = '#12100c';
+    x.beginPath(); x.ellipse(s / 2, s * .44, s * .3, s * .22, 0, 0, 7); x.fill();
+    x.fillStyle = 'rgba(200,200,190,.14)';
+    x.beginPath(); x.ellipse(s * .42, s * .38, s * .1, s * .05, -.5, 0, 7); x.fill();
+  } else {
+    x.fillStyle = vault ? '#4b5567' : '#5d5344';
+    rrect(x, pad * 1.5, pad * 1.5, s - pad * 3, (s - pad * 3) * .45, s * .08);
+    x.fill();
+  }
   if (vault){
     // riveted band
     x.fillStyle = '#96a3b5';
@@ -943,14 +958,16 @@ function drawChest(x, e, s){
       x.beginPath(); x.arc(s * rx, s * .3, s * .035, 0, 7); x.fill();
     }
   }
-  x.fillStyle = vault ? '#9fc2e8' : '#c9a86a';
-  x.fillRect(s / 2 - s * .06, s * .32, s * .12, s * .14);
+  if (!tarp){
+    x.fillStyle = vault ? '#9fc2e8' : '#c9a86a';
+    x.fillRect(s / 2 - s * .06, s * .32, s * .12, s * .14);
+  }
   // fill gauge
   const cap = F.BUILDINGS[e.key].cap || F.CHEST_CAP;
   const fr = clamp((e.total || 0) / cap, 0, 1);
   x.fillStyle = 'rgba(0,0,0,.4)';
   x.fillRect(pad * 1.6, s - pad * 2.2, s - pad * 3.2, s * .07);
-  x.fillStyle = '#ffd68a';
+  x.fillStyle = tarp ? '#8a8171' : '#ffd68a';
   x.fillRect(pad * 1.6, s - pad * 2.2, (s - pad * 3.2) * fr, s * .07);
   // out arrow
   drawPortArrow(x, e, s);
@@ -2387,7 +2404,16 @@ R.draw = function(S, dt, U){
     for (const e of vis){
       if ((e.kind === 'belt' || e.kind === 'splitter' || e.kind === 'ubelt') && e.item){
         const [px, py] = R.worldToScreen(e.x, e.y);
-        const [ix, iy] = beltPoint(e, s, clamp(e.t, 0, 1));
+        let ix, iy;
+        if (e.kind === 'splitter'){
+          // ride straight from the entry edge to the CENTER; the receiving
+          // belt draws the exit half (its item starts at t = −.5)
+          const d0 = e.srcDir != null ? e.srcDir : e.dir;
+          [ix, iy] = beltPoint({ srcDir: d0, dir: d0 }, s, clamp(e.t, 0, .5));
+        } else {
+          const lo = (e.kind === 'belt' && e.srcDir === e.dir) ? -.5 : 0;
+          [ix, iy] = beltPoint(e, s, clamp(e.t, lo, 1));
+        }
         const ic = R.itemIcon(e.item, isz);
         x.save();
         x.shadowColor = 'rgba(0,0,0,.5)';
@@ -2621,6 +2647,17 @@ R.draw = function(S, dt, U){
         x.lineWidth = 1.5;
         rrect(x, px + 1, py + 1, e.w * s - 2, e.h * s - 2, s * .12);
         x.stroke();
+      }
+    }
+    /* selected belt line: every belt in the run glows cyan */
+    if (U.lineSel && U.lineSel.length){
+      x.fillStyle = 'rgba(89,214,255,.14)';
+      x.strokeStyle = 'rgba(89,214,255,.8)';
+      x.lineWidth = Math.max(1, s * .05);
+      for (const b of U.lineSel){
+        const [px, py] = R.worldToScreen(b.x, b.y);
+        x.fillRect(px + 1, py + 1, s - 2, s - 2);
+        x.strokeRect(px + 1.5, py + 1.5, s - 3, s - 3);
       }
     }
     if (U.selection){

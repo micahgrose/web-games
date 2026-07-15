@@ -323,7 +323,8 @@ function initEnt(S, e, def){
     case 'belt':     e.item = null; e.t = 0; e.srcDir = e.dir; break;
     case 'ubelt':    e.item = null; e.t = 0; e.srcDir = e.dir; e.linkId = 0; e.isExit = false; e.transit = []; break;
     case 'splitter': e.item = null; e.t = 0; e.srcDir = e.dir; e.outIdx = 0;
-                     e.filterItem = null; e.prioOut = null; break;
+                     e.exPrio = { left:0, front:0, right:0 };          // 1 = first pick … 3 = last; 0 = round-robin
+                     e.exFilt = { left:null, front:null, right:null }; break;
     case 'chest':    e.store = {}; e.total = 0; break;
     case 'port':     e.store = {}; e.total = 0; e.mode = null; e.portItem = null; e.drones = []; break;
     case 'pipe':     e.fluid = 0; break;
@@ -513,12 +514,16 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       target.item = item; target.t = t0 || 0; target.srcDir = fromDir;
       return true;
     case 'chest': {
-      const cap = (F.BUILDINGS[target.key].cap || F.CHEST_CAP) + F.upRank(S, 'capacitors') * 20;
+      const cdef = F.BUILDINGS[target.key];
+      // tar goes ONLY into the tar pit — and the pit takes nothing else
+      if ((item === 'tar') !== !!cdef.tarOnly) return false;
+      const cap = (cdef.cap || F.CHEST_CAP) + (cdef.tarOnly ? 0 : F.upRank(S, 'capacitors') * 20);
       if (target.total >= cap) return false;
       target.store[item] = (target.store[item] || 0) + 1; target.total++;
       return true;
     }
     case 'core':
+      if (item === 'tar') return false;   // the Core will not drink tar — process it
       deliverToCore(S, item);
       return true;
     case 'miner': case 'gen':
@@ -536,6 +541,7 @@ F.tryInsert = function(S, target, item, fromDir, t0){
       target.inBuf[item] = (target.inBuf[item] || 0) + 1; return true;
     case 'port':
       // only providers take belt input, and only their configured item
+      if (item === 'tar') return false;   // drones won't touch the stuff
       if (target.mode !== 'provide' || item !== target.portItem) return false;
       if (target.total >= F.BUILDINGS[target.key].cap) return false;
       target.store[item] = (target.store[item] || 0) + 1; target.total++;
@@ -1226,38 +1232,45 @@ function tickBelt(S, e, dt){
   }
 }
 
+/* Items ride to the CENTER of the splitter (t 0→.5), route there, then are
+   handed to the chosen exit with t0 = −.5 so they visibly travel the second
+   half of the tile out the proper side — no more teleporting.
+   Per-exit config: exFilt[name] reserves that lane for one item (matching
+   items may ONLY use matching lanes); exPrio[name] 1..3 ranks the open
+   lanes; unranked open lanes share round-robin. */
 function tickSplitter(S, e, dt){
   if (!e.item) return;
-  e.t += beltSpeed(S, e) * dt;
-  if (e.t >= 1){
-    const FRONT = e.dir, LEFT = (e.dir + 3) & 3, RIGHT = (e.dir + 1) & 3;
-    const tryOut = (d) => {
-      const tgt = F.entAt(S, e.x + DX[d], e.y + DY[d]);
-      if (tgt && F.tryInsert(S, tgt, e.item, d, 0)){ e.item = null; e.t = 0; return true; }
-      return false;
-    };
-    // filtered items go strictly LEFT; they wait if that lane is blocked
-    if (e.filterItem && e.item === e.filterItem){
-      if (!tryOut(LEFT)) e.t = 1;
-      return;
-    }
-    // everything else: optional priority side first, then round-robin the rest
-    let dirs = [FRONT, LEFT, RIGHT];
-    if (e.filterItem) dirs = [FRONT, RIGHT];          // left lane is reserved for the filter
-    const prioDir = e.prioOut ? { front: FRONT, left: LEFT, right: RIGHT }[e.prioOut] : null;
-    if (prioDir != null && dirs.includes(prioDir)){
-      if (tryOut(prioDir)) return;
-      dirs = dirs.filter(d => d !== prioDir);         // overflow to the others
-    }
-    for (let n = 0; n < dirs.length; n++){
-      const d = dirs[(e.outIdx + n) % dirs.length];
-      if (tryOut(d)){
-        e.outIdx = (e.outIdx + n + 1) % dirs.length;
-        return;
-      }
-    }
-    e.t = 1;
+  if (e.t < .5){
+    e.t = Math.min(.5, e.t + beltSpeed(S, e) * dt);
+    if (e.t < .5) return;
   }
+  const FRONT = e.dir, LEFT = (e.dir + 3) & 3, RIGHT = (e.dir + 1) & 3;
+  const DIRS = { left: LEFT, front: FRONT, right: RIGHT };
+  const tryOut = (n) => {
+    const d = DIRS[n];
+    const tgt = F.entAt(S, e.x + DX[d], e.y + DY[d]);
+    if (tgt && F.tryInsert(S, tgt, e.item, d, -0.5)){ e.item = null; e.t = 0; return true; }
+    return false;
+  };
+  const names = ['left', 'front', 'right'];
+  // filtered lanes: a matching item must use one of its lanes (best rank first)
+  const matches = names.filter(n => e.exFilt[n] === e.item);
+  if (matches.length){
+    matches.sort((a, b) => (e.exPrio[a] || 9) - (e.exPrio[b] || 9));
+    for (const n of matches) if (tryOut(n)) return;
+    e.t = .5;   // wait at the center for the lane to clear
+    return;
+  }
+  // open lanes: ranked ones first (1 → 3), the rest round-robin
+  const open = names.filter(n => !e.exFilt[n]);
+  const ranked = open.filter(n => e.exPrio[n]).sort((a, b) => e.exPrio[a] - e.exPrio[b]);
+  for (const n of ranked) if (tryOut(n)) return;
+  const rr = open.filter(n => !e.exPrio[n]);
+  for (let i = 0; i < rr.length; i++){
+    const n = rr[(e.outIdx + i) % rr.length];
+    if (tryOut(n)){ e.outIdx = (e.outIdx + i + 1) % rr.length; return; }
+  }
+  e.t = .5;
 }
 
 function tickTunnel(S, e, dt){
@@ -1416,8 +1429,10 @@ F.serialize = function(S){
     if (e.isExit) o.ex = 1;
     if (e.prog && !o.pg) o.p2 = e.prog;
     if (e.outIdx) o.oi = e.outIdx;
-    if (e.filterItem) o.fi = e.filterItem;
-    if (e.prioOut) o.po = e.prioOut;
+    if (e.exPrio && (e.exPrio.left || e.exPrio.front || e.exPrio.right))
+      o.xp = [e.exPrio.left, e.exPrio.front, e.exPrio.right];
+    if (e.exFilt && (e.exFilt.left || e.exFilt.front || e.exFilt.right))
+      o.xf = [e.exFilt.left, e.exFilt.front, e.exFilt.right];
     if (e.workItem) o.wk = e.workItem;
     if (e.mods && e.mods.length) o.md = e.mods.slice();
     if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
@@ -1516,8 +1531,11 @@ F.deserialize = function(data){
     if (o.ex) e.isExit = true;
     if (o.p2) e.prog = o.p2;
     if (o.oi) e.outIdx = o.oi;
-    if (o.fi) e.filterItem = o.fi;
-    if (o.po) e.prioOut = o.po;
+    if (o.xp && e.exPrio){ e.exPrio.left = o.xp[0] || 0; e.exPrio.front = o.xp[1] || 0; e.exPrio.right = o.xp[2] || 0; }
+    if (o.xf && e.exFilt){ e.exFilt.left = o.xf[0] || null; e.exFilt.front = o.xf[1] || null; e.exFilt.right = o.xf[2] || null; }
+    // legacy splitter config: one filter (always left) + one priority exit
+    if (o.fi && e.exFilt) e.exFilt.left = o.fi;
+    if (o.po && e.exPrio && e.exPrio[o.po] != null) e.exPrio[o.po] = 1;
     if (o.wk) e.workItem = o.wk;
     if (o.md) e.mods = o.md.filter(m => F.MODULES[m]);
     if (o.pa) e.prodAcc = o.pa;
