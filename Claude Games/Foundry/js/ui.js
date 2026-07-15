@@ -355,6 +355,30 @@ function tryUpgradeLine(x, y, def){
   return true;
 }
 
+/* the whole run of belts this one belongs to: forward along each belt's own
+   direction, backward through whichever SINGLE belt feeds the chain —
+   stopping at machines, splitters, tunnels, junctions and gaps */
+function beltLineOf(S, start){
+  const line = [start], seen = new Set([start.id]);
+  let cur = start;
+  while (true){
+    const nxt = F.entAt(S, cur.x + F.DX[cur.dir], cur.y + F.DY[cur.dir]);
+    if (!nxt || nxt.kind !== 'belt' || seen.has(nxt.id)) break;
+    line.push(nxt); seen.add(nxt.id); cur = nxt;
+  }
+  cur = start;
+  while (true){
+    let prev = null, feeders = 0;
+    for (let d = 0; d < 4; d++){
+      const b = F.entAt(S, cur.x - F.DX[d], cur.y - F.DY[d]);
+      if (b && b.kind === 'belt' && b.dir === d){ prev = b; feeders++; }
+    }
+    if (feeders !== 1 || seen.has(prev.id)) break;   // gap or junction — the line ends here
+    line.unshift(prev); seen.add(prev.id); cur = prev;
+  }
+  return line;
+}
+
 /* drop a splitter straight onto a belt — the belt folds into it, keeping
    its direction and whatever item was riding it */
 function trySplitterOnBelt(x, y){
@@ -508,7 +532,9 @@ function captureBlueprint(b){
   const list = entsInBox(b);
   if (!list.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
   const parts = list.map(e => ({ key: e.key, dx: e.x - b.x0, dy: e.y - b.y0, dir: e.dir,
-    recipe: e.recipe || null, filterItem: e.filterItem || null, prioOut: e.prioOut || null,
+    recipe: e.recipe || null,
+    exPrio: e.exPrio ? Object.assign({}, e.exPrio) : null,
+    exFilt: e.exFilt ? Object.assign({}, e.exFilt) : null,
     mode: e.mode || null, portItem: e.portItem || null }));
   UI.blueprint = { w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1, parts };
   UI.bpDir = 0;
@@ -533,7 +559,7 @@ function bpParts(anchorX, anchorY){
   return bp.parts.map(p => {
     const [ox, oy] = bpTransform(p.dx, p.dy, bp.w, bp.h, rot);
     return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3,
-             recipe: p.recipe, filterItem: p.filterItem, prioOut: p.prioOut,
+             recipe: p.recipe, exPrio: p.exPrio, exFilt: p.exFilt,
              mode: p.mode, portItem: p.portItem };
   });
 }
@@ -551,8 +577,8 @@ function stampBlueprint(t){
     if (e){
       placed++;
       if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe;
-      if (p.filterItem) e.filterItem = p.filterItem;
-      if (p.prioOut) e.prioOut = p.prioOut;
+      if (p.exPrio && e.exPrio) Object.assign(e.exPrio, p.exPrio);
+      if (p.exFilt && e.exFilt) Object.assign(e.exFilt, p.exFilt);
       if (p.mode && e.kind === 'port'){ e.mode = p.mode; e.portItem = p.portItem; }
     }
     else poor++;
@@ -832,6 +858,7 @@ function select(e){
   UI.selection = e;
   UI.selSig = null;          // force a fresh structural build
   UI._bufsCache = null;
+  if (!UI.lineSel || !e || UI.lineSel.forId !== e.id) UI.lineSel = null;
   const p = $('selPanel');
   if (!e){ p.classList.add('hidden'); return; }
   p.classList.remove('hidden');
@@ -848,7 +875,10 @@ function refreshSelPanel(force){
   if (!e) return;
   const S = UI.S;
   if (S.ents.indexOf(e) < 0){ select(null); return; }
-  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex, e.filterItem || '', e.prioOut || '',
+  const sig = [e.id, e.recipe || '', e.linkId || 0, S.msIndex,
+    e.exPrio ? `${e.exPrio.left}${e.exPrio.front}${e.exPrio.right}` : '',
+    e.exFilt ? `${e.exFilt.left || ''},${e.exFilt.front || ''},${e.exFilt.right || ''}` : '',
+    UI.lineSel && UI.lineSel.forId === e.id ? 'ln' + UI.lineSel.list.length : '',
     (e.mods || []).join(','), e.mode || '', e.portItem || ''].join('|');
   if (force || UI.selSig !== sig){
     UI.selSig = sig;
@@ -1052,24 +1082,53 @@ function buildSelPanel(e){
     html += row('Status', dv.lit, 'lit');
     html += `<div class="ghostNote">Lights the night in a ${def.glow * 2}-tile circle. Needs a pole in range.</div>`;
   }
-  if (e.kind === 'belt') html += row('Speed', dv.speed, 'speed');
+  if (e.kind === 'belt'){
+    html += row('Speed', dv.speed, 'speed');
+    const line = UI.lineSel && UI.lineSel.forId === e.id ? UI.lineSel.list : null;
+    if (!line){
+      html += `<button class="menuBtn" data-line style="margin-top:8px">⛓ Select line</button>`;
+      html += `<div class="ghostNote">Selects every belt in this run — through corners, stopping at machines, splitters and gaps — to replace the whole line at once.</div>`;
+    } else {
+      html += `<div class="selSection">Line — ${line.length} belt${line.length > 1 ? 's' : ''}</div>`;
+      const tiers = ['belt1', 'belt2', 'belt3', 'belt4'].filter(k => S.unlocked[k]);
+      for (const k of tiers){
+        const n = line.filter(b => b.key !== k).length;
+        if (!n){ html += `<div class="ghostNote">${F.BUILDINGS[k].name} — the whole line already.</div>`; continue; }
+        const per = F.buildCost(S, k), need = {};
+        for (const c in per) need[c] = per[c] * n;
+        const afford = F.canAfford(S, need);
+        const costStr = Object.entries(need).map(([c, q]) =>
+          `<span class="${F.invCount(S, c) < q ? 'lack' : ''}">${iconImg(c, 13)} ${F.fmt(q)}</span>`).join(' ');
+        html += `<div class="lineRow"><button class="recipeBtn lineRep" data-lrep="${k}" ${afford ? '' : 'disabled'}
+          title="Replace ${n} belt${n > 1 ? 's' : ''} with ${F.BUILDINGS[k].name}">${iconImg(k, 20)}</button>
+          <div class="lineInfo"><b>${F.BUILDINGS[k].name}</b><div class="lineCost" data-lcost="${k}">${costStr}</div></div></div>`;
+      }
+      html += `<div class="ghostNote">Old belts refund in full; items riding the line stay on it.</div>`;
+    }
+  }
   if (e.kind === 'splitter'){
-    // filter: matched items always exit LEFT; everything else shares the rest
+    const N_LBL = { left:'◀ Left exit', front:'▲ Front exit', right:'▶ Right exit' };
+    html += `<div class="selSection">Exits</div>`;
+    for (const n of ['left', 'front', 'right']){
+      const p = e.exPrio[n], f = e.exFilt[n];
+      html += `<div class="exitRow" data-exit="${n}">
+        <span class="exitLbl">${N_LBL[n]}</span>
+        <button class="exitSlot prioSlot${p ? ' set' : ''}" data-clrp="${n}" title="${p ? `Priority ${p} — click to clear` : 'Drag a priority chip here'}">${p || '·'}</button>
+        <span class="exitFilterLbl">filter</span>
+        <button class="exitSlot filtSlot${f ? ' set' : ''}" data-clrf="${n}" title="${f ? `${F.ITEMS[f].name} only — click to clear` : 'Drag a resource here'}">${f ? iconImg(f, 18) : '·'}</button>
+      </div>`;
+    }
+    html += `<div class="selSection">Priorities — drag onto an exit</div><div class="recipeGrid">`;
+    for (const p of [1, 2, 3])
+      html += `<button class="recipeBtn prioChip" data-dragp="${p}" title="Priority ${p}${p === 1 ? ' (first pick)' : p === 3 ? ' (last pick)' : ''}">${p}</button>`;
+    html += `</div>`;
     const seen = F.ITEM_ORDER.filter(k =>
       F.oreTypeByItem[k] || S.inv[k] || S.delivered[k] || S.stats.made[k]);
-    html += `<div class="selSection">Filter → left exit</div><div class="recipeGrid">`;
-    html += `<button class="recipeBtn${!e.filterItem ? ' on' : ''}" data-filter="_" title="No filter">✕</button>`;
+    html += `<div class="selSection">Filters — drag onto an exit</div><div class="recipeGrid">`;
     for (const k of seen)
-      html += `<button class="recipeBtn${e.filterItem === k ? ' on' : ''}" data-filter="${k}" title="${F.ITEMS[k].name}">${iconImg(k, 22)}</button>`;
+      html += `<button class="recipeBtn" data-dragf="${k}" title="${F.ITEMS[k].name}">${iconImg(k, 22)}</button>`;
     html += `</div>`;
-    html += `<div class="selSection">Priority exit</div><div class="recipeGrid">`;
-    for (const [val, lbl] of [['_', 'None'], ['left', '◀'], ['front', '▲'], ['right', '▶']])
-      html += `<button class="recipeBtn prioBtn${(e.prioOut || '_') === val ? ' on' : ''}" data-prio="${val}" title="${val === '_' ? 'Even split' : 'Prefer ' + val + ' exit'}">${lbl}</button>`;
-    html += `</div>`;
-    if (e.filterItem)
-      html += `<div class="ghostNote">${F.ITEMS[e.filterItem].name} always exits left; other items use front/right.</div>`;
-    else
-      html += `<div class="ghostNote">Exits are relative to the arrow: ◀ left · ▲ front · ▶ right.</div>`;
+    html += `<div class="ghostNote">A filtered exit takes ONLY its item — and that item uses only its exits. Ranked exits fill 1 → 3; unranked ones share evenly. Click a slot to clear it.</div>`;
   }
   if (e.kind === 'lab'){
     html += `<div class="labProj">
@@ -1167,18 +1226,103 @@ function buildSelPanel(e){
       refreshSelPanel(true);
     });
   });
-  p.querySelectorAll('[data-filter]').forEach(b => {
+  /* splitter config: drag priority chips / resource icons onto exit rows */
+  const startCfgDrag = (ev, payload, html) => {
+    ev.preventDefault();
+    const g = document.createElement('div');
+    g.className = 'dragGhost';
+    g.innerHTML = html;
+    document.body.appendChild(g);
+    const at = (e2) => { g.style.left = e2.clientX + 'px'; g.style.top = e2.clientY + 'px'; };
+    const hot = (e2) => {
+      const el = document.elementFromPoint(e2.clientX, e2.clientY);
+      const row = el && el.closest ? el.closest('[data-exit]') : null;
+      p.querySelectorAll('[data-exit]').forEach(r => r.classList.toggle('dropHot', r === row));
+      return row;
+    };
+    at(ev);
+    const move = (e2) => { at(e2); hot(e2); };
+    const up = (e2) => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      g.remove();
+      p.querySelectorAll('[data-exit]').forEach(r => r.classList.remove('dropHot'));
+      const el = document.elementFromPoint(e2.clientX, e2.clientY);
+      const rowEl = el && el.closest ? el.closest('[data-exit]') : null;
+      if (!rowEl){ A.sfx.click(); return; }
+      const exit = rowEl.dataset.exit;
+      if (payload.p){
+        for (const n of ['left', 'front', 'right']) if (e.exPrio[n] === payload.p) e.exPrio[n] = 0;
+        e.exPrio[exit] = payload.p;
+      } else if (payload.f){
+        e.exFilt[exit] = payload.f;
+      }
+      A.sfx.buy();
+      refreshSelPanel(true);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+  };
+  p.querySelectorAll('[data-dragp]').forEach(b => {
+    b.addEventListener('pointerdown', ev => startCfgDrag(ev, { p: +b.dataset.dragp }, b.innerHTML));
+  });
+  p.querySelectorAll('[data-dragf]').forEach(b => {
+    b.addEventListener('pointerdown', ev => startCfgDrag(ev, { f: b.dataset.dragf }, b.innerHTML));
+  });
+  p.querySelectorAll('[data-clrp]').forEach(b => {
     b.addEventListener('click', () => {
-      e.filterItem = b.dataset.filter === '_' ? null : b.dataset.filter;
+      if (!e.exPrio[b.dataset.clrp]) return;
+      e.exPrio[b.dataset.clrp] = 0;
       A.sfx.click();
       refreshSelPanel(true);
     });
   });
-  p.querySelectorAll('[data-prio]').forEach(b => {
+  p.querySelectorAll('[data-clrf]').forEach(b => {
     b.addEventListener('click', () => {
-      e.prioOut = b.dataset.prio === '_' ? null : b.dataset.prio;
+      if (!e.exFilt[b.dataset.clrf]) return;
+      e.exFilt[b.dataset.clrf] = null;
       A.sfx.click();
       refreshSelPanel(true);
+    });
+  });
+  /* belt line select + one-click line replacement */
+  const lineBtn = p.querySelector('[data-line]');
+  if (lineBtn) lineBtn.addEventListener('click', () => {
+    UI.lineSel = { forId: e.id, list: beltLineOf(S, e) };
+    A.sfx.click();
+    refreshSelPanel(true);
+  });
+  p.querySelectorAll('[data-lrep]').forEach(b => {
+    b.addEventListener('click', () => {
+      const key = b.dataset.lrep;
+      const line = (UI.lineSel && UI.lineSel.forId === e.id) ? UI.lineSel.list : null;
+      if (!line) return;
+      const todo = line.filter(x2 => x2.key !== key && S.ents.includes(x2));
+      const per = F.buildCost(S, key), need = {};
+      for (const c in per) need[c] = per[c] * todo.length;
+      if (!todo.length || !F.canAfford(S, need)){ A.sfx.error(); return; }
+      let swapped = 0, anchor = null;
+      for (const old of todo){
+        const carry = { x: old.x, y: old.y, dir: old.dir, item: old.item, t: old.t, srcDir: old.srcDir };
+        F.remove(S, old.x, old.y);
+        const nb = F.place(S, key, carry.x, carry.y, carry.dir, false);
+        if (!nb) continue;
+        if (carry.item){
+          nb.item = carry.item; nb.t = carry.t || 0;
+          nb.srcDir = carry.srcDir != null ? carry.srcDir : nb.dir;
+          F.invAdd(S, carry.item, -1);
+        }
+        swapped++;
+        if (old.id === e.id || !anchor) anchor = nb;
+      }
+      A.sfx.place();
+      buildBarAfford();
+      toast(`Replaced ${swapped} belt${swapped > 1 ? 's' : ''} with ${F.BUILDINGS[key].name}.`, '', 2600);
+      if (anchor){
+        select(anchor);
+        UI.lineSel = { forId: anchor.id, list: beltLineOf(S, anchor) };
+        refreshSelPanel(true);
+      } else select(null);
     });
   });
   p.querySelectorAll('[data-pmode]').forEach(b => {
@@ -1258,6 +1402,16 @@ function updateSelPanel(e){
   const p = $('selPanel');
   // broke down while the panel was open → rebuild so the banner appears
   if (!!e.broken !== !!UI._selBroken){ UI._selBroken = !!e.broken; buildSelPanel(e); return; }
+  // line-replace buttons follow the wallet live
+  if (UI.lineSel && UI.lineSel.forId === e.id){
+    p.querySelectorAll('[data-lrep]').forEach(b => {
+      const key = b.dataset.lrep;
+      const n = UI.lineSel.list.filter(x2 => x2.key !== key).length;
+      const per = F.buildCost(S, key), need = {};
+      for (const c in per) need[c] = per[c] * n;
+      b.disabled = !n || !F.canAfford(S, need);
+    });
+  }
   const dv = dynVals(e);
   p.querySelectorAll('[data-dyn]').forEach(el2 => {
     const v = dv[el2.dataset.dyn];
@@ -2210,10 +2364,13 @@ function renderHowTo(){
   <p class="howP"><b>Drag</b> to lay a belt line — it follows your pointer and turns corners automatically.
   ${kb('R')} rotates before placing. Belts push items into whatever they point at: a machine, the Core,
   or another belt (side entries merge; head-on is refused). The <b>splitter</b> deals items evenly to
-  every open exit — and click one to configure it: set a <b>filter</b> (that item always exits left —
-  perfect for pulling coal out of a mixed line) and a <b>priority exit</b> that fills first with
-  overflow spilling to the others. Stamp a splitter <b>directly onto a belt</b> and it swaps in,
-  keeping the belt's direction and cargo. <b>Tunnels</b> dive under up to 4 tiles
+  every open exit — and click one to configure each exit: drag <b>priority chips</b> (1 fills first,
+  3 last) onto its exits, and drag a <b>resource</b> onto an exit to reserve that lane for it —
+  perfect for pulling coal or tar out of a mixed line. A reserved lane takes ONLY its item, and that
+  item goes nowhere else. Stamp a splitter <b>directly onto a belt</b> and it swaps in,
+  keeping the belt's direction and cargo. Click any belt and <b>Select line</b> to grab its whole
+  run and replace every belt in it with a faster tier in one click.
+  <b>Tunnels</b> dive under up to 4 tiles
   (place the entrance, then the exit in the same direction) and let lines cross. The <b>depot</b>
   buffers 60 items and releases them out its front — a shock-absorber for uneven flows.
   Right-click removes anything for a <b>full refund</b>, contents included — redesign freely.
@@ -2294,7 +2451,10 @@ function renderHowTo(){
   plastic (with coal) or ${ic('fuelCell')} fuel cells (with steel). Pipes only connect pumpjacks,
   refineries, <b>reservoirs</b> (a researchable 240-crude buffer tank) and other pipes.
   Cracking always leaves ${ic('tar')} <b>tar</b> in the chute alongside the product — let it pile up
-  and the refinery jams. Set a <b>splitter filter</b> to pull tar aside, smelt it back into coal,
+  and the refinery jams. And tar has almost nowhere to go: <b>the Core refuses it, ordinary depots
+  refuse it, drones won't haul it</b> — only tar-cooking machines and the squat brick <b>tar pit</b>
+  (30 tar, nothing else) will take it off a belt. Reserve a
+  <b>splitter exit</b> for tar to pull it aside, smelt it back into coal,
   or research <b>Tar synthesis</b> to re-polymerise it into extra plastic.</p>
 
   <div class="selSection">Growing the factory</div>
@@ -2970,6 +3130,7 @@ UI.viewState = function(){
     marquee: UI.marquee ? Object.assign(boxOf(UI.marquee), { mode: UI.mode }) : null,
     hover: (UI.mode || UI.holdStack) ? null : UI.hover,
     selection: UI.selection,
+    lineSel: (UI.lineSel && UI.selection && UI.lineSel.forId === UI.selection.id) ? UI.lineSel.list : null,
     arrow: UI.arrow,
     callout: UI.callout,
     beltPath: null,
