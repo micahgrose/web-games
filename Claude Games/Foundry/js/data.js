@@ -242,10 +242,17 @@ for (const k in B){ if (B[k].power && B[k].kind !== 'lamp') B[k].power *= 5; }
 
 /* Everything past the milestone basics — anything the tech tree sells —
    costs a THIRD of its sticker price. Research is the real gate; the
-   wallet needn't gate it twice. (Tier scaling still applies on top.) */
+   wallet needn't gate it twice. */
 for (const k in B){
   const d = B[k];
   if (d.tech) for (const c in d.cost) d.cost[c] = Math.max(1, Math.round(d.cost[c] / 3));
+}
+
+/* …but electricity is an investment: every grid-DRAWING building then
+   costs double whatever the rules above left it at */
+for (const k in B){
+  const d = B[k];
+  if (d.power) for (const c in d.cost) d.cost[c] *= 2;
 }
 
 /* Hidden service STRETCH, in completed operations (ores dug, crafts finished,
