@@ -2472,10 +2472,23 @@ R.draw = function(S, dt, U){
       nx.fillStyle = ch;
       nx.beginPath(); nx.arc(ccx2, ccy2, crad, 0, 7); nx.fill();
     }
+    /* the wanderer's lantern: a small glow rides the cursor, fading in and
+       out with the dark. 1/2.5 of a lamp's radius, and its light leans
+       amber over reveal 80:20 (a lamp is 50:50) — company, not utility. */
+    const CURSOR_R = (15 / 2.5) * s2;
+    const mOn = R.mouse && R.mouse.x != null;
+    if (mOn){
+      const hole = nx.createRadialGradient(R.mouse.x, R.mouse.y, 0, R.mouse.x, R.mouse.y, CURSOR_R);
+      hole.addColorStop(0, 'rgba(0,0,0,.22)');
+      hole.addColorStop(.45, 'rgba(0,0,0,.16)');
+      hole.addColorStop(1, 'rgba(0,0,0,0)');
+      nx.fillStyle = hole;
+      nx.beginPath(); nx.arc(R.mouse.x, R.mouse.y, CURSOR_R, 0, 7); nx.fill();
+    }
     x.drawImage(nc, 0, 0);
     /* …and half the light given back as warm amber, pooled with
        per-channel MAX so it never stacks toward white */
-    if (lamps.length){
+    if (lamps.length || mOn){
       if (!R._lightCv) R._lightCv = document.createElement('canvas');
       const lc = R._lightCv;
       if (lc.width !== R.W || lc.height !== R.H){ lc.width = R.W; lc.height = R.H; }
@@ -2491,6 +2504,15 @@ R.draw = function(S, dt, U){
         lg.addColorStop(1, 'rgba(255,160,60,0)');
         lx2.fillStyle = lg;
         lx2.beginPath(); lx2.arc(lx, ly, rad, 0, 7); lx2.fill();
+      }
+      if (mOn){
+        const breathe = .9 + .1 * Math.sin(time * 2.2);
+        const cg = lx2.createRadialGradient(R.mouse.x, R.mouse.y, 0, R.mouse.x, R.mouse.y, CURSOR_R);
+        cg.addColorStop(0, `rgba(255,200,110,${.4 * k2 * breathe})`);
+        cg.addColorStop(.5, `rgba(255,180,90,${.19 * k2})`);
+        cg.addColorStop(1, 'rgba(255,160,60,0)');
+        lx2.fillStyle = cg;
+        lx2.beginPath(); lx2.arc(R.mouse.x, R.mouse.y, CURSOR_R, 0, 7); lx2.fill();
       }
       x.save();
       x.globalCompositeOperation = 'lighter';
