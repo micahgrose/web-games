@@ -643,7 +643,7 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
   font-size:clamp(12px, 2vw, 15px); color:var(--ink-dim); letter-spacing:.26em; text-transform:uppercase;
   margin-top:2px;
 }
-#titleBtns{ margin-top:44px; display:flex; flex-direction:column; align-items:center; gap:12px; }
+#titleBtns{ margin-top:40px; display:flex; flex-direction:column; align-items:center; gap:12px; }
 .titleBtn{
   font-family:var(--font-d); font-weight:600; font-size:15px; letter-spacing:.18em;
   color:var(--ink); padding:13px 46px; border-radius:10px;
@@ -651,6 +651,40 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
   transition:all .18s; min-width:240px;
 }
 .titleBtn:hover{ border-color:var(--accent); color:var(--accent); background:rgba(255,180,84,.07); box-shadow:0 0 24px rgba(255,180,84,.18); }
+
+/* ---- save slots ---- */
+.saveSlot{
+  display:flex; align-items:center; gap:12px;
+  width:420px; max-width:calc(100vw - 40px);
+  padding:12px 14px; border-radius:11px;
+  border:1px solid var(--line-bright); background:rgba(255,255,255,.03);
+  transition:border-color .18s, background .18s;
+}
+.saveSlot.empty{ border-style:dashed; opacity:.86; }
+.saveSlot:hover{ border-color:rgba(255,180,84,.5); background:rgba(255,180,84,.05); }
+.slotInfo{ flex:1 1 auto; min-width:0; text-align:left; }
+.slotName{
+  font-family:var(--font-d); font-weight:600; font-size:15px; letter-spacing:.04em;
+  color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.saveSlot.empty .slotName{ color:var(--ink-faint); font-style:italic; }
+.slotSub{ margin-top:3px; font-size:11.5px; color:var(--ink-dim); letter-spacing:.02em; }
+.slotBtn{
+  flex:0 0 auto; font-family:var(--font-d); font-weight:600; font-size:12.5px; letter-spacing:.12em;
+  color:var(--ink); padding:9px 16px; border-radius:8px;
+  border:1px solid var(--line-bright); background:rgba(255,255,255,.04); transition:all .16s;
+}
+.slotBtn:hover{ border-color:var(--accent); color:var(--accent); background:rgba(255,180,84,.09); }
+.slotDel{ padding:9px 12px; color:var(--ink-faint); }
+.slotDel:hover{ border-color:var(--bad); color:var(--bad); background:rgba(255,118,118,.1); }
+.slotDel[data-confirm]{ border-color:var(--bad); color:var(--bad); }
+.slotInput{
+  flex:1 1 auto; min-width:0; font-family:var(--font-d); font-size:14px; letter-spacing:.03em;
+  color:var(--ink); padding:9px 12px; border-radius:8px;
+  border:1px solid var(--accent); background:rgba(0,0,0,.25); outline:none;
+}
+.slotInput::placeholder{ color:var(--ink-faint); }
+.saveSlot.naming{ border-color:var(--accent); background:rgba(255,180,84,.06); }
 #titleHint{ margin-top:34px; font-size:11.5px; color:var(--ink-faint); letter-spacing:.22em; text-transform:uppercase; }
 #titleFoot{
   position:absolute; bottom:16px; left:0; right:0; text-align:center;

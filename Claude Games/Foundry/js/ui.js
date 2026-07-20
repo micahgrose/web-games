@@ -30,6 +30,8 @@ const UI = F.ui = {
   arrow: null,
   started: false,
   cineStage: 0,
+  slot: null,            // which save slot (0..2) the live game writes to
+  slotName: null,        // its player-given name
 };
 
 const $ = id => document.getElementById(id);
@@ -39,7 +41,8 @@ const el = (tag, cls, html) => {
   if (html != null) e.innerHTML = html;
   return e;
 };
-const SAVE_KEY = 'foundry_save_v1';
+const SAVE_KEYS = ['foundry_save_v1_0', 'foundry_save_v1_1', 'foundry_save_v1_2'];
+const LEGACY_KEY = 'foundry_save_v1';   // the old single-save; migrates into slot 0
 
 /* ==================================================================== */
 /* INIT                                                                 */
@@ -62,45 +65,138 @@ UI.init = function(){
   });
 };
 
-function hasSave(){
-  try { return !!localStorage.getItem(SAVE_KEY); } catch (e){ return false; }
-}
-UI.save = function(){
-  if (!UI.S || R.cine || UI.S.testWorld) return;   // test worlds never touch the real save
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(F.serialize(UI.S))); } catch (e){}
-};
-function loadSave(){
+/* ---- three save slots ----
+   Each slot key holds { name, save } (name + serialized world). The old
+   single save migrates into slot 0 on first run. UI.slot / UI.slotName
+   track which slot the live game writes back to. */
+function migrateLegacy(){
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const old = localStorage.getItem(LEGACY_KEY);
+    if (old){
+      if (!localStorage.getItem(SAVE_KEYS[0]))
+        localStorage.setItem(SAVE_KEYS[0], JSON.stringify({ name: 'Foundry', save: JSON.parse(old) }));
+      localStorage.removeItem(LEGACY_KEY);
+    }
+  } catch (e){}
+}
+function readSlot(i){
+  try {
+    const raw = localStorage.getItem(SAVE_KEYS[i]);
     if (!raw) return null;
-    return F.deserialize(JSON.parse(raw));
+    const o = JSON.parse(raw);
+    if (o && o.save) return { name: o.name || 'Foundry', data: o.save };
+    return { name: 'Foundry', data: o };   // stray unwrapped save, tolerate it
   } catch (e){ return null; }
 }
+/* name + one-line progress label for a slot, or null if empty */
+function slotMeta(i){
+  const s = readSlot(i);
+  if (!s) return null;
+  const d = s.data;
+  let idx = d.msIndex || 0;
+  if (d.msId === 'won') idx = F.MILESTONES.length;
+  else if (d.msId != null){ const mi = F.MILESTONES.findIndex(m => m.id === d.msId); if (mi >= 0) idx = mi; }
+  const label = idx >= F.MILESTONES.length
+    ? 'the Engine wakes'
+    : `Tier ${idx + 1}/${F.MILESTONES.length} · ${F.MILESTONES[idx].name}`;
+  return { name: s.name, label };
+}
+function loadSlot(i){
+  const s = readSlot(i);
+  if (!s) return null;
+  try { return F.deserialize(s.data); } catch (e){ return null; }
+}
+UI.save = function(){
+  if (!UI.S || R.cine || UI.S.testWorld || UI.slot == null) return;   // test worlds never touch a slot
+  try {
+    localStorage.setItem(SAVE_KEYS[UI.slot],
+      JSON.stringify({ name: UI.slotName || 'Foundry', save: F.serialize(UI.S) }));
+  } catch (e){}
+};
 
 /* ==================================================================== */
 /* TITLE                                                                */
 /* ==================================================================== */
 let titleRaf = null;
 function initTitle(){
-  const btnC = $('btnContinue'), btnN = $('btnNew');
-  if (hasSave()) btnC.classList.remove('hidden');
-  btnC.addEventListener('click', () => {
-    A.init(); A.resume();
-    const S = loadSave();
-    startGame(S || F.newGame());
-  });
-  btnN.addEventListener('click', () => {
-    A.init(); A.resume();
-    if (hasSave() && !btnN.dataset.confirm){
-      btnN.dataset.confirm = '1';
-      btnN.textContent = 'OVERWRITE SAVE?';
-      setTimeout(() => { btnN.dataset.confirm = ''; btnN.textContent = 'NEW WORLD'; }, 2600);
-      return;
-    }
-    try { localStorage.removeItem(SAVE_KEY); } catch (e){}
-    startGame(F.newGame());
-  });
+  migrateLegacy();
+  renderSlots();
   startTitleFx();
+}
+
+/* draw the three save-slot rows on the title screen */
+function renderSlots(){
+  const wrap = $('titleBtns');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  for (let i = 0; i < 3; i++){
+    const meta = slotMeta(i);
+    const row = el('div', 'saveSlot' + (meta ? '' : ' empty'));
+    if (meta){
+      row.appendChild(el('div', 'slotInfo',
+        `<div class="slotName">${escapeHtml(meta.name)}</div><div class="slotSub">${escapeHtml(meta.label)}</div>`));
+      const play = el('button', 'slotBtn slotPlay', 'CONTINUE');
+      play.addEventListener('click', () => {
+        A.init(); A.resume();
+        const S = loadSlot(i);
+        if (!S) return;
+        UI.slot = i; UI.slotName = meta.name;
+        startGame(S);
+      });
+      const del = el('button', 'slotBtn slotDel', '✕');
+      del.title = 'Delete this save';
+      del.addEventListener('click', () => confirmDeleteSlot(i, del));
+      row.appendChild(play); row.appendChild(del);
+    } else {
+      row.appendChild(el('div', 'slotInfo', `<div class="slotName">Empty slot ${i + 1}</div>`));
+      const nw = el('button', 'slotBtn slotNew', 'NEW GAME');
+      nw.addEventListener('click', () => beginNewInSlot(i, row));
+      row.appendChild(nw);
+    }
+    wrap.appendChild(row);
+  }
+}
+
+/* name-your-foundry input, inline in the slot row */
+function beginNewInSlot(i, row){
+  A.init(); A.resume();
+  row.className = 'saveSlot naming';
+  row.innerHTML = '';
+  const input = el('input', 'slotInput');
+  input.type = 'text'; input.maxLength = 24;
+  input.placeholder = 'Name your foundry…';
+  input.value = 'Foundry ' + (i + 1);
+  const start = el('button', 'slotBtn slotStart', 'START');
+  row.appendChild(input); row.appendChild(start);
+  input.focus(); input.select();
+  const go = () => {
+    const name = (input.value || '').trim() || ('Foundry ' + (i + 1));
+    const S = F.newGame();
+    UI.slot = i; UI.slotName = name;
+    try { localStorage.setItem(SAVE_KEYS[i], JSON.stringify({ name, save: F.serialize(S) })); } catch (e){}
+    startGame(S);
+  };
+  start.addEventListener('click', go);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') go();
+    else if (e.key === 'Escape') renderSlots();
+  });
+}
+
+function confirmDeleteSlot(i, btn){
+  if (btn.dataset.confirm){
+    try { localStorage.removeItem(SAVE_KEYS[i]); } catch (e){}
+    renderSlots();
+    return;
+  }
+  btn.dataset.confirm = '1';
+  btn.textContent = 'SURE?';
+  setTimeout(() => { renderSlots(); }, 2600);
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 
 function startTitleFx(){
@@ -133,7 +229,8 @@ function quitToTitle(){
   $('winOverlay').classList.add('hidden');
   $('winOverlay').classList.remove('solid');
   $('title').classList.remove('hidden');
-  $('btnContinue').classList.remove('hidden');
+  UI.slot = null;
+  renderSlots();
   startTitleFx();
 }
 
@@ -141,6 +238,7 @@ function quitToTitle(){
 function startTestWorld(){
   const S = F.newGame();
   S.testWorld = true;
+  UI.slot = null;   // sandbox is never written to a slot
   for (const k in F.BUILDINGS) S.unlocked[k] = true;
   for (const k in F.RECIPES) S.unlocked['r:' + k] = true;
   for (const k in F.ITEMS) S.inv[k] = 1000;
