@@ -1218,6 +1218,20 @@ function beltSpeed(S, e){
   return F.BUILDINGS[e.key].speed * F.beltMul(S);
 }
 
+/* a splitter glides its item at the pace of the SLOWEST conveyor leading
+   out of it — so it never zips faster than the belts it feeds. Falls back
+   to its own base speed when no belt currently exits it. */
+function splitterSpeed(S, e){
+  let slow = Infinity;
+  for (const d of [e.dir, (e.dir + 3) & 3, (e.dir + 1) & 3]){   // front, left, right
+    const n = F.entAt(S, e.x + DX[d], e.y + DY[d]);
+    if (n && n.kind === 'belt' && n.dir !== OPP(d))             // a belt it can push into
+      slow = Math.min(slow, F.BUILDINGS[n.key].speed);
+  }
+  const base = slow === Infinity ? F.BUILDINGS[e.key].speed : slow;
+  return base * F.beltMul(S);
+}
+
 function tickBelt(S, e, dt){
   if (!e.item) return;
   e.t += beltSpeed(S, e) * dt;
@@ -1241,7 +1255,7 @@ function tickBelt(S, e, dt){
 function tickSplitter(S, e, dt){
   if (!e.item) return;
   if (e.t < .5){
-    e.t = Math.min(.5, e.t + beltSpeed(S, e) * dt);
+    e.t = Math.min(.5, e.t + splitterSpeed(S, e) * dt);
     if (e.t < .5) return;
   }
   const FRONT = e.dir, LEFT = (e.dir + 3) & 3, RIGHT = (e.dir + 1) & 3;

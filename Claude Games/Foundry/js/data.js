@@ -257,13 +257,17 @@ for (const k in B){
 
 /* Hidden service STRETCH, in completed operations (ores dug, crafts finished,
    crude drawn). At the end of each stretch the machine rolls F.BREAK_CHANCE to
-   die for good; survive and the counter resets. Higher marks stretch longer.
+   die for good; survive and the counter resets. The stretch scales with a
+   machine's SPEED so a faster mark burns through more ops per lifetime —
+   but not quite proportionally: each Mk step is tuned ~7 real-minutes shorter
+   than the one below, so higher tiers still wear out a little sooner in
+   wall-clock time. Drill real-time means land near 80 / 73 / 66 / 59 min.
    NEVER shown to the player — machines simply break down one day. */
 {
-  const LIFE = { miner1:500, miner2:800, miner3:1300, miner4:2000, pump:800,
-    smelter1:500, smelter2:800, smelter3:1300, smelter4:2000, alloy:800,
-    asm1:500, asm2:800, asm3:1300, asm4:2000, refinery:1000,
-    crusher1:500, crusher2:800 };
+  const LIFE = { miner1:500, miner2:1000, miner3:1815, miner4:2580, pump:800,
+    smelter1:500, smelter2:1000, smelter3:1815, smelter4:2580, alloy:800,
+    asm1:500, asm2:1000, asm3:1815, asm4:2580, refinery:1000,
+    crusher1:500, crusher2:1000 };
   for (const k in LIFE) B[k].life = LIFE[k];
 }
 
@@ -639,7 +643,7 @@ F.TECHS = {
     cost:{ pack2:5, pack3:4 }, req:['solarPower'], effect:'sunAnchor' },
   /* --- mid logistics & industry --- */
   modules:     { name:'Machine modules', icon:'speedModule',
-    desc:'Slottable inserts for drills and machines: speed modules (+35% speed — at ×11.2 power draw), efficiency modules (huge power savings; they tame a speed module down to ×2.3) and hardened modules (machines last 50% longer per module). Two slots per machine.',
+    desc:'Slottable inserts for drills and machines: speed modules (+35% speed — at ×11.2 power draw), efficiency modules (huge power savings; they tame a speed module down to ×2.3) and hardened modules (machines last 120% longer per module). Two slots per machine.',
     cost:{ pack2:16 }, req:[], unlocks:['r:speedModule','r:effModule','r:durModule'] },
   crushing2:   { name:'Ball mills', icon:'titanDust',
     desc:'An electric mill that crushes 2.4× faster — and is hard enough to crack titanium.',
@@ -754,7 +758,7 @@ F.MODULES = {
   speedModule: { spd:.35, pow:10.2 },
   effModule:   { pow:-8.9 },
   prodModule:  { prod:.12 },
-  durModule:   { dur:.50 },   // +50% service life; slotted only, never broadcast
+  durModule:   { dur:1.20 },  // +120% service life; slotted only, never broadcast
 };
 F.MOD_SLOTS = 2;
 F.BEACON_FACTOR = .5;
