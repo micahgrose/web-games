@@ -798,7 +798,7 @@ F.UPGRADES = {
     costs:[ {stone:20, coal:10}, {ironIngot:20, brick:10}, {gear:15, plate:10}, {steel:10, circuit:5}, {motor:8, advCircuit:4} ] },
   capacitors: { name:'Capacitors',  desc:'Machine input buffers +2 and depots +20 capacity per rank.', per:2, max:5,
     costs:[ {copperIngot:20, wire:10}, {plate:15, circuit:5}, {glass:12, circuit:12}, {steel:15, plastic:10}, {advCircuit:12, frame:4} ] },
-  durability: { name:'Durability',  desc:'All drills and machines last +12% longer before wearing out per rank.', per:.12, max:5,
+  durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank.', per:.16, max:5,
     costs:[ {plate:25, gear:20}, {steel:20, circuit:10}, {steel:40, motor:12}, {advCircuit:12, plastic:20}, {processor:5, frame:5} ] },
 };
 
