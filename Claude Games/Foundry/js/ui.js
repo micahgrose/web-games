@@ -2390,7 +2390,7 @@ function renderHowTo(){
   <b>wears out</b> as it works — past each stretch of service its survival is a <b>roll of the dice</b>,
   and one day it <b>breaks down for good</b>: a crumbled, smoking wreck you must scrap (nothing comes
   back; slotted modules survive on a coin flip) and replace. Higher-mark machines endure longer,
-  <b>Durability</b> ranks in the tech tree add +12% per rank to each service stretch, and the
+  <b>Durability</b> ranks in the tech tree add +16% per rank to each service stretch, and the
   ${ic('durModule')} <b>hardened module</b> adds +50% to whatever it's slotted in. How long exactly?
   The machines don't say.</p>
 
