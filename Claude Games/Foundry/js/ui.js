@@ -2453,7 +2453,7 @@ function renderHowTo(){
   Cracking always leaves ${ic('tar')} <b>tar</b> in the chute alongside the product — let it pile up
   and the refinery jams. And tar has almost nowhere to go: <b>the Core refuses it, ordinary depots
   refuse it, drones won't haul it</b> — only tar-cooking machines and the squat brick <b>tar pit</b>
-  (30 tar, nothing else) will take it off a belt. Reserve a
+  (210 tar, nothing else) will take it off a belt. Reserve a
   <b>splitter exit</b> for tar to pull it aside, smelt it back into coal,
   or research <b>Tar synthesis</b> to re-polymerise it into extra plastic.</p>
 
