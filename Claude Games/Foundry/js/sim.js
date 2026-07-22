@@ -882,15 +882,15 @@ function minerWants(S, e){
 
 /* every finished operation grinds the machine down a little. At the end of
    each (hidden) service stretch — F.lifeOf ops — the machine rolls the dice:
-   F.BREAK_CHANCE that it breaks for good, otherwise the wear counter resets
-   and it soldiers on toward the next roll. */
+   F.breakChance(e) that it breaks for good (1 in 4, widened by hardened
+   modules), otherwise the wear counter resets and it soldiers on. */
 function wearDown(S, e, n){
   if (e.broken) return;
   e.ops = (e.ops || 0) + (n || 1);
   const life = F.lifeOf(S, e);
   if (life === Infinity || e.ops < life) return;
   e.ops = 0;   // checkpoint passed either way
-  if (Math.random() < F.BREAK_CHANCE){
+  if (Math.random() < F.breakChance(S, e)){
     e.broken = true;
     e.active = false;
     e.crafting = false;
@@ -1097,6 +1097,7 @@ F.setResearch = function(S, id){
   const tk = F.TECHS[id];
   if (!tk || RS.done[id]) return false;
   for (const rq of (tk.req || [])) if (!RS.done[rq]) return false;
+  if (!F.rankMet(S, tk)) return false;   // e.g. Invincibility needs Durability V
   if (RS.cur === id) return true;
   dropLabWork(S);
   RS.cur = id;
@@ -1115,7 +1116,7 @@ F.techAvailable = function(S, id){
   const tk = F.TECHS[id];
   if (!tk || S.research.done[id]) return false;
   for (const rq of (tk.req || [])) if (!S.research.done[rq]) return false;
-  return true;
+  return F.rankMet(S, tk);
 };
 
 /* ---- drone depots ----
@@ -1581,6 +1582,12 @@ F.deserialize = function(data){
       else { e.inBuf[e.workItem] = (e.inBuf[e.workItem] || 0) + 1; e.workItem = null; e.prog = 0; }
     }
   }
+  // migration: the old single "Machine modules" tech granted two slots and all
+  // three module recipes at once. It now only opens the sub-techs, so preserve
+  // old saves by granting them the equivalents (two slots + the three types).
+  if (S.research.done.modules)
+    for (const t of ['speedModuleTech', 'effModuleTech', 'durModuleTech', 'moduleSlot1', 'moduleSlot2'])
+      if (F.TECHS[t]) S.research.done[t] = true;
   // migration: content added after this save was made (e.g. power poles)
   // must still unlock — re-apply every completed milestone's unlock list
   for (let i = 0; i < S.msIndex && i < F.MILESTONES.length; i++)
