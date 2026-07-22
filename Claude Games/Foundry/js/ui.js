@@ -977,6 +977,7 @@ function refreshSelPanel(force){
     e.exPrio ? `${e.exPrio.left}${e.exPrio.front}${e.exPrio.right}` : '',
     e.exFilt ? `${e.exFilt.left || ''},${e.exFilt.front || ''},${e.exFilt.right || ''}` : '',
     UI.lineSel && UI.lineSel.forId === e.id ? 'ln' + UI.lineSel.list.length : '',
+    Object.keys(S.research.done).length,   // module-type / slot unlocks change the panel
     (e.mods || []).join(','), e.mode || '', e.portItem || ''].join('|');
   if (force || UI.selSig !== sig){
     UI.selSig = sig;
@@ -1098,9 +1099,13 @@ function modFxStr(S, e, def){
 
 /* module slots + insert buttons for drills / machines / beacons */
 function moduleSection(S, e, def){
-  const slots = def.slots || F.MOD_SLOTS;
+  const slots = F.modSlots(S, e);
   const types = Object.keys(F.MODULES).filter(k => F.recipeUnlocked(S, k) || F.invCount(S, k) > 0 || (e.mods || []).includes(k));
-  if (!types.length) return '';
+  if (!types.length && !slots) return '';
+  if (!slots){
+    return `<div class="selDivider"></div><div class="selSection">Modules</div>` +
+      `<div class="ghostNote">No module slots yet — research <b>Module slot I</b> in the Tech tree (T) to fit one.</div>`;
+  }
   let h = `<div class="selDivider"></div><div class="selSection">Modules</div><div class="modRow">`;
   for (let i = 0; i < slots; i++){
     const m = (e.mods || [])[i];
@@ -1456,7 +1461,7 @@ function buildSelPanel(e){
     b.addEventListener('click', () => {
       if (e.broken){ A.sfx.error(); return; }   // no upgrading a corpse
       const k = b.dataset.mod;
-      const slots = def.slots || F.MOD_SLOTS;
+      const slots = F.modSlots(S, e);
       if (!e.mods) e.mods = [];
       if (e.mods.length >= slots || F.invCount(S, k) <= 0){ A.sfx.error(); return; }
       F.invAdd(S, k, -1);
@@ -2021,9 +2026,12 @@ const TREE_LANES = [
     [1, 'up:metallurgy'],
     [1, 'up:fabrication'],
     [1, 'up:durability'],
+    [5, 'invincibility'],
     [3, 'arcFurnaces', 'plasmaForges'],
     [3, 'poweredAssembly', 'nanoForges'],
-    [2, 'modules', null, 'prodModules'],
+    [2, 'modules', 'speedModuleTech', 'effModuleTech', 'durModuleTech'],
+    [3, 'moduleSlot1', 'moduleSlot2', 'moduleSlot3'],
+    [3, 'prodModules'],
     [4, 'beacons'],
     [3, 'chromeworks', null, 'sunforge'],
     [4, 'tarSynthesis']],
@@ -2054,9 +2062,11 @@ function treeLayout(){
           }
         } else {
           nodes[spec] = { key: spec, tech: spec, x: TREE_PAD + col * TREE_COLW, y };
-          const req = F.TECHS[spec].req;
-          if (req && req.length) for (const r of req) edges.push([r, spec]);
-          else edges.push(['root', spec]);
+          const req = F.TECHS[spec].req, rr = F.TECHS[spec].reqRank;
+          let any = false;
+          if (req && req.length){ for (const r of req) edges.push([r, spec]); any = true; }
+          if (rr) for (const tr in rr){ edges.push(['up:' + tr + ':' + (rr[tr] - 1), spec]); any = true; }
+          if (!any) edges.push(['root', spec]);
           col++;
         }
       }
@@ -2097,14 +2107,16 @@ function treeTechNode(S, n){
     return `<div class="tnode tech tsil" style="left:${n.x}px;top:${n.y}px">
       <div class="tnTop"><span class="tnName">?</span></div></div>`;
   const done = !!RS.done[id], cur = RS.cur === id;
-  const reqMet = (tk.req || []).every(r => RS.done[r]);
+  const reqMet = (tk.req || []).every(r => RS.done[r]) && F.rankMet(S, tk);
   const sp = RS.prog[id] || {};
   let got = 0, tot = 0;
   for (const pk in tk.cost){ tot += tk.cost[pk]; got += Math.min(sp[pk] || 0, tk.cost[pk]); }
   const cls = done ? 'done' : cur ? 'cur' : reqMet ? 'avail' : 'tlock';
+  const rankTag = (!done && tk.reqRank && !F.rankMet(S, tk))
+    ? `<span class="tnTag" title="Needs Durability V">🔒</span>` : '';
   return `<div class="tnode tech ${cls}" data-node="${id}" style="left:${n.x}px;top:${n.y}px">
     <div class="tnTop">${iconImg(tk.icon, 15)}<span class="tnName">${tk.name}</span>${
-      done ? '<span class="tnTag">✓</span>' : cur ? '<span class="tnTag cur">⚗</span>' : ''}</div>
+      done ? '<span class="tnTag">✓</span>' : cur ? '<span class="tnTag cur">⚗</span>' : rankTag}</div>
     <div class="tnCost">${Object.entries(tk.cost).map(([pk, nn]) =>
       `<span>${iconImg(pk, 12)}<i data-tcost="${id}:${pk}">${done ? nn : Math.min(sp[pk] || 0, nn)}</i>/${nn}</span>`).join('')}</div>
     <div class="tnBar"><i data-tnbar="${id}" style="width:${done ? 100 : tot ? (got / tot * 100).toFixed(1) : 0}%"></i></div>
@@ -2146,10 +2158,15 @@ function showTreeTip(ev, key){
     if (names.length) html += `<div class="tt-stat">unlocks: ${[...new Set(names)].join(', ')}</div>`;
     html += `<div class="tt-cost">` + Object.entries(tk.cost).map(([pk, n]) =>
       `<span>${iconImg(pk, 14)} ${n} ${F.ITEMS[pk].name}</span>`).join('') + `</div>`;
+    const rankNeed = tk.reqRank && !F.rankMet(S, tk)
+      ? Object.keys(tk.reqRank).map(k => `${F.UPGRADES[k].name} ${TREE_ROMAN[tk.reqRank[k] - 1]}`).join(', ')
+      : null;
     if (RS.done[key]) html += `<div class="tt-stat">researched ✓</div>`;
     else if (RS.cur === key) html += `<div class="tt-stat">labs are on it — click to pause</div>`;
     else if (!(tk.req || []).every(r => RS.done[r]))
       html += `<div class="tt-lock">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
+    else if (rankNeed)
+      html += `<div class="tt-lock">requires: ${rankNeed} (max the upgrade first)</div>`;
     else html += `<div class="tt-stat">click to set as the lab project</div>`;
   }
   tt.innerHTML = html;
@@ -2489,8 +2506,10 @@ function renderHowTo(){
   and one day it <b>breaks down for good</b>: a crumbled, smoking wreck you must scrap (nothing comes
   back; slotted modules survive on a coin flip) and replace. Higher-mark machines endure longer,
   <b>Durability</b> ranks in the tech tree add +16% per rank to each service stretch, and the
-  ${ic('durModule')} <b>hardened module</b> adds +120% to whatever it's slotted in. How long exactly?
-  The machines don't say.</p>
+  ${ic('durModule')} <b>hardened module</b> adds +120% to whatever it's slotted in <i>and</i> makes it
+  likelier to survive each wear check. Max the Durability line and you can research
+  <b>Invincibility</b> — the brutally expensive endgame tech that <b>ends breakdowns entirely</b>,
+  so nothing you build ever wears out again. How long exactly? The machines don't say.</p>
 
   <div class="selSection">Power</div>
   <p class="howP">Coal serves the burner age: Mk1 drills, kilns, fabricators and crushers eat it
@@ -2539,8 +2558,11 @@ function renderHowTo(){
   ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.
   Deep in the tree wait ${ic('speedModule')} <b>modules</b> — inserts that trade power for speed
   (or the reverse), plus ${ic('prodModule')} productivity skim — and the <b>beacon</b>, which
-  broadcasts its own modules at half strength to every machine in a 10×10 area. Click any drill or
-  machine to slot modules into it.</p>
+  broadcasts its own modules at half strength to every machine in a 10×10 area. Modules take real
+  investment: <b>Machine modules</b> only opens the door, then you research each <b>type</b> (Speed,
+  Efficiency, Hardened) and each <b>Module slot</b> (I → II → III) on its own — a machine has
+  <b>no slots at all</b> until you do. Beacons come with their own two slots. Click any drill or
+  machine to fit modules into its earned slots.</p>
 
   <div class="selSection">Oil</div>
   <p class="howP">Black seeps in the far wastes hold crude. Research <b>Oil prospecting</b> for the

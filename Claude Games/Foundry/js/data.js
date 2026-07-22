@@ -107,9 +107,9 @@ F.RECIPES = {
   powerCore:  { out:'powerCore',   outN:1, in:{fuelCell:2, frame:1, motor:1},    time:6.0, machine:'asm', unlock:8 },
   hullPlate:  { out:'hullPlate',   outN:1, in:{titanIngot:2, steel:2, glass:1},  time:6.0, machine:'asm', unlock:8 },
   /* modules */
-  speedModule:{ out:'speedModule', outN:1, in:{circuit:18, wire:36},   time:36.0, machine:'asm', tech:'modules' },
-  effModule:  { out:'effModule',   outN:1, in:{circuit:18, glass:18},  time:36.0, machine:'asm', tech:'modules' },
-  durModule:  { out:'durModule',   outN:1, in:{steel:12, gear:18},     time:18.0, machine:'asm', tech:'modules' },
+  speedModule:{ out:'speedModule', outN:1, in:{circuit:18, wire:36},   time:36.0, machine:'asm', tech:'speedModuleTech' },
+  effModule:  { out:'effModule',   outN:1, in:{circuit:18, glass:18},  time:36.0, machine:'asm', tech:'effModuleTech' },
+  durModule:  { out:'durModule',   outN:1, in:{steel:12, gear:18},     time:18.0, machine:'asm', tech:'durModuleTech' },
   prodModule: { out:'prodModule',  outN:1, in:{advCircuit:2, plastic:2},time:6.0, machine:'asm', tech:'prodModules' },
   /* science packs */
   pack1:      { out:'pack1', outN:1, in:{gear:1, copperIngot:1},    time:4.0, machine:'asm', unlock:2 },
@@ -639,8 +639,29 @@ F.TECHS = {
     cost:{ pack2:5, pack3:4 }, req:['solarPower'], effect:'sunAnchor' },
   /* --- mid logistics & industry --- */
   modules:     { name:'Machine modules', icon:'speedModule',
-    desc:'Slottable inserts for drills and machines: speed modules (+35% speed — at ×11.2 power draw), efficiency modules (huge power savings; they tame a speed module down to ×2.3) and hardened modules (machines last 120% longer per module). Two slots per machine.',
-    cost:{ pack2:16 }, req:[], unlocks:['r:speedModule','r:effModule','r:durModule'] },
+    desc:'The science of machine tuning. Opens the research for each module TYPE and for the SLOTS to fit them in — but grants nothing on its own. A machine has no module slots until you research them.',
+    cost:{ pack2:16 }, req:[], unlocks:[] },
+  speedModuleTech:{ name:'Speed modules', icon:'speedModule',
+    desc:'Craft speed modules: +35% machine speed each — at a ruinous ×11.2 power draw. Pair one with an efficiency module to tame the bill to ×2.3.',
+    cost:{ pack2:6 }, req:['modules'], unlocks:['r:speedModule'] },
+  effModuleTech:{ name:'Efficiency modules', icon:'effModule',
+    desc:'Craft efficiency modules: a huge cut to a machine\'s power draw, and the counterweight that makes speed modules affordable.',
+    cost:{ pack2:6 }, req:['modules'], unlocks:['r:effModule'] },
+  durModuleTech:{ name:'Hardened modules', icon:'durModule',
+    desc:'Craft hardened modules: +120% service life each, and each one widens a machine\'s breakdown odds (1/4 → 1/6 → 1/8).',
+    cost:{ pack2:6 }, req:['modules'], unlocks:['r:durModule'] },
+  moduleSlot1: { name:'Module slot I', icon:'gear',
+    desc:'Cut a single module socket into every drill and machine. Without it, modules have nowhere to go.',
+    cost:{ pack2:8 }, req:['modules'], effect:'slot' },
+  moduleSlot2: { name:'Module slot II', icon:'gear',
+    desc:'A second module socket in every drill and machine.',
+    cost:{ pack2:6 }, req:['moduleSlot1'], effect:'slot' },
+  moduleSlot3: { name:'Module slot III', icon:'gear',
+    desc:'A third module socket in every drill and machine — the most any can hold.',
+    cost:{ pack3:4 }, req:['moduleSlot2'], effect:'slot' },
+  invincibility:{ name:'Invincibility', icon:'chromsteel',
+    desc:'The last secret of the durable machine: nothing you build ever wears out or breaks down again, forever. Demands a fully-maxed Durability line and a king\'s ransom in science.',
+    cost:{ pack3:150, pack4:120 }, req:[], reqRank:{ durability:5 }, effect:'invincible' },
   crushing2:   { name:'Ball mills', icon:'titanDust',
     desc:'An electric mill that crushes 2.4× faster — and is hard enough to crack titanium.',
     cost:{ pack1:10, pack2:15 }, req:['crushing'], unlocks:['crusher2','r:titanDust','r:titanIngotD'] },
@@ -744,9 +765,9 @@ F.draftSpd  = S => (S.research && S.research.done.forcedDraft) ? 1.3 : 1;
 F.draftBurn = S => (S.research && S.research.done.forcedDraft) ? 1.6 : 1;
 
 /* ================= MODULES =================
-   Slotted into drills/machines (F.MOD_SLOTS each) or beacons (def.slots).
-   Beacons rebroadcast speed/efficiency at half strength to machines in range;
-   productivity is machine-only. */
+   Slotted into drills/machines (F.modSlots, earned by research) or beacons
+   (def.slots). Beacons rebroadcast speed/efficiency at half strength to
+   machines in range; productivity is machine-only. */
 F.MODULES = {
   /* speed is a devil's bargain: one module alone drives draw to ×11.2.
      Efficiency pulls it back down — a speed+efficiency pair lands at ×2.3
@@ -756,7 +777,7 @@ F.MODULES = {
   prodModule:  { prod:.12 },
   durModule:   { dur:1.20 },  // +120% service life; slotted only, never broadcast
 };
-F.MOD_SLOTS = 2;
+F.MOD_SLOTS = 3;   // the most any machine can earn (Module slot III)
 F.BEACON_FACTOR = .5;
 F.MODDABLE = e => e.kind === 'miner' || e.kind === 'machine';
 
@@ -798,7 +819,7 @@ F.UPGRADES = {
     costs:[ {stone:20, coal:10}, {ironIngot:20, brick:10}, {gear:15, plate:10}, {steel:10, circuit:5}, {motor:8, advCircuit:4} ] },
   capacitors: { name:'Capacitors',  desc:'Machine input buffers +2 and depots +20 capacity per rank.', per:2, max:5,
     costs:[ {copperIngot:20, wire:10}, {plate:15, circuit:5}, {glass:12, circuit:12}, {steel:15, plastic:10}, {advCircuit:12, frame:4} ] },
-  durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank.', per:.16, max:5,
+  durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank. (Max the line, then research Invincibility to end breakdowns entirely.)', per:.16, max:5,
     costs:[ {plate:25, gear:20}, {steel:20, circuit:10}, {steel:40, motor:12}, {advCircuit:12, plastic:20}, {processor:5, frame:5} ] },
 };
 
@@ -834,8 +855,34 @@ F.lifeOf = function(S, e){
   if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) mul += F.MODULES[m].dur;
   return def.life * mul;
 };
-/* odds a machine dies at the end of each service stretch */
-F.BREAK_CHANCE = .25;
+/* Odds a machine dies at the end of each service stretch: 1 in 4 — and every
+   hardened module widens that denominator by two (1/6 with one module,
+   1/8 with two), on top of the stretch it already lengthens. The
+   Invincibility research ends breakdowns for every machine, for good. */
+F.BREAK_DENOM = 4;
+F.BREAK_CHANCE = 1 / F.BREAK_DENOM;
+F.breakChance = function(S, e){
+  if (S.research && S.research.done.invincibility) return 0;
+  let den = F.BREAK_DENOM;
+  if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) den += 2;
+  return 1 / den;
+};
+
+/* upgrade-rank prerequisites for a tech (e.g. Invincibility needs Durability V) */
+F.rankMet = function(S, tk){
+  if (!tk || !tk.reqRank) return true;
+  for (const k in tk.reqRank) if ((S.upgrades[k] || 0) < tk.reqRank[k]) return false;
+  return true;
+};
+
+/* how many module slots an entity has: beacons keep their built-in count,
+   drills/machines earn theirs by researching Module slot I / II / III */
+F.modSlots = function(S, e){
+  const def = F.BUILDINGS[e.key];
+  if (def && def.kind === 'beacon') return def.slots || 2;
+  const d = S.research.done;
+  return d.moduleSlot3 ? 3 : d.moduleSlot2 ? 2 : d.moduleSlot1 ? 1 : 0;
+};
 
 /* ================= ONE-SHOT TIPS ================= */
 F.TIPS = {
