@@ -1393,6 +1393,7 @@ function buildSelPanel(e){
   p.querySelectorAll('[data-blockex]').forEach(b => {
     b.addEventListener('click', () => {
       const exit = b.dataset.blockex;
+      if (!e.exBlock) e.exBlock = { left: false, front: false, right: false };
       e.exBlock[exit] = !e.exBlock[exit];
       A.sfx.click();
       refreshSelPanel(true);
@@ -1401,9 +1402,11 @@ function buildSelPanel(e){
   p.querySelectorAll('[data-ratio]').forEach(inp => {
     inp.addEventListener('change', () => {
       const exit = inp.dataset.ratio;
-      const val = Math.max(0, Math.min(100, +inp.value || 1));
-      e.exRatio[exit] = val || 1;
-      inp.value = e.exRatio[exit];
+      if (!e.exRatio) e.exRatio = { left: 1, front: 1, right: 1 };
+      let val = parseInt(inp.value) || 1;
+      val = Math.max(0, Math.min(100, val)) || 1;
+      e.exRatio[exit] = val;
+      inp.value = val;
       A.sfx.click();
       refreshSelPanel(true);
     });
