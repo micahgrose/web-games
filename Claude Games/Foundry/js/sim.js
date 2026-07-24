@@ -12,7 +12,7 @@ const { DX, DY, OPP, clamp } = F;
 const GEN = {
   1: { size: 128 },
   2: { size: 160 },
-  3: { size: 240 },
+  3: { size: 224 },
 };
 const GEN_CURRENT = 3;
 const CORE_SIZE = 4;
