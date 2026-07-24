@@ -1400,7 +1400,9 @@ function buildSelPanel(e){
     });
   });
   p.querySelectorAll('[data-ratio]').forEach(inp => {
-    inp.addEventListener('change', () => {
+    let dragStart = null;
+
+    const applyRatio = () => {
       const exit = inp.dataset.ratio;
       if (!e.exRatio) e.exRatio = { left: 1, front: 1, right: 1 };
       let val = parseInt(inp.value) || 1;
@@ -1409,7 +1411,28 @@ function buildSelPanel(e){
       inp.value = val;
       A.sfx.click();
       refreshSelPanel(true);
+    };
+
+    inp.addEventListener('pointerdown', (ev) => {
+      dragStart = { y: ev.clientY, val: parseInt(inp.value) || 1 };
+      inp.setPointerCapture(ev.pointerId);
     });
+
+    inp.addEventListener('pointermove', (ev) => {
+      if (!dragStart) return;
+      const delta = dragStart.y - ev.clientY;
+      let newVal = dragStart.val + Math.round(delta / 2);
+      newVal = Math.max(0, Math.min(100, newVal)) || 1;
+      inp.value = newVal;
+    });
+
+    inp.addEventListener('pointerup', () => {
+      if (!dragStart) return;
+      dragStart = null;
+      applyRatio();
+    });
+
+    inp.addEventListener('change', applyRatio);
   });
   /* belt line select + one-click line replacement */
   const lineBtn = p.querySelector('[data-line]');
