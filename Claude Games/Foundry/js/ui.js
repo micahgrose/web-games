@@ -2072,7 +2072,6 @@ const TREE_LANES = [
     [1, 'up:metallurgy'],
     [1, 'up:fabrication'],
     [1, 'up:durability'],
-    [5, 'invincibility'],
     [3, 'arcFurnaces', 'plasmaForges'],
     [3, 'poweredAssembly', 'nanoForges'],
     [2, 'modules', 'speedModuleTech', 'effModuleTech', 'durModuleTech'],
@@ -2107,8 +2106,10 @@ function treeLayout(){
             col++;
           }
         } else {
+          const tk = F.TECHS[spec];
+          if (!tk) { col++; continue; } // skip undefined techs
           nodes[spec] = { key: spec, tech: spec, x: TREE_PAD + col * TREE_COLW, y };
-          const req = F.TECHS[spec].req, rr = F.TECHS[spec].reqRank;
+          const req = tk.req, rr = tk.reqRank;
           let any = false;
           if (req && req.length){ for (const r of req) edges.push([r, spec]); any = true; }
           if (rr) for (const tr in rr){ edges.push(['up:' + tr + ':' + (rr[tr] - 1), spec]); any = true; }
