@@ -205,9 +205,9 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 /* Selected-entity panel */
 #selPanel{
   position:absolute; right:12px; top:64px;
-  width:min(272px, calc(100vw - 24px));
+  width:min(360px, calc(100vw - 24px));
   max-height:calc(100vh - 200px);
-  overflow:hidden auto; scrollbar-width:thin;
+  overflow:hidden auto; scrollbar-width:none;
   padding:12px;
 }
 .selHead{ display:flex; align-items:center; gap:9px; margin-bottom:8px; }
@@ -231,23 +231,35 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 .bufRow .n{ color:var(--ink-dim); font-variant-numeric:tabular-nums; margin-left:auto; }
 /* splitter exit rows (drag priorities / filters onto them) */
 .exitRow{
-  display:flex; align-items:center; gap:7px; margin:4px 0;
-  padding:5px 7px; border:1px solid var(--line); border-radius:8px;
+  display:flex; align-items:center; gap:8px; margin:6px 0;
+  padding:8px 10px; border:1px solid var(--line); border-radius:8px;
   background:rgba(255,255,255,.02); font-size:12px;
 }
 .exitRow.dropHot{ border-color:var(--accent2); background:rgba(89,214,255,.08); }
-.exitLbl{ min-width:74px; color:var(--ink); }
+.exitLbl{ min-width:82px; color:var(--ink); font-weight:500; }
 .exitFilterLbl{ color:var(--ink-faint); font-size:11px; margin-left:auto; }
 .exitSlot{
-  width:30px; height:30px; border-radius:7px;
+  width:40px; height:40px; border-radius:7px;
   border:1px dashed var(--line-bright); background:rgba(255,255,255,.03);
-  color:var(--ink-faint); font-size:13px;
+  color:var(--ink-faint); font-size:15px;
   display:flex; align-items:center; justify-content:center;
+  transition:border-color .12s, background .12s, color .12s;
 }
+.exitSlot:hover{ border-color:var(--line-bright); }
 .exitSlot.set{ border-style:solid; color:var(--ink); }
 .exitSlot.blocked{ border-color:var(--bad); background:rgba(255,118,118,.12); color:var(--bad); }
 .prioSlot.set{ border-color:var(--accent); background:rgba(255,180,84,.14); color:var(--accent); font-weight:700; }
 .filtSlot.set{ border-color:var(--accent2); background:rgba(89,214,255,.1); }
+.ratioLbl{ color:var(--ink-faint); font-size:11px; }
+.ratioInput{
+  width:56px; height:30px; border-radius:6px;
+  border:1px solid var(--line-bright); background:rgba(255,255,255,.04);
+  color:var(--ink); font-size:12px; text-align:center;
+  font-variant-numeric:tabular-nums;
+  transition:border-color .12s, background .12s;
+}
+.ratioInput:hover{ border-color:var(--line-bright); background:rgba(255,255,255,.07); }
+.ratioInput:focus{ outline:none; border-color:var(--accent2); background:rgba(89,214,255,.08); }
 .prioChip{ font-weight:700; font-size:15px; color:var(--accent); cursor:grab; }
 .ratioLbl{ color:var(--ink-faint); font-size:11px; margin-left:4px; }
 .ratioInput{
