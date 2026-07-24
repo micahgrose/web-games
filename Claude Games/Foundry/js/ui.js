@@ -1213,16 +1213,14 @@ function buildSelPanel(e){
     const N_LBL = { left:'◀ Left exit', front:'▲ Front exit', right:'▶ Right exit' };
     html += `<div class="selSection">Exits</div>`;
     for (const n of ['left', 'front', 'right']){
-      const p = e.exPrio[n], f = e.exFilt[n];
-      const blk = e.exBlock[n], rat = e.exRatio[n] || 1;
+      const p = e.exPrio[n], f = e.exFilt[n], blk = e.exBlock && e.exBlock[n], rat = (e.exRatio && e.exRatio[n]) || 1;
       html += `<div class="exitRow" data-exit="${n}">
         <span class="exitLbl">${N_LBL[n]}</span>
-        <button class="exitSlot blockSlot${blk ? ' blocked' : ''}" data-blockex="${n}" title="${blk ? 'Blocked (closed) — click to open' : 'Open — click to block'}">${blk ? '✕' : '○'}</button>
+        <button class="exitSlot${blk ? ' blocked' : ''}" data-blockex="${n}" title="${blk ? 'Blocked — click to open' : 'Click to block this exit'}">${blk ? '✕' : '○'}</button>
         <button class="exitSlot prioSlot${p ? ' set' : ''}" data-clrp="${n}" title="${p ? `Priority ${p} — click to clear` : 'Drag a priority chip here'}">${p || '·'}</button>
         <span class="exitFilterLbl">filter</span>
         <button class="exitSlot filtSlot${f ? ' set' : ''}" data-clrf="${n}" title="${f ? `${F.ITEMS[f].name} only — click to clear` : 'Drag a resource here'}">${f ? iconImg(f, 18) : '·'}</button>
-        <span class="ratioLbl">ratio</span>
-        <input type="number" class="ratioInput" data-ratio="${n}" min="0" max="100" value="${rat}" title="Weight (1-100) — higher = more items to this exit">
+        <span class="ratioLbl">ratio</span><input class="ratioInput" type="number" min="0" max="100" value="${rat}" data-ratio="${n}" title="Weight for this exit (1-100)">
       </div>`;
     }
     html += `<div class="selSection">Priorities — drag onto an exit</div><div class="recipeGrid">`;
