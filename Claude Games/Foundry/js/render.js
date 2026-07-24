@@ -900,21 +900,31 @@ function drawSplitter(x, e, s, time, S){
   rrect(x, -s * .3, -s * .3, s * .6, s * .6, s * .08);
   x.fill();
   // three-way fan arrows (0=front, -90°=left, +90°=right in local space):
-  // filtered lanes cyan, ranked lanes brighter the higher their priority
+  // blocked lanes dark red, filtered lanes cyan, ranked lanes brighter the higher their priority
   x.lineWidth = Math.max(1, s * .05);
   x.lineCap = 'round';
   const LANE_A = { front: 0, left: -Math.PI / 2, right: Math.PI / 2 };
   for (const n of ['front', 'left', 'right']){
+    const blocked = e.exBlock && e.exBlock[n];
     const p = e.exPrio ? e.exPrio[n] : 0;
-    x.strokeStyle = (e.exFilt && e.exFilt[n]) ? 'rgba(120,220,255,.9)'
-      : p === 1 ? 'rgba(255,214,138,1)'
-      : p === 2 ? 'rgba(255,214,138,.8)'
-      : p === 3 ? 'rgba(255,214,138,.65)'
-      : 'rgba(255,214,138,.5)';
+    if (blocked){
+      x.strokeStyle = 'rgba(255,100,100,.6)';
+    } else {
+      x.strokeStyle = (e.exFilt && e.exFilt[n]) ? 'rgba(120,220,255,.9)'
+        : p === 1 ? 'rgba(255,214,138,1)'
+        : p === 2 ? 'rgba(255,214,138,.8)'
+        : p === 3 ? 'rgba(255,214,138,.65)'
+        : 'rgba(255,214,138,.5)';
+    }
     x.save(); x.rotate(LANE_A[n]);
     x.beginPath();
-    x.moveTo(0, 0); x.lineTo(s * .22, 0);
-    x.moveTo(s * .13, -s * .07); x.lineTo(s * .23, 0); x.lineTo(s * .13, s * .07);
+    if (blocked){
+      x.moveTo(-s * .08, -s * .08); x.lineTo(s * .08, s * .08);
+      x.moveTo(s * .08, -s * .08); x.lineTo(-s * .08, s * .08);
+    } else {
+      x.moveTo(0, 0); x.lineTo(s * .22, 0);
+      x.moveTo(s * .13, -s * .07); x.lineTo(s * .23, 0); x.lineTo(s * .13, s * .07);
+    }
     x.stroke();
     x.restore();
   }

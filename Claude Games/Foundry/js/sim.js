@@ -324,7 +324,10 @@ function initEnt(S, e, def){
     case 'ubelt':    e.item = null; e.t = 0; e.srcDir = e.dir; e.linkId = 0; e.isExit = false; e.transit = []; break;
     case 'splitter': e.item = null; e.t = 0; e.srcDir = e.dir; e.outIdx = 0;
                      e.exPrio = { left:0, front:0, right:0 };          // 1 = first pick … 3 = last; 0 = round-robin
-                     e.exFilt = { left:null, front:null, right:null }; break;
+                     e.exFilt = { left:null, front:null, right:null };
+                     e.exBlock = { left:false, front:false, right:false }; // blocked exits skip distribution
+                     e.exRatio = { left:1, front:1, right:1 };         // weight-based split
+                     break;
     case 'chest':    e.store = {}; e.total = 0; break;
     case 'port':     e.store = {}; e.total = 0; e.mode = null; e.portItem = null; e.drones = []; break;
     case 'pipe':     e.fluid = 0; break;
@@ -1269,21 +1272,26 @@ function tickSplitter(S, e, dt){
   };
   const names = ['left', 'front', 'right'];
   // filtered lanes: a matching item must use one of its lanes (best rank first)
-  const matches = names.filter(n => e.exFilt[n] === e.item);
+  const matches = names.filter(n => e.exFilt[n] === e.item && !e.exBlock[n]);
   if (matches.length){
     matches.sort((a, b) => (e.exPrio[a] || 9) - (e.exPrio[b] || 9));
     for (const n of matches) if (tryOut(n)) return;
     e.t = .5;   // wait at the center for the lane to clear
     return;
   }
-  // open lanes: ranked ones first (1 → 3), the rest round-robin
-  const open = names.filter(n => !e.exFilt[n]);
+  // open lanes: ranked ones first (1 → 3), then weighted ratio distribution
+  const open = names.filter(n => !e.exFilt[n] && !e.exBlock[n]);
   const ranked = open.filter(n => e.exPrio[n]).sort((a, b) => e.exPrio[a] - e.exPrio[b]);
   for (const n of ranked) if (tryOut(n)) return;
   const rr = open.filter(n => !e.exPrio[n]);
-  for (let i = 0; i < rr.length; i++){
-    const n = rr[(e.outIdx + i) % rr.length];
-    if (tryOut(n)){ e.outIdx = (e.outIdx + i + 1) % rr.length; return; }
+  if (rr.length){
+    // ratio-weighted distribution: pick an exit based on its weight
+    const totalRatio = rr.reduce((sum, n) => sum + (e.exRatio[n] || 1), 0);
+    let roll = Math.random() * totalRatio;
+    for (const n of rr){
+      roll -= (e.exRatio[n] || 1);
+      if (roll <= 0){ if (tryOut(n)) return; break; }
+    }
   }
   e.t = .5;
 }
@@ -1448,6 +1456,10 @@ F.serialize = function(S){
       o.xp = [e.exPrio.left, e.exPrio.front, e.exPrio.right];
     if (e.exFilt && (e.exFilt.left || e.exFilt.front || e.exFilt.right))
       o.xf = [e.exFilt.left, e.exFilt.front, e.exFilt.right];
+    if (e.exBlock && (e.exBlock.left || e.exBlock.front || e.exBlock.right))
+      o.xb = [e.exBlock.left ? 1 : 0, e.exBlock.front ? 1 : 0, e.exBlock.right ? 1 : 0];
+    if (e.exRatio && (e.exRatio.left !== 1 || e.exRatio.front !== 1 || e.exRatio.right !== 1))
+      o.xr = [e.exRatio.left, e.exRatio.front, e.exRatio.right];
     if (e.workItem) o.wk = e.workItem;
     if (e.mods && e.mods.length) o.md = e.mods.slice();
     if (e.prodAcc) o.pa = +e.prodAcc.toFixed(3);
@@ -1548,6 +1560,8 @@ F.deserialize = function(data){
     if (o.oi) e.outIdx = o.oi;
     if (o.xp && e.exPrio){ e.exPrio.left = o.xp[0] || 0; e.exPrio.front = o.xp[1] || 0; e.exPrio.right = o.xp[2] || 0; }
     if (o.xf && e.exFilt){ e.exFilt.left = o.xf[0] || null; e.exFilt.front = o.xf[1] || null; e.exFilt.right = o.xf[2] || null; }
+    if (o.xb && e.exBlock){ e.exBlock.left = !!o.xb[0]; e.exBlock.front = !!o.xb[1]; e.exBlock.right = !!o.xb[2]; }
+    if (o.xr && e.exRatio){ e.exRatio.left = o.xr[0] || 1; e.exRatio.front = o.xr[1] || 1; e.exRatio.right = o.xr[2] || 1; }
     // legacy splitter config: one filter (always left) + one priority exit
     if (o.fi && e.exFilt) e.exFilt.left = o.fi;
     if (o.po && e.exPrio && e.exPrio[o.po] != null) e.exPrio[o.po] = 1;

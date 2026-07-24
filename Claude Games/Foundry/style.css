@@ -245,9 +245,18 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
   display:flex; align-items:center; justify-content:center;
 }
 .exitSlot.set{ border-style:solid; color:var(--ink); }
+.exitSlot.blocked{ border-color:var(--bad); background:rgba(255,118,118,.12); color:var(--bad); }
 .prioSlot.set{ border-color:var(--accent); background:rgba(255,180,84,.14); color:var(--accent); font-weight:700; }
 .filtSlot.set{ border-color:var(--accent2); background:rgba(89,214,255,.1); }
 .prioChip{ font-weight:700; font-size:15px; color:var(--accent); cursor:grab; }
+.ratioLbl{ color:var(--ink-faint); font-size:11px; margin-left:4px; }
+.ratioInput{
+  width:40px; height:24px; font-size:11px;
+  border:1px solid var(--line); border-radius:5px;
+  background:rgba(255,255,255,.04); color:var(--ink);
+  padding:2px 4px; text-align:center;
+}
+.ratioInput:focus{ outline:none; border-color:var(--accent2); background:rgba(89,214,255,.08); }
 [data-dragf]{ cursor:grab; }
 .dragGhost{
   position:fixed; z-index:120; pointer-events:none;

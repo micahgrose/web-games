@@ -1213,12 +1213,14 @@ function buildSelPanel(e){
     const N_LBL = { left:'◀ Left exit', front:'▲ Front exit', right:'▶ Right exit' };
     html += `<div class="selSection">Exits</div>`;
     for (const n of ['left', 'front', 'right']){
-      const p = e.exPrio[n], f = e.exFilt[n];
+      const p = e.exPrio[n], f = e.exFilt[n], blk = e.exBlock && e.exBlock[n], rat = (e.exRatio && e.exRatio[n]) || 1;
       html += `<div class="exitRow" data-exit="${n}">
         <span class="exitLbl">${N_LBL[n]}</span>
+        <button class="exitSlot${blk ? ' blocked' : ''}" data-blockex="${n}" title="${blk ? 'Blocked — click to open' : 'Click to block this exit'}">${blk ? '✕' : '○'}</button>
         <button class="exitSlot prioSlot${p ? ' set' : ''}" data-clrp="${n}" title="${p ? `Priority ${p} — click to clear` : 'Drag a priority chip here'}">${p || '·'}</button>
         <span class="exitFilterLbl">filter</span>
         <button class="exitSlot filtSlot${f ? ' set' : ''}" data-clrf="${n}" title="${f ? `${F.ITEMS[f].name} only — click to clear` : 'Drag a resource here'}">${f ? iconImg(f, 18) : '·'}</button>
+        <span class="ratioLbl">ratio</span><input class="ratioInput" type="number" min="0" max="100" value="${rat}" data-ratio="${n}" title="Weight for this exit (1-100)">
       </div>`;
     }
     html += `<div class="selSection">Priorities — drag onto an exit</div><div class="recipeGrid">`;
@@ -1231,7 +1233,7 @@ function buildSelPanel(e){
     for (const k of seen)
       html += `<button class="recipeBtn" data-dragf="${k}" title="${F.ITEMS[k].name}">${iconImg(k, 22)}</button>`;
     html += `</div>`;
-    html += `<div class="ghostNote">A filtered exit takes ONLY its item — and that item uses only its exits. Ranked exits fill 1 → 3; unranked ones share evenly. Click a slot to clear it.</div>`;
+    html += `<div class="ghostNote">Block an exit to make it 2-way. Drag priorities (1 fills first) and filters (item-only) onto exits. Set ratio weights for unranked distribution (1=low, 100=high). Filtered items use only their lanes.</div>`;
   }
   if (e.kind === 'lab'){
     html += `<div class="labProj">
@@ -1384,6 +1386,24 @@ function buildSelPanel(e){
     b.addEventListener('click', () => {
       if (!e.exFilt[b.dataset.clrf]) return;
       e.exFilt[b.dataset.clrf] = null;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-blockex]').forEach(b => {
+    b.addEventListener('click', () => {
+      const exit = b.dataset.blockex;
+      e.exBlock[exit] = !e.exBlock[exit];
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-ratio]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const exit = inp.dataset.ratio;
+      const val = Math.max(0, Math.min(100, +inp.value || 1));
+      e.exRatio[exit] = val || 1;
+      inp.value = e.exRatio[exit];
       A.sfx.click();
       refreshSelPanel(true);
     });
