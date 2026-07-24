@@ -1272,25 +1272,28 @@ function tickSplitter(S, e, dt){
   };
   const names = ['left', 'front', 'right'];
   // filtered lanes: a matching item must use one of its lanes (best rank first)
-  const matches = names.filter(n => e.exFilt[n] === e.item && !e.exBlock[n]);
+  const matches = names.filter(n => e.exFilt[n] === e.item && !(e.exBlock && e.exBlock[n]));
   if (matches.length){
     matches.sort((a, b) => (e.exPrio[a] || 9) - (e.exPrio[b] || 9));
     for (const n of matches) if (tryOut(n)) return;
     e.t = .5;   // wait at the center for the lane to clear
     return;
   }
-  // open lanes: ranked ones first (1 → 3), then weighted ratio distribution
-  const open = names.filter(n => !e.exFilt[n] && !e.exBlock[n]);
+  // open lanes: ranked ones first (1 → 3), then unranked by ratio weight
+  const open = names.filter(n => !e.exFilt[n] && !(e.exBlock && e.exBlock[n]));
   const ranked = open.filter(n => e.exPrio[n]).sort((a, b) => e.exPrio[a] - e.exPrio[b]);
   for (const n of ranked) if (tryOut(n)) return;
-  const rr = open.filter(n => !e.exPrio[n]);
-  if (rr.length){
-    // ratio-weighted distribution: pick an exit based on its weight
-    const totalRatio = rr.reduce((sum, n) => sum + (e.exRatio[n] || 1), 0);
-    let roll = Math.random() * totalRatio;
-    for (const n of rr){
-      roll -= (e.exRatio[n] || 1);
-      if (roll <= 0){ if (tryOut(n)) return; break; }
+  const unranked = open.filter(n => !e.exPrio[n]);
+  if (unranked.length){
+    // weighted random selection by exRatio
+    let totalWeight = 0;
+    for (const n of unranked) totalWeight += (e.exRatio && e.exRatio[n]) || 1;
+    const roll = Math.random() * totalWeight;
+    let sum = 0;
+    for (const n of unranked){
+      const w = (e.exRatio && e.exRatio[n]) || 1;
+      if (roll <= sum + w){ if (tryOut(n)) return; break; }
+      sum += w;
     }
   }
   e.t = .5;
