@@ -1282,16 +1282,16 @@ function tickSplitter(S, e, dt){
   for (const n of ranked) if (tryOut(n)) return;
   const unranked = open.filter(n => !e.exPrio[n]);
   if (unranked.length){
-    // weighted random selection by exRatio
-    let totalWeight = 0;
-    for (const n of unranked) totalWeight += (e.exRatio && e.exRatio[n]) || 1;
-    const roll = Math.random() * totalWeight;
-    let sum = 0;
+    // deterministic ratio cycling: build a cycle array and step through it
+    const cycle = [];
     for (const n of unranked){
       const w = (e.exRatio && e.exRatio[n]) || 1;
-      if (roll <= sum + w){ if (tryOut(n)) return; break; }
-      sum += w;
+      for (let i = 0; i < w; i++) cycle.push(n);
     }
+    if (!e.ratioIdx) e.ratioIdx = 0;
+    const n = cycle[e.ratioIdx % cycle.length];
+    e.ratioIdx++;
+    if (tryOut(n)) return;
   }
   e.t = .5;
 }
