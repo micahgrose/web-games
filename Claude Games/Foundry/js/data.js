@@ -224,10 +224,14 @@ const B = F.BUILDINGS = {
              desc:'Burns coal to feed the grid. 30 P at full load. Needs a power pole in range to deliver it.' },
   solar:   { name:'Solar array',     cat:'pow', kind:'solar', w:2, h:2, out:12, cost:{glass:6, circuit:2, plate:4}, unlock:6,
              desc:'Silent, fuel-free power. 12 P, always on.' },
-  turbine: { name:'Fuel turbine',    cat:'pow', kind:'turbine', w:2, h:2, out:1250, burn:20, cost:{steel:10, motor:4, plate:8}, unlock:6,
-             desc:'Burns fuel cells for serious power. 1250 P at full load.' },
-  turbine2:{ name:'Chrome turbine',  cat:'pow', kind:'turbine', w:2, h:2, out:400, burn:15, cost:{chromsteel:50, motor:25, advCircuit:16}, tech:'chromeTurbines',
-             desc:'Chromsteel blades spinning near the speed of sound. 400 P at full load.' },
+  solar2:  { name:'Solar tower',     cat:'pow', kind:'solar', w:2, h:2, out:45, cost:{glass:40, circuit:20, steel:20}, tech:'solarTowers',
+             desc:'Concentrated mirrors around a molten-salt core. 45 P of silent, fuel-free power.' },
+  solar3:  { name:'Helios array',    cat:'pow', kind:'solar', w:3, h:3, out:1000, cost:{glass:80, advCircuit:24, frame:16}, tech:'helios',
+             desc:'A field of sun-tracking mirrors. 1000 P without a whisper of smoke.' },
+  turbine: { name:'Fuel turbine',    cat:'pow', kind:'turbine', w:2, h:2, out:400, burn:20, cost:{steel:10, motor:4, plate:8}, unlock:6,
+             desc:'Burns fuel cells for serious power. 400 P at full load.' },
+  turbine2:{ name:'Chrome turbine',  cat:'pow', kind:'turbine', w:2, h:2, out:1250, burn:15, cost:{chromsteel:50, motor:25, advCircuit:16}, tech:'chromeTurbines',
+             desc:'Chromsteel blades spinning near the speed of sound. 1250 P at full load.' },
 };
 F.BUILD_ORDER = Object.keys(B);
 
@@ -655,9 +659,6 @@ F.TECHS = {
   moduleSlot3: { name:'Module slot III', icon:'gear',
     desc:'A third module socket in every drill and machine — the most any can hold.',
     cost:{ pack3:4 }, req:['moduleSlot2'], effect:'slot' },
-  invincibility:{ name:'Invincibility', icon:'chromsteel',
-    desc:'The last secret of the durable machine: nothing you build ever wears out or breaks down again, forever. Demands a fully-maxed Durability line and a king\'s ransom in science.',
-    cost:{ pack3:150, pack4:120 }, req:[], reqRank:{ durability:5 }, effect:'invincible' },
   crushing2:   { name:'Ball mills', icon:'titanDust',
     desc:'An electric mill that crushes 2.4× faster — and is hard enough to crack titanium.',
     cost:{ pack1:10, pack2:15 }, req:['crushing'], unlocks:['crusher2','r:titanDust','r:titanIngotD'] },
@@ -815,7 +816,7 @@ F.UPGRADES = {
     costs:[ {stone:20, coal:10}, {ironIngot:20, brick:10}, {gear:15, plate:10}, {steel:10, circuit:5}, {motor:8, advCircuit:4} ] },
   capacitors: { name:'Capacitors',  desc:'Machine input buffers +2 and depots +20 capacity per rank.', per:2, max:5,
     costs:[ {copperIngot:20, wire:10}, {plate:15, circuit:5}, {glass:12, circuit:12}, {steel:15, plastic:10}, {advCircuit:12, frame:4} ] },
-  durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank. (Max the line, then research Invincibility to end breakdowns entirely.)', per:.16, max:5,
+  durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank. At rank V, all machines become immortal and nothing wears out.', per:.16, max:5,
     costs:[ {plate:25, gear:20}, {steel:20, circuit:10}, {steel:40, motor:12}, {advCircuit:12, plastic:20}, {processor:5, frame:5} ] },
 };
 
@@ -853,12 +854,12 @@ F.lifeOf = function(S, e){
 };
 /* Odds a machine dies at the end of each service stretch: 1 in 4 — and every
    hardened module widens that denominator by two (1/6 with one module,
-   1/8 with two), on top of the stretch it already lengthens. The
-   Invincibility research ends breakdowns for every machine, for good. */
+   1/8 with two), on top of the stretch it already lengthens. At durability
+   rank V, all machines become immortal and nothing wears out. */
 F.BREAK_DENOM = 4;
 F.BREAK_CHANCE = 1 / F.BREAK_DENOM;
 F.breakChance = function(S, e){
-  if (S.research && S.research.done.invincibility) return 0;
+  if ((S.upgrades.durability || 0) >= 5) return 0;
   let den = F.BREAK_DENOM;
   if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) den += 2;
   return 1 / den;
