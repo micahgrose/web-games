@@ -1214,11 +1214,15 @@ function buildSelPanel(e){
     html += `<div class="selSection">Exits</div>`;
     for (const n of ['left', 'front', 'right']){
       const p = e.exPrio[n], f = e.exFilt[n];
+      const blk = e.exBlock[n], rat = e.exRatio[n] || 1;
       html += `<div class="exitRow" data-exit="${n}">
         <span class="exitLbl">${N_LBL[n]}</span>
+        <button class="exitSlot blockSlot${blk ? ' blocked' : ''}" data-blockex="${n}" title="${blk ? 'Blocked (closed) — click to open' : 'Open — click to block'}">${blk ? '✕' : '○'}</button>
         <button class="exitSlot prioSlot${p ? ' set' : ''}" data-clrp="${n}" title="${p ? `Priority ${p} — click to clear` : 'Drag a priority chip here'}">${p || '·'}</button>
         <span class="exitFilterLbl">filter</span>
         <button class="exitSlot filtSlot${f ? ' set' : ''}" data-clrf="${n}" title="${f ? `${F.ITEMS[f].name} only — click to clear` : 'Drag a resource here'}">${f ? iconImg(f, 18) : '·'}</button>
+        <span class="ratioLbl">ratio</span>
+        <input type="number" class="ratioInput" data-ratio="${n}" min="0" max="100" value="${rat}" title="Weight (1-100) — higher = more items to this exit">
       </div>`;
     }
     html += `<div class="selSection">Priorities — drag onto an exit</div><div class="recipeGrid">`;
@@ -1384,6 +1388,25 @@ function buildSelPanel(e){
     b.addEventListener('click', () => {
       if (!e.exFilt[b.dataset.clrf]) return;
       e.exFilt[b.dataset.clrf] = null;
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-blockex]').forEach(b => {
+    b.addEventListener('click', () => {
+      const exit = b.dataset.blockex;
+      e.exBlock[exit] = !e.exBlock[exit];
+      A.sfx.click();
+      refreshSelPanel(true);
+    });
+  });
+  p.querySelectorAll('[data-ratio]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const exit = inp.dataset.ratio;
+      let val = parseInt(inp.value) || 1;
+      val = Math.max(0, Math.min(100, val)) || 1;
+      e.exRatio[exit] = val;
+      inp.value = val;
       A.sfx.click();
       refreshSelPanel(true);
     });
