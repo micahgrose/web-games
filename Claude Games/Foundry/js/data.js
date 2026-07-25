@@ -288,7 +288,7 @@ F.CATS = [
 ];
 
 /* ================= MILESTONES =================
-   The spine — eighteen tiers, one new idea at a time, each followed by
+   The spine — twenty-one tiers, one new idea at a time, each followed by
    room to practise it. Tiers unlock only the most basic buildings + the
    spine recipes; everything else is researched in the tech tree.
    IDs are stable keys — saves store the id of the tier in progress, so
@@ -413,10 +413,31 @@ F.MILESTONES = [
   { id:'m8', name:'Star Metal',
     flavor:'Titanium bones for a sleeping god.',
     req:{ titanIngot:350, frame:125 },
-    unlocks:['r:processor','r:logicMatrix','r:powerCore','r:hullPlate','r:pack4'],
+    unlocks:['r:processor','r:pack4'],
     grant:{},
-    hint:'Everything you have built converges here: processors, cores, hull. Three final components.',
-    recap:'Star-metal bones. Everything converges.' },
+    hint:'Titanium waits at the far edges of the world — smelt it, frame it. The processor is the first thing worthy of it: advanced circuits, silicon and glass, etched into judgement. Quantum science comes with it.',
+    recap:'Star-metal and the processor — the factory can think now.' },
+  { id:'mThink', name:'Quantum Thought',
+    flavor:'A thousand processors thinking in lockstep. Feed the flask that feeds the mind.',
+    req:{ processor:120, pack4:100 },
+    unlocks:['r:logicMatrix'],
+    grant:{},
+    hint:'Processors and quantum science are both slow, deep chains — build them wide, not fast. When both flow steadily, the logic matrix opens: the Engine\'s mind, woven from processors and glass.',
+    recap:'Processors by the crate, science by the flask. The mind can be built.' },
+  { id:'mCore', name:'The Beating Heart',
+    flavor:'A mind is nothing without a fire to drive it. Cage a star in a shell of steel.',
+    req:{ logicMatrix:30 },
+    unlocks:['r:powerCore'],
+    grant:{},
+    hint:'The power core burns fuel cells inside a titanium frame — the same fuel your turbines drink, now bound into a heart. Keep the fuel-cell line rich.',
+    recap:'The heart is a caged fire. Fuel cells become the Engine\'s pulse.' },
+  { id:'mHull', name:'Star-Metal Skin',
+    flavor:'Mind and heart need a body to hold them against the dark.',
+    req:{ powerCore:30 },
+    unlocks:['r:hullPlate'],
+    grant:{},
+    hint:'Hull segments are titanium, steel and glass pressed into armour — the last of the three works. Every earlier line feeds this one.',
+    recap:'The body is star-metal skin. All three works are within reach.' },
   { id:'m9', name:'Ignition',
     flavor:'Mind, heart, body. Deliver the three works and the World Engine breathes again.',
     req:{ logicMatrix:60, powerCore:60, hullPlate:60 },
