@@ -1,11 +1,13 @@
 # DESIGN.md — LAMPBLACK (stealth-heist roguelite)
 
 ## HANDOFF
-- Phase: 2 — Core & systems | Status: **DONE** (2026-07-25)
+- Phase: 3 — Teaching & feel | Status: **DONE** (2026-07-25)
 - Core: **Lampblack** — top-down gaslamp-noir stealth-heist roguelite. Three spatial information channels (LIGHT you manufacture, SIGHT that reads light, SOUND that propagates through geometry), an evidence ratchet that permanently hardens the floor, and a greed loop where the trip back out — not a bank button — is the risk.
-- **USER DIRECTIVE (every phase): "watch yourself on art + sounds."** Phase 2 complied by attaching an audio/visual identity to every system as it was designed (§2.9) — sound and light ARE mechanics here. Phase 3 must not treat §2.9 as done; it's the *identity spec*, Phase 3 owns the *feel spec* (animation frames, WebAudio synthesis recipes, palette values, layout safe-areas) and the teaching curriculum.
-- Next chat does: **Phase 3 (teaching & feel).** Design the in-game curriculum (scripted first-heist encounters that teach light→sight→sound→evidence one at a time, §2.8 gating table is the skeleton; **Magpie the fence is the teaching voice** — tips in her words, never a tutorial box; consequence previews; no static legend) + full feel spec (thief + guard art per §2.9 identity notes, walk cycles per feedback_walk_cycle_and_facing_recipe, WebAudio synthesis plan, dynamic music layers, capped shake, defensive layout). Update this HANDOFF.
+- **USER DIRECTIVE (every phase): "watch yourself on art + sounds."** Phase 3 answered with the full feel spec (§4: locked palette, sprite construction + frame counts, per-guard gait/tell sync, WebAudio recipes + 4-layer music, shake budget, defensive HUD) and a six-channel diegetic teaching system (§3, Magpie-voiced). **Phase 4's compliance = implement audio/art WITH each system as it's built (not after), and ship the two feel-review harnesses (§4.9: soundboard page + animation gallery scene) so the user can audit every recipe/cycle by name.**
+- Next chat does: **Phase 4 (build & ship).** Branch `Lampblack_Updates` (current). Read this file END TO END — §2 systems, §3 teaching, §4 feel are all build spec. Build order suggestion: floor gen + three channels → guards/AI → verbs/loot/banking → run structure/fence → teaching triggers + feel layer woven throughout. Headless verify per §2.5 (gen asserts + probe bot as localizer, never judge); The Other Shadow reuses the probe brain as an in-game actor. Ship the feel harnesses, commit+push, then hand the user: (1) the §4.9 screenshot checkpoint list, (2) the soundboard/gallery audit ask, (3) a punch list naming every unverified layer (feel, difficulty, input plumbing — verify DOM event wiring per feedback_verify_input_plumbing).
 - SETTLED (don't reopen):
+  - **Teaching (§3):** no tutorial-box object exists; six diegetic channels; Magpie's parchment notes (≤12 words, once per profile, queue-1, safe-moment gate, exact texts in §3.2); lesson-lock geometry teaches first, words confirm; **A1J1 = "The Glover House," a fixed authored seed** (NOT a gen-constraint feature) with the 8-beat walk order; universal preview grammar (noise pips + time pips + evidence eye); Fence's Ledger accolades PAY REP with unearned stubs visible; exactly 3 in-moment callouts; hold-Tab Case Notes as fallback reference; anti-degenerate counters get scripted discoveries (§3.3); Morning Edition names the cause of capture.
+  - **Feel (§4):** palette hexes locked (§4.1, three temperature families rule); 5-layer render pipeline with cached visibility-polygon lightmap; thief = 5 baked bodies + procedural legs + 3-node verlet scarf + swelling satchel, 8-frame snapped cycles, named cadence constants; per-guard gait/signature/tell table with **audio synced to animation frames**; telegraph windups on every guard state change; shake = max-not-additive, cap 6px, 5 events only; WebAudio door-graph spatial model (same BFS as guards), all recipes + the [D5 F5 E5 A4 D5] leitmotif + 4 always-running music layers at 84bpm; 5-anchor defensive HUD (soot gem top-left prime), min 1024×600; Magpie 96×96 bust ×3 expressions + line-pool counts; Morning Edition run-end newspaper.
   - Setting = **gaslamp-noir Victorian city — USER-CONFIRMED at the Phase 2 seam** ("flavor sounds amazing, keep it"); name Lampblack is load-bearing (lampblack = lamp soot; the thief is soot-black; snuffing lamps is the signature verb).
   - **Seam self-pass additions (user delegated "add more" to me — see red-team §Phase 2-seam):** the **soot gem** player-visibility indicator (§2.1.1), the **capture ladder** (Last Trick → one Crooked Watchman bribe → pinched, §2.3), **Magpie** the named fence (§2.6 — she is Phase 3's teaching voice), and job modifier #11 **The Other Shadow** rival thief (§2.8).
   - The three-channel stealth model as specced in §2.1–§2.3: spatial light with raycast shadows, graduated cone detection with visible awareness fill + last-known-position ghost, sound as door-graph propagation (never a bare radius), scent trails for dogs.
@@ -15,14 +17,14 @@
   - Tool roster with named 3-tier evolutions, 12 Tricks, 3 thief loadouts, 10 guard types incl. Old Copper hunter, 6 building archetypes, 5 districts, 4 Big Jobs, 10 named Scores, 10 job modifiers (§2.5–§2.8).
   - Anti-degenerate counters are part of the core, not tuning: you need light for fine work (dark lantern), wardens relight, lure habituation, body evidence, un-KO-able hunters (§2.3, red-team).
   - Big Jobs are 2-floor buildings; standard jobs 1 floor.
-- OPEN (Phase 3+ decides):
-  - Teaching curriculum specifics (which scripted encounters, in what order — gating table in §2.8 is the constraint).
-  - All feel-layer specifics: sprite construction, animation frame counts, synthesis recipes, music layer instrumentation, palette hex values, HUD layout.
-  - Fire propagation (oil + flame) — deliberately deferred to Phase 4 as a stretch system, NOT cut (see red-team). Chandelier winches likewise stretch.
-  - Exact tuning numbers in §2.1–§2.3 are *defaults with rationale*, expected to move in Phase 4; the *structures* are settled.
-  - Mid-run save format (serialize between jobs — required, runs are 25–40 min; shape decided in Phase 4).
-- Known risks (carry forward): detection fairness is a knife-edge I can't feel → every number in §2.1 errs generous + legible (fill bars, ghosts, audio tells); screenshot checkpoints with the user EARLY in Phase 4 (feedback_user_provides_visuals). Covet-rhyme is answered structurally (§2.4 note) — don't drift back to payout-math greed.
-- Read first (Phase 3): feedback_multichat_build_workflow, feedback_teach_core_in_game, feedback_onboarding_and_ambition, feedback_juice_and_feel, feedback_character_art_and_layout, feedback_walk_cycle_and_facing_recipe, feedback_user_provides_visuals, then §2 of this file end-to-end (especially §2.8 gating + §2.9 identities).
+- OPEN (Phase 4 decides):
+  - Fire propagation (oil + flame) — stretch system, in/out call at build time, NOT silently cut (see red-team Phase 2). Chandelier winches likewise stretch.
+  - Exact tuning numbers everywhere (§2.1–§2.3 detection/noise, §4.3 cadences, §4.5 synth params, accolade REP values) are *defaults with rationale* — structures settled, numbers move.
+  - Mid-run save format (serialize at fence screens — required, runs are 25–40 min).
+  - Magpie's full line texts (pools + counts committed in §4.7; §3.2 notes are final text).
+  - Safecracking dial minigame feel — spec'd generous, flagged for user co-tune; do NOT silently collapse to a hold-bar.
+- Known risks (carry forward): detection fairness is a knife-edge I can't feel → every number errs generous + legible; **screenshot checkpoints + soundboard/gallery audits with the user EARLY, not at the end** (§4.9; feedback_user_provides_visuals). Covet-rhyme answered structurally (§2.4) — no "bank remotely" conveniences. Teaching's one untestable claim: does the never-decays ratchet land? — ask the user directly at first playtest.
+- Read first (Phase 4): feedback_dont_tune_game_to_the_bot, feedback_bot_is_a_probe_not_a_judge, feedback_verify_input_plumbing, reference_headless_chrome_broken, feedback_user_runs_the_tests, feedback_climax_and_juice_budget, feedback_user_provides_visuals, feedback_auto_commit_push, then THIS FILE end-to-end (§2 systems, §3 teaching, §4 feel are all build spec).
 
 ## 0 — Divergence map (what exists, where my defaults land)
 Occupied basins in this repo — a new core must not be a sibling of these:
@@ -244,6 +246,192 @@ You can always flee to any unsealed exit with whatever's in the bag — the deep
 - **Characters are CHARACTERS** (feedback_character_art_and_layout: no shapes-with-eyes): the thief = hooded silhouette with scarf-tail physics, 8-way facing + full walk/creep/sprint cycles per feedback_walk_cycle_and_facing_recipe, distinct carry/pick/snuff/KO poses. Every guard type owns a silhouette (table §2.8) + gait (watchman stroll, sergeant stride, dog lope, Old Copper's limp) + vocal/foley tell. Phase 3 specs frames.
 - **All audio procedural WebAudio** (repo standard, no assets): footstep synthesis per material, whistle-melody synth, snore LFO, key-jangle noise bursts, the *shk-CLACK* shutter. Phase 3 writes the recipes; Phase 4 implements WITH the systems, not after (directive).
 
+# 3 — TEACHING (Phase 3, 2026-07-25)
+
+**The rule: the game contains no tutorial-box object.** Every piece of instruction arrives through one of six diegetic channels (§3.1), and the *primary* teacher is level geometry — words only confirm what the floor already forced you to discover. §2.8's gating table is the skeleton; this section is the flesh.
+
+## 3.0 — Principles (settled)
+
+1. **Magpie is the only voice.** In-run tips are **Magpie's notes**: torn parchment scraps in her handwriting ("she scribbles on the back of every job listing, dearie"). They slide in bottom-left, ≤12 words, her diction, never pause the game. *Why:* she's a fence, not a radio — handwriting is the only period-honest channel, and it makes every tip characterful for free. *Rejected:* thief inner-voice (wastes the Magpie investment, no personality contrast), comm-link (anachronism), signposts (Symbiont lesson).
+2. **One mechanic per beat, forced by geometry.** Each new mechanic gets a **lesson lock**: a generator-guaranteed arrangement where the mechanic is the only good move (feedback_teach_core_in_game's "scripted first encounter," implemented as gen constraints, not cutscenes). The note fires *after* the player is in the situation, never before.
+3. **Once per profile, one at a time, safe moments only.** Every note has a persisted seen-flag. Queue depth 1; a queued note waits for: player not in any cone, no note shown in last 8s. Exceptions (fire immediately): Old Copper's entrance, LOCKDOWN, grabbed. *Why:* a stealth game's tension is silence; tips must never talk over a knife-edge moment.
+4. **Consequence previews use one grammar everywhere:** every hands-verb option shows **noise pips (0–4 🔊) + time pips (0–3 ⏱) + an evidence eye-icon** if it leaves evidence. Taught once (first locked door: force = 4 pips/instant/eye vs pick = 1 pip/slow/none), read forever. Throw verbs preview the landing ring at true propagated radius. Blackjack prompt shows the body icon — you know it's an evidence bomb *before* the swing.
+5. **Replays skip nothing and re-teach nothing.** A1J1's lesson locks are just good level design on replay (the seed varies after the first profile-run); the notes simply don't re-fire. No "skip tutorial" toggle needed because there is no tutorial to skip.
+
+## 3.1 — The six channels
+
+| Channel | When | Teaches |
+|---|---|---|
+| **Lesson locks** (gen-guaranteed geometry) | in the moment | the mechanic itself, by being the only good move |
+| **Magpie's notes** (parchment scraps, ≤12 words) | just-in-time, once ever | names what the player just felt |
+| **Consequence previews** (pips + eye grammar) | before every commit | costs of the choice, before it's made |
+| **Magpie's briefings** (fence counter, pre-job) | between jobs | warns the NEXT job's new roster ("the Vane house keeps dogs — my knees remember") |
+| **The Fence's Ledger** (post-job debrief accolades) | between jobs | rewards the deep play by naming it + paying REP (§3.4) |
+| **The Morning Edition** (run-end newspaper) | run over | cause of death, named plainly; the season's story (§4.8) |
+
+Fallback reference (allowed, never the teaching): **hold-Tab "Case Notes"** overlay — revealed floor plan, observed patrol dots, and every visible interactable labeled with its verb + pip grammar. Live, unpaused, in-world (a charcoal-sketch look).
+
+## 3.2 — The curriculum (beat by beat)
+
+**A1J1 is a fixed-seed townhouse — "The Glover House" — for a fresh profile.** Small (22×14), 1 watchman + 1 sentry, big shadows, quota = the Glover ledger (1 slot, in a desk). Lesson locks in walk order:
+
+| # | Beat | Mechanic | The lesson lock (how geometry forces it) | Magpie's note |
+|---|---|---|---|---|
+| 1 | Perimeter | Casing / peek | Job starts on the perimeter strip; front door in a moonlit pool (obviously hostile), a side window overlooks the watchman's loop | "Walk the walls first, love. Windows gossip." |
+| 2 | Entry vestibule | **Soot gem** | Entry is through a moonlight quad you MUST cross; gem flares as you step in | "See the gem glow? So do they." |
+| 3 | First hall | **Snuffing** | One lamp lights the only corridor; watchman's loop crosses it; shadow route exists ONLY if snuffed | "Pinch the wick. Dark is your coat." |
+| 4 | Same hall | **Awareness fill** | Watchman returns while player likely lingers; cone-edge in shadow = slow fill (5–6s window), visibly climbing | "His eyes are filling. Still, or shadow — pick one." |
+| 5 | Parlor | **SUSPICIOUS + decay** | Sentry posted so the natural route clips his cone edge; he stirs, looks, settles (a designed safe scare) | "He *felt* you. Statues, dearie." |
+| 6 | Study | **Fine work needs light** | The ledger desk sits in ℓ<0.3 unless its lamp stays lit; pick prompt reads "too dark for fine work" | "Can't pick what you can't see. Crack your lantern — briefly." |
+| 7 | Any first noise ≥ clear | **Investigate + ghost** | First time a guard walks to a sound/spot, the ghost marker freezes where LOS broke | "That smoke-you is what he believes. Let him chase it." |
+| 8 | Exit | **Banking** | Cart glows at the entry point; "Banked." callout with value on stash | "Shine in the bag is hope. Shine in the cart is money." |
+
+**A1J2 (townhouse, +warden, creak floors) — SOUND and EVIDENCE:**
+
+| Beat | Mechanic | Lesson lock | Note |
+|---|---|---|---|
+| First creak-tile step | Materials + creaks | Creak tiles seeded on the main route; ring renders, sentry glances | "Old boards sing. Creep, or go around." |
+| First closed door between you and a noise | Door-graph sound | Ring visibly dies at the closed door | "Doors eat sound. Use them." |
+| First locked door | Preview grammar | Force (4 pips, eye) vs pick (1 pip, slow) side by side | — (the grammar IS the note) |
+| Warden relights your doused lamp | Evidence + undo | His circuit passes your first snuff within ~60s | "That one tidies up after you. Route around him." |
+| First Alertness feed | **The ratchet** | Stamp line ("+5 — forced door found") + wall lamps recolor in a visible wave down the corridor | "The house remembers. It never calms — only hardens." |
+| First attended-loot grab | Loot tags | Jewelry box in an occupied bedroom, tagged with a small warm-glow icon | "Warm loot. Someone misses it *tonight*." |
+
+**A1 Big Job (Counting House) — pressure + multi-objective:** pickpocket taught on the first key-holder (slow-fill hold prompt, breaks on his head-turns — his tell telegraphs the rhythm); note: "Light fingers, patient heart." First response guard entering at ALARMED gets a door-slam sound + note: "Company. The house is hiring." Big Job briefing at the counter explains the buy-in economy in Magpie's terms ("jobs this fat need grease going in").
+
+**A2 (pairs, dogs, mirrors, bells):** each new guard/hazard debuts in a job where its counter exists nearby (dogs debut in a manor with fireplaces + a smoke offer on the prior fence screen — the counter is drafted or ambient, never absent). Notes: pairs "Two sets of eyes, one watching backward. No sneaking behind."; first scent lock-on "He has your scent, not your shape. Smoke or hearth breaks it."; mirror "Mirrors carry eyes around corners. Both ways, mind."; bell door "Rigged. Three seconds of quiet hands buys silence."; first 2-hand Score "Hands full means helpless. Know your road home."; dumbwaiter "Send the shine down. Keep your hands free."; 5-slot sprint lock "Heavy bag, slow feet. Greed has a gait."
+**A2 Big (Gala):** you *arrive in* servant livery — disguise is the entry state, not an option to find. Note on first sprint-warning flash (HUD edge glows when a blowing action is primed): "Walk like you're paid to be here. Never run."
+
+**A3 (marksmen, electric zones, Old Copper):** marksman "He owns the light. The dark is yours."; electric zone "Can't pinch the future. Route around it."; **Old Copper is introduced audio-first** — his boot + *shk-CLACK* play through the door graph ~20s before he's visible (horror-style; the tell IS the introduction), urgent note: "That shutter-song? Leave. Now. He doesn't bribe." Magpie has already seeded him in the Act 2 debrief: "There's a copper who doesn't blow his whistle. Pray you never hear the shutter."
+**A3 Big (Archive):** Heat-scaled garrison stated on the listing in plain words ("your season's noise, armed and waiting").
+
+**Run-layer teaching (fence screens, trigger-based):** first Heat+2 "You've made that borough nervous. Nervous pays better — and bites."; first Score fenced "Famous shine sells thrice. Bring me stories, not spoons."; first Trick draft "Habits make the thief. Pick one."; LOCKDOWN first "They've sealed it. One door left — the long one."; famous-Score pickup "They'll miss that one by morning. Fly."; first Last Trick burn "That trick spends once. There's no third hand."; Crooked Watchman offer is a full scripted screen (his terms in dialogue — the one bribe is a story beat and self-explains); The Other Shadow first sighted "Another shadow works tonight. Mind she doesn't reach your prize first."
+
+## 3.3 — Scripted discovery of the anti-degenerate counters (red-team Phase 2 requirement)
+
+These are the moments a player learns the game pushes back; each is trigger-scripted so it *reads as a rule, not a bug*:
+- **Body evidence:** first KO → note "Tuck him somewhere soft. A found man screams loudest." If the body IS found (+20 stamp + stage wave), Magpie's debrief needles: "Left him snoring in the hall, did we? The whole watch heard the encore." The pair (note → consequence → debrief) closes the loop even if the player ignores step 1.
+- **Lure habituation:** second same-class lure within 60s → the +10 stamp fires WITH the note "Same trick twice? He's not a cat." — the punishment and the explanation are simultaneous, so it never feels random.
+- **Douse-everything:** taught positively by beat 6 (fine work needs light) and negatively by the warden beat; no extra note needed — geometry covers it.
+- **Camp-in-a-wardrobe:** the rounds-clock stamp (+4) is visible from the first 90s; if the player hides >20s at ALARMED+, one note: "The night doesn't wait with you, dearie."
+
+## 3.4 — The Fence's Ledger (reward callouts that PAY)
+
+Post-job debrief lists earned **accolades in Magpie's voice**, each worth REP (deep play is rewarded, not just labeled — feedback_teach_core_in_game):
+**Ghost** (no guard past SUSPICIOUS) +2 · **No Trace** (zero evidence feeds) +2 · **Clean Hands** (no KOs) +1 · **Full Bag** (banked 6+ slots) +1 · **The Long Walk** (banked anything at LOCKDOWN) +1 · **In & Out** (quota banked under 5 min) +1 · **Second-Story Ghost** (never used a door) +1. Un-earned accolades show as silhouetted stubs with their names visible — the ledger doubles as a "here's what mastery looks like" menu (depth taught by visible absence).
+**In-moment soot-script callouts (exactly 3, small, fading):** "Lost him." (a search resolves without finding you) · "Banked. +£N" (at the cart) · "Marked." (a Score enters the bag). *Rejected:* combo counters, popup spam — tension is the product; the ledger does the celebrating.
+
+## 3.5 — Completeness audit (every §2 system → its teacher)
+
+Light field/snuff/soot gem/fine-work → A1J1 beats 2–6. Cones/fill/ghost/SUSPICIOUS → beats 4–7. Sound graph/materials/previews → A1J2. Evidence ratchet/loot tags/warden → A1J2. Casing/peek → beat 1 + Case Notes. Banking/cart → beat 8; dumbwaiter/bulk/2-hand/sprint-lock → A2 notes. Hide spots → sentry-search moment (first INVESTIGATE searches a wardrobe on-screen — seeing him check teaches "hiding is a bet"). Pickpocket/response guards/buy-in → A1 Big. Pairs/dogs/mirrors/bells → A2. Disguise → A2 Big entry state. Marksman/electric/Old Copper → A3 audio-first. Heat/fence economy/Tricks/evolutions/intel → fence-screen triggers + Magpie stock lines. Capture ladder → Last Trick note + scripted Watchman screen + Morning Edition naming the cause. Job modifiers → listing headlines in plain words. The Other Shadow → sighting note + Magpie hints. **Gap found in audit and fixed:** hide-spot search needed an on-screen demonstration (added above); everything else had a row.
+
+# 4 — FEEL (Phase 3, 2026-07-25)
+
+The identity (§2.9) made flesh: exact palette, sprite construction, animation frames, synthesis recipes, layout. Phase 4 implements these WITH the systems, not after.
+
+## 4.1 — Palette (locked; Phase 4 uses these names as constants)
+
+| Name | Hex | Use |
+|---|---|---|
+| NIGHT | #070a14 | outdoor void, deepest dark |
+| FLOOR_UNLIT | #10131f | interior floor base in darkness |
+| WALL | #1c2233 | walls (multiply toward NIGHT unlit) |
+| WOOD / CARPET / MARBLE | #35281a / #3a2430 / #3d4358 | material tints, revealed by light |
+| LAMP_CORE → edge | #ffdca8 → rgba(255,180,90,0) | gas lamp radial gradient |
+| CANDLE / FIRE / MOON | #ffc878 / #ff9d5c / #9db8d8 @ α.25 | other sources (moon is COLD — the one cold light) |
+| ALERT ramp | #ffb85c → #ffe0b0 → #fff4e4 → #ff8a70 | CALM→WARY→ALARMED→LOCKDOWN lamp recolor |
+| THIEF_CLOAK / SCARF | #171a24 / #8a3138 | player; the dull-crimson scarf is the ONE saturated accent on screen |
+| GUARD_COAT / BRASS | #2b3a58 / #c9a45c | guard base + buttons/keys/plume |
+| CONE base → alarmed | rgba(255,205,120,.13) → rgba(255,90,60,.22) | view cones, suspicion lerp |
+| RING_PLAYER / GUARD / LURE | #e8ecf4 / #ffb85c / #7ab8ff | sound rings (player also solid-line, guard dashed — redundant with color) |
+| PARCHMENT / INK / SOOT_TEXT | #e6d5ae / #26201a / #c8ccd8 | Magpie notes, job board / UI text |
+
+Readability rule: the screen is allowed exactly three temperature families — warm lamplight, cold moon/night blues, and the crimson scarf. Anything else must justify itself.
+
+## 4.2 — Render pipeline (Canvas 2D, 5 layers)
+
+1. **Base:** floor/furniture pre-rendered per floor to an offscreen canvas at material colors × 0.35 (the "unlit" scene).
+2. **Lightmap:** half-res offscreen. Per source: radial gradient in its color, drawn clipped to its **visibility polygon** (raycast source→wall-segment endpoints; cached per static source, invalidated on door toggle; guard lanterns recompute per frame against segments within radius only). Composite 'lighter' onto the base. Lamp breathing: radius ±4% sine ~0.5Hz with per-lamp phase; fireplaces add 1/f flicker jitter.
+3. **Entities:** sprites brightness-lerped by ℓ at their tile (gameplay ℓ lives on the tile grid, recomputed on light-change *events* — one truth, the render prettifies it).
+4. **FX:** cones (polygon fill, suspicion-tinted), rings (expanding stroked circles that clip at closed doors), ghost marker (smoky player silhouette, α 0.5, slow dissolve), particles, soot footprints.
+5. **HUD** (§4.6).
+Snuff fx: pool irises shut over 220ms (ease-in) + 6 soot-mote particles (2px, rise with sine drift, 900ms fade) + the *fwip* (§4.5). This is the signature verb — it must feel like pinching silk.
+
+## 4.3 — The thief (construction per feedback_walk_cycle_and_facing_recipe)
+
+32px logical tile; thief ≈ 20×28px. **Baked body + procedural legs:** 5 hand-authored bodies (front / back / side / front-¾ / back-¾, left = mirrored), hooded, 3-tone shading (base #171a24, shadow #0d0f16, highlight #262b3a), NO outline-plus-dot-eyes — the face is a dark void under the hood with two faint glints only in light (ℓ>0.5). **Scarf-tail: 3-node verlet chain** (gravity 0, damped follow, streams in sprint, settles on stop) — the "alive" flourish. **The satchel visibly swells with bag slots** — carry state is readable art (0 slots = flat strap, 6 = bulging + strap strain).
+**Cycles:** 8-frame contact/down/passing/up walk, discrete snapping `floor(phase/(π/4))%8`, body offset down +0.7px / up −0.9px, speed-scaled cadence (named constants, expect live tuning: `WALK_CAD=0.05, CREEP_CAD=0.03, SPRINT_CAD=0.085`), walkAmt 0→1 ease to rest pose, velocity-octant 8-way sticky facing, splay legs front/back, scissor on side/diagonals.
+**Pose list:** idle (2-frame breath, 1.2s) · creep (body −2px crouch, longer scissor) · sprint (2px lean, scarf streaming) · pick/safecrack (kneel + 2-frame elbow jitter synced to audio ticks) · snuff (3-frame reach-pinch-withdraw, 400ms) · throw (arc arm) · blackjack (250ms windup + 100ms swing + follow-through) · 2-hand carry (baked alt body, arms up, load sway) · drag (lean-back 2-frame) · hide (eyes-glint pair in wardrobe crack) · grabbed (2-frame struggle shake) · Last Trick (soot-burst smear + 8 particles).
+
+## 4.4 — Guards: silhouette + gait + synced tell (audio fires ON animation frames — one clock)
+
+| Guard | Gait/cadence | Signature animation | Tell sync |
+|---|---|---|---|
+| Watchman | slow stroll ×0.8 | lantern-arm swing; his light pool sways WITH it | whistle phrase starts on left-foot contacts |
+| Sentry | seated | chest-rise snore bob; wake = snore stutter → 1.2s stretch → eyes (readable mercy window) | snore loop synced to bob |
+| Warden | hunched ×0.9 | relight = reach up, flame blooms in 300ms | key jangle on each contact frame |
+| Constable pair | matched ×1.0 | rear man walks backward, periodic shoulder-check turn | in-step footfalls + murmur between phrases |
+| Hound + handler | 4-frame lope | nose-down sniff pose on scent; handler leash-jerked | pant at 4Hz; snuffle on sniff pose; bark on lock-on |
+| Sergeant | stride ×1.3 | arm-extend point when ordering searches | barked orders on the point frame |
+| Marksman | perched | rifle rotation lerps to track; muzzle glint when acquiring | rifle-cock click at acquire start |
+| Dockside tough | rolling wander ×0.9 | spit (idle fx) | off-key hum, breaks randomly |
+| Guests/servants | skirt-sway / tray 2-frame | startle = jump-back + hands up | chatter murmur; gasp→scream on startle |
+| **Old Copper** | asymmetric limp (long-short step timing) ×0.7 | 1.5× silhouette mass, coat to floor; **shutter anim = his cone snaps in/out WITH the *shk-CLACK*** | heavy/light boot alternation; shutter clack on cone toggle |
+
+**Telegraph rules (fairness is animation):** every guard state change gets a windup the player can act during — SUSPICIOUS: halt + 300ms head-turn (lantern raised) before the cone swings; INVESTIGATE: 400ms lean-and-point, then walk; DETECTED: 400ms shout pose + whistle BEFORE chase speed engages. KO: 90ms hit-stop + 3-frame crumple fold.
+**Shake budget (feedback_climax_and_juice_budget):** `shake = max(shake, event)` — never additive — decay ×0.85/frame, hard cap 6px. Events: detected whistle 2 · door force 3 · guard slips on oil 3 · grabbed 5 · Last Trick 6. Nothing else shakes. Stealth's baseline is stillness; shake is punctuation.
+
+## 4.5 — WebAudio (all procedural, no assets; init on first gesture; no-AudioContext guard)
+
+**Graph:** master gain → DynamicsCompressor → destination. Buses: `music, ambience, foley, tells, ui`. **Spatial model = the door graph:** world sounds get pan `clamp(dx/14,-1,1)`, gain from received-loudness, and a lowpass whose cutoff lerps 600→8000Hz by door attenuation — **computed by the SAME BFS the guards use** (one truth, two consumers, §2.1.3). Guard tell loops re-evaluate at 4Hz, smoothed with setTargetAtTime.
+
+**Foley recipes** (osc/noise → filter → env; all durations ms):
+- **Footsteps by material:** carpet = noise bp200Hz, 60ms, soft · wood = bp400Hz 80ms + random creak (saw pitch-bend 300→180Hz, 120ms) · marble = bp900Hz click 50ms + slap-back delay 90ms · glass = 2kHz crunch grains, random pitch. Player's own steps audible at their true L — creak dread is a feature.
+- **Snuff *fwip*:** hp1.2kHz noise 80ms + sine drop 800→200Hz. **Relight:** soft *foomp* — lp noise swell 150ms + candle sine flutter.
+- **Lockpick:** 900Hz tick pattern (the hold-fill's audible progress); success = bright 2.4kHz ping. **Safe dial:** ticks per notch; **felt-click stop = duller 350Hz thunk** — the audio IS the minigame interface. **Drill:** saw 120Hz + noise, sustained.
+- **Blackjack:** lp thump 90Hz 100ms + cloth noise. **Body drag:** looped slow noise scrapes on step frames.
+- **Whistle-blast (DETECTED):** square 2.4kHz + noise, 300ms rising. **Scream:** swept square 800→1200Hz with 8Hz vibrato + gasp noise attack.
+- **Tells:** watchman whistle = triangle osc + vibrato LFO playing **the leitmotif — D-minor, lazy swing: [D5 F5 E5 A4 D5]** (THE game theme — reprised in the menu pad and the Morning Edition sting; per-watchman phase offset) · snore = lp-noise with sawtooth-shaped gain LFO 0.25Hz (inhale/exhale), dropout-stutter before waking · keys = 4–6 FM pings (carrier 2–4kHz random, ratio 3.7) per contact frame · dog pant = bp800Hz bursts at 4Hz; bark = saw 300Hz pitch-drop + noise · Old Copper = alternating sine-thud 60Hz heavy/light + **shk-CLACK** (noise tick 15ms + square 1.8kHz 30ms metallic click).
+- **UI:** coin = FM bell 5kHz short · paper rustle (Magpie note) = lp-noise sweep 200ms · jackdaw chirp = FM 2.8kHz 40ms (Magpie's text blip, every 3rd char at 40 chars/s).
+
+**Music — 4 alertness layers, one 84bpm scheduler (0.1s lookahead), all layers always running, gains crossfade 3s on stage change (never restart — phase-aligned):**
+- **CALM:** vinyl crackle (sparse bp3kHz pops) + harbor bell (FM, D3, random 25–45s) + room-tone pad (2 detuned triangles D2+A2, −30dB).
+- **WARY:** + brushed-hat swing 8ths (hp4kHz noise bursts, −24dB) + sparse pizzicato bass (sine pluck, D–F–A–C line).
+- **ALARMED:** + tremolo strings (3-saw Dm chord, 7Hz gain LFO, lp1.2kHz, −20dB).
+- **LOCKDOWN:** + timpani heartbeat (sine 55Hz lub-dub) + thin A5 pedal whine (−30dB).
+- Stage-up stinger: one muted-brass stab (saw + lowpass sweep). While any guard chases: tremolo bus +6dB.
+
+## 4.6 — HUD & layout (defensive — I fly blind, so nothing may depend on eyeballing)
+
+Full-window canvas (no letterbox), devicePixelRatio-aware, camera centered on player. **HUD lives in 5 fixed anchors, inset 16px, font `clamp(12px, 1.4vw, 18px)`, each anchor max-width 40vw — overlap between anchors is impossible by construction.** Min supported 1024×600.
+- **Top-left: the soot gem** — 48px lantern-lens glyph, glow = ℓ at player (the genre's most-consulted instrument gets the prime slot) — with the 6-slot bag strip beneath (28px slots; bulk items span; slots visually strain at 5+).
+- **Top-right:** alertness wall-lamp glyph (stage color + pips) + evidence ticker (last 3 stamps, fade 5s).
+- **Top-center:** quota line, small ("Deeds 0/1 · fee £120").
+- **Bottom-center:** contextual verb strip / radial on hold-E, with the pip+eye preview grammar.
+- **Bottom-left:** Magpie note parchment (slide-in, max-width 320px).
+- **Hold-Tab:** Case Notes overlay (charcoal-sketch floor plan, patrol dots, labels). No minimap otherwise — casing IS the map fantasy.
+Phase 4 screenshot matrix: 1024×600, 1366×768, 1920×1080 (§4.9).
+
+## 4.7 — Magpie (portrait + lines)
+
+**Portrait: 96×96 pixel bust, 3 expressions** (appraising/default, delighted/big haul, needling/sloppy job): sharp-eyed older woman, silver bun, magpie-feather shawl, cameo brooch (stolen, obviously), jackdaw on her shoulder (it reacts too — puffs up at Scores), cluttered counter foreground. Text types at 40 chars/s with jackdaw-chirp blips.
+**Line pools (counts committed; texts written in Phase 4 from these + §3.2's notes):** greetings ×8 keyed to {clean/sloppy/first-time/post-capture-history} · Score appraisals ×10 (one per named Score — "the Vane Emerald! Sit DOWN, dearie") · listing warnings ×12 keyed to modifiers/rosters · teaching briefings = §3.2's pool re-voiced for the counter · The Other Shadow hints ×6 ("she had another client, that one") · needle lines ×8 keyed to evidence stats ("half the district's lit up like Christmas").
+
+## 4.8 — The Morning Edition (run-end newspaper)
+
+Every run ends on a front page of **THE MORNING SENTINEL**: procedural headline from outcome — pinched: "PHANTOM TAKEN AT THE VANE HOUSE — hound followed a soot trail" (**the cause of capture named plainly — the roguelite death-lesson**) · disgrace: "SEASON OF SILENCE — the shadow retires poor" · victory: "ARCHIVE ROBBED — WATCH BAFFLED, MAGISTRATE FURIOUS". Sub-columns render run stats as news briefs (Scores taken with engravings, peak alertness per district, Heat map as "boroughs on edge"). Leitmotif sting, minor for loss / resolved-major for the win. Parchment + ink palette; cheap (text layout + the district map) and it closes every run with the fantasy: you are the city's ghost story, and this is the city telling it.
+
+## 4.9 — Screenshot checkpoints (Phase 4 must request these EARLY — feedback_user_provides_visuals)
+
+1. A lit parlor: lamp pool + shadow teeth + thief idle (art baseline — judge palette & light quality).
+2. The same lamp mid-snuff (iris + smoke motes).
+3. A guard at INVESTIGATE: cone tint + fill glyph + ghost marker visible.
+4. Full HUD at 1366×768 AND 1024×600 (anchor overlap check).
+5. Thief walk vs creep vs sprint (three shots or a short capture — leg readability).
+6. Magpie's counter screen.
+7. The Morning Edition.
+Plus the two **feel-review harnesses Phase 4 must ship** (they make the blind layer auditable in minutes): a **soundboard debug page** (every recipe on a key) and an **animation gallery scene** (every character cycling its poses). The user auditions, reports by name, I fix precisely.
+
 ## Red-team log
 
 ### Phase 1 (self-attack)
@@ -268,8 +456,17 @@ User confirmed the gaslamp-Victorian flavor and handed the "add more?" question 
 - **Harshness call (delegated):** kept run-over teeth but built the capture ladder (§2.3) — one unbribeable-hunter exception preserves terror, one gutting bribe converts the most frustration-prone moment (blind-tuned grab) into a story beat with an economic scar. This is designing around a knife-edge I can't feel, per the standing risk.
 - **Examined and deliberately NOT changed:** rounds-clock pacing (+4/90s — Phase 4 tuning, noted a 15-min floor self-ALARMS around min 19, probably right); genre-canon inventory re-checked (light/sound/hiding/bodies/disguise/keys/peeking/casing all present; verticality served by windows+grapple — full rooftop layer would be a different game); guard roster at 10 (enough identities; an 11th adds count, not decisions); no new districts (5 is the content budget's edge already).
 
+### Phase 3 (self-attack, 2026-07-25)
+- **Completeness audit ran (§3.5): every §2 system now has a named teacher.** One real gap surfaced and fixed mid-audit — hide spots had a note but no *demonstration*; added the scripted on-screen wardrobe search at first INVESTIGATE so the player SEES that hiding is a bet, not a shield. Lesson repeated from the seam: audit "is it taught?" per-system, not per-section.
+- **Is the ratchet — the identity — actually taught?** It's counter-genre-default (every other stealth game's alarm decays), so it gets triple coverage: the stamp+lamp-recolor wave (felt), note "It never calms — only hardens" (named), and Magpie's debrief needling (reflected). If a playtester still waits for the alarm to cool, the teaching failed — flag as a user-test question, not a settled success.
+- **Note-volume check:** ~30 once-ever notes across 9 floors ≈ 3/floor average; densest is A1J1 (8, but strung along a linear walk order so the queue never stacks). The cap-1 + safe-moment gate is the spam-proof. Risk accepted: a player who rushes A1J1 may out-run beats 4–5; the fallback channels (previews, ledger stubs, briefings) re-teach later, so nothing is single-point.
+- **Am I speccing art I can't verify?** Yes, deliberately — but every craft claim in §4 is either (a) construction-rule-shaped (silhouette-first, 3-tone, baked+procedural — followable blind), (b) numeric (palette hexes, frame counts, cadence constants — checkable in code), or (c) covered by the §4.9 checkpoint list + the two feel-review harnesses. The harnesses are the real answer: soundboard + gallery convert "user vibes on the whole game" into "user reports on named assets." Don't let Phase 4 skip them to save time — they ARE the verification plan for the feel layer.
+- **What I almost cut (naming per feedback_build_the_novel_feature):** the Morning Edition newspaper (flinched — "scope"; kept: it's text layout + existing stats, and it's the run's story-closer and death-lesson in one); scarf verlet physics (kept — the single "alive" flourish, 3 nodes is trivial); Magpie's jackdaw reacting to Scores (kept, one conditional sprite swap). Honestly cut: full VO (no assets, no TTS in scope), minimap (anti-fantasy — casing is the map), per-guard barks-as-speech-text (tell audio + animation carries it; text barks would clutter the soot-quiet look).
+- **Leitmotif risk:** the whistle motif [D5 F5 E5 A4 D5] is now load-bearing (watchman tell, menu, Morning Edition). I can't hear it. It's 5 notes in D minor with swing — structurally safe — but it's first on the soundboard audit list for a reason.
+- **Fresh-me check:** could a fresh chat build A1J1's teaching from §3.2 alone? The lesson-lock table gives geometry constraints + trigger conditions + exact note text. The one soft spot: "generator guarantees the lesson lock" needs Phase 4 to implement A1J1 as a fixed authored seed, not constraint-solving — stated in §3.2's header, restated in HANDOFF so it isn't misread as a gen feature.
+
 ## Open questions
 - ~~Phase 1: user pick~~ ANSWERED: **Lampblack**, no splice, directive "watch art + sounds" (standing, in HANDOFF).
 - ~~Phase 2 seam questions to user~~ ANSWERED 2026-07-25: **gaslamp-Victorian confirmed** ("flavor sounds amazing, keep it"); roster additions + harshness **delegated to me** ("you are the chef… be critical about it to yourself") → seam self-pass ran, four changes landed (soot gem, capture ladder, Magpie, The Other Shadow — see red-team §Phase 2-seam). Note for future seams: the poke can come back to me; a delegated seam = run a SECOND red-team, produce concrete changes, don't just reassure.
-- Phase 3: teaching curriculum beats (Magpie is the voice; §2.8 gating is the skeleton); full feel spec (frames, synthesis recipes, palette, layout, Magpie's portrait + line pools).
-- Phase 4: fire propagation stretch (in/out); safecracking minigame tuning (user co-tune); mid-run save shape; exact numbers pass; The Other Shadow's bot-brain shared with the verification probe.
+- ~~Phase 3: teaching curriculum + feel spec~~ ANSWERED 2026-07-25: §3 (six channels, Glover House 8-beat opening, full note text pool, accolades, discovery scripts, completeness audit) + §4 (palette, pipeline, thief/guard art + animation, WebAudio recipes + music layers, HUD anchors, Magpie portrait/lines, Morning Edition, screenshot checkpoints + feel-review harnesses).
+- Phase 4: fire propagation stretch (in/out); safecracking minigame tuning (user co-tune); mid-run save shape; exact numbers pass; The Other Shadow's bot-brain shared with the verification probe; Magpie line-pool texts; user-test question — does the never-decays ratchet land without a genre-default assumption fighting it?
