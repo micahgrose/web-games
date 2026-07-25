@@ -94,7 +94,7 @@ R.buildGround = function(S){
      milestone (drainEvents → R.buildGround). */
   /* heal radius per completed tier (tiles): barely creeps in for the first
      few tiers, then accelerates; full map on victory */
-  const HEAL_R = [0, 2, 4, 6, 8, 11, 14, 17, 20, 24, 28, 33, 38, 45, 53, 63, 78, 100, 120, 140, 158, 1e4];
+  const HEAL_R = [0, 2, 4, 6, 8, 11, 14, 17, 20, 24, 28, 33, 38, 45, 53, 63, 70, 78, 100, 120, 140, 158, 1e4];
   const msDone = S.won || S.freeplay ? HEAL_R.length - 1 : Math.min(S.msIndex || 0, HEAL_R.length - 1);
   R._heal = null;
   if (HEAL_R[msDone] > 0){

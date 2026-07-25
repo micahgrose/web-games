@@ -1150,6 +1150,8 @@ function buildSelPanel(e){
     const t = S.oreType[i];
     const ore = t ? F.ORES[t] : null;
     html += row('Deposit', ore ? `${ore.name} · endless vein` : '—');
+    if (ore && (ore.minTier || 1) > (def.tier || 1))
+      html += `<div class="ghostNote" style="color:var(--bad)">This drill is too weak to bite ${ore.name.toLowerCase()} — needs a ${minMachineName('miner', ore.minTier)} or better.</div>`;
     html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
     html += moduleSection(S, e, def);
@@ -1640,11 +1642,23 @@ function bufList(o){
   return h || '<div class="ghostNote">empty</div>';
 }
 
+// name the weakest machine of a family that can run a recipe (for tier hints)
+function minMachineName(fam, tier){
+  for (const k in F.BUILDINGS){ const b = F.BUILDINGS[k]; if (b.fam === fam && b.tier === tier) return b.name; }
+  return 'a stronger machine';
+}
 function recipeSection(S, e, def){
   if (F.AUTO_RECIPES[def.fam]){
-    const opts = F.AUTO_RECIPES[def.fam].filter(k => F.recipeUnlocked(S, k));
-    return `<div class="selSection">${def.fam === 'crusher' ? 'Crushes automatically' : 'Smelts automatically'}</div>
-      <div class="compChain">${opts.map(k => `<span>${iconImg(F.RECIPES[k].out, 15)}</span>`).join('')}</div>`;
+    const unlocked = F.AUTO_RECIPES[def.fam].filter(k => F.recipeUnlocked(S, k));
+    const opts  = unlocked.filter(k => F.recipeFits(def, k));
+    const gated = unlocked.filter(k => !F.recipeFits(def, k));
+    let h = `<div class="selSection">${def.fam === 'crusher' ? 'Crushes automatically' : 'Smelts automatically'}</div>
+      <div class="compChain">${opts.map(k => `<span>${iconImg(F.RECIPES[k].out, 15)}</span>`).join('') || '<span class="ghostTxt">nothing yet</span>'}</div>`;
+    if (gated.length){
+      const min = Math.min(...gated.map(k => F.RECIPES[k].minTier || 1));
+      h += `<div class="ghostNote" style="color:var(--bad)">Too weak for ${gated.map(k => iconImg(F.RECIPES[k].out, 13)).join(' ')} — needs a ${minMachineName(def.fam, min)}.</div>`;
+    }
+    return h;
   }
   const opts = Object.keys(F.RECIPES).filter(k => {
     const r = F.RECIPES[k];
@@ -1652,7 +1666,9 @@ function recipeSection(S, e, def){
   });
   let h = `<div class="selSection">Recipe</div><div class="recipeGrid">`;
   for (const k of opts){
-    h += `<button class="recipeBtn${e.recipe === k ? ' on' : ''}" data-recipe="${k}" title="${F.ITEMS[F.RECIPES[k].out].name}">${iconImg(F.RECIPES[k].out, 24)}</button>`;
+    const fits = F.recipeFits(def, k);
+    const need = fits ? '' : ` — needs a ${minMachineName(def.fam, F.RECIPES[k].minTier || 1)}`;
+    h += `<button class="recipeBtn${e.recipe === k ? ' on' : ''}${fits ? '' : ' locked'}" data-recipe="${k}"${fits ? '' : ' disabled'} title="${F.ITEMS[F.RECIPES[k].out].name}${need}">${iconImg(F.RECIPES[k].out, 24)}</button>`;
   }
   h += '</div>';
   if (e.recipe){

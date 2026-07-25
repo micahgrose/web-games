@@ -227,6 +227,8 @@ button{ font-family:inherit; color:inherit; background:none; border:none; cursor
 }
 .recipeBtn:hover{ border-color:var(--line-bright); background:rgba(255,255,255,.07); }
 .recipeBtn.on{ border-color:var(--accent); background:rgba(255,180,84,.12); }
+.recipeBtn.locked{ opacity:.32; filter:grayscale(1); cursor:not-allowed; border-style:dashed; }
+.recipeBtn.locked:hover{ border-color:var(--line); background:rgba(255,255,255,.03); }
 .bufRow{ display:flex; align-items:center; gap:7px; margin:4px 0; font-size:12px; }
 .bufRow .n{ color:var(--ink-dim); font-variant-numeric:tabular-nums; margin-left:auto; }
 /* splitter exit rows (drag priorities / filters onto them) */

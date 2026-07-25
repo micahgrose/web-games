@@ -10,7 +10,7 @@ F.ORES = {
   3: { id:'coal',      name:'Coal',     c1:'#3d434e', c2:'#22262e' },
   4: { id:'stone',     name:'Stone',    c1:'#9a948a', c2:'#6b665e' },
   5: { id:'quartz',    name:'Quartz',   c1:'#cfe6f2', c2:'#8fb4c9' },
-  6: { id:'titanOre',  name:'Titanium', c1:'#b9a7e8', c2:'#7a68b0' },
+  6: { id:'titanOre',  name:'Titanium', c1:'#b9a7e8', c2:'#7a68b0', minTier:3 },
   7: { id:'crude',     name:'Oil seep', c1:'#2a2f2a', c2:'#141712' },
   8: { id:'chromite',  name:'Chromite', c1:'#9be8e0', c2:'#4a8d86' },
 };
@@ -80,20 +80,20 @@ F.RECIPES = {
   copperIngot:{ out:'copperIngot',outN:1, in:{copperOre:1}, time:2.0, machine:'smelter', unlock:1 },
   brick:      { out:'brick',      outN:1, in:{stone:1},     time:1.6, machine:'smelter', unlock:1 },
   glass:      { out:'glass',      outN:1, in:{quartz:1},    time:2.6, machine:'smelter', unlock:1 },
-  titanIngot: { out:'titanIngot', outN:1, in:{titanOre:1},  time:3.6, machine:'smelter', unlock:7 },
+  titanIngot: { out:'titanIngot', outN:1, in:{titanOre:1},  time:3.6, machine:'smelter', minTier:3, unlock:7 },
   /* grit smelting (tech: ore crushing — 1 grit → 1 ingot, so ore counts double) */
   ironIngotD: { out:'ironIngot',  outN:1, in:{ironDust:1},   time:2.0, machine:'smelter', tech:'crushing' },
   copperIngotD:{out:'copperIngot',outN:1, in:{copperDust:1}, time:2.0, machine:'smelter', tech:'crushing' },
-  titanIngotD:{ out:'titanIngot', outN:1, in:{titanDust:1},  time:3.6, machine:'smelter', tech:'crushing2' },
+  titanIngotD:{ out:'titanIngot', outN:1, in:{titanDust:1},  time:3.6, machine:'smelter', minTier:3, tech:'crushing2' },
   /* crusher (auto) — 1 ore → 2 grit */
   ironDust:   { out:'ironDust',   outN:2, in:{ironOre:1},   time:1.8, machine:'crusher', tech:'crushing' },
   copperDust: { out:'copperDust', outN:2, in:{copperOre:1}, time:1.8, machine:'crusher', tech:'crushing' },
-  titanDust:  { out:'titanDust',  outN:2, in:{titanOre:1},  time:2.8, machine:'crusher', tech:'crushing2' },
+  titanDust:  { out:'titanDust',  outN:2, in:{titanOre:1},  time:2.8, machine:'crusher', minTier:2, tech:'crushing2' },
   /* alloy furnace (auto) */
   steel:      { out:'steel',      outN:1, in:{ironIngot:2, coal:1},  time:3.2, machine:'alloy', unlock:4 },
   silicon:    { out:'silicon',    outN:1, in:{quartz:1, coal:1},     time:2.6, machine:'alloy', unlock:4 },
-  chrome:     { out:'chrome',     outN:1, in:{chromite:1, coal:1},   time:3.4, machine:'alloy', tech:'chromeworks' },
-  chromsteel: { out:'chromsteel', outN:1, in:{chrome:1, steel:1},    time:4.2, machine:'alloy', tech:'chromeworks' },
+  chrome:     { out:'chrome',     outN:1, in:{chromite:1, coal:1},   time:3.4, machine:'alloy', minTier:2, tech:'chromeworks' },
+  chromsteel: { out:'chromsteel', outN:1, in:{chrome:1, steel:1},    time:4.2, machine:'alloy', minTier:2, tech:'chromeworks' },
   /* assembler */
   gear:       { out:'gear',   outN:1, in:{ironIngot:2},              time:1.6, machine:'asm', unlock:2 },
   wire:       { out:'wire',   outN:2, in:{copperIngot:1},            time:1.4, machine:'asm', unlock:2 },
@@ -101,7 +101,7 @@ F.RECIPES = {
   circuit:    { out:'circuit',outN:1, in:{wire:2, silicon:1},        time:2.4, machine:'asm', unlock:4 },
   motor:      { out:'motor',  outN:1, in:{gear:2, steel:1, wire:2},  time:3.2, machine:'asm', unlock:5 },
   advCircuit: { out:'advCircuit', outN:1, in:{circuit:1, plastic:1, wire:2}, time:3.4, machine:'asm', unlock:6 },
-  frame:      { out:'frame',  outN:1, in:{steel:2, titanIngot:1},    time:3.6, machine:'asm', unlock:7 },
+  frame:      { out:'frame',  outN:1, in:{steel:2, titanIngot:1},    time:3.6, machine:'asm', minTier:3, unlock:7 },
   processor:  { out:'processor', outN:1, in:{advCircuit:2, silicon:1, glass:1}, time:4.2, machine:'asm', unlock:8 },
   logicMatrix:{ out:'logicMatrix', outN:1, in:{processor:2, circuit:2, glass:1}, time:6.0, machine:'asm', unlock:8 },
   powerCore:  { out:'powerCore',   outN:1, in:{fuelCell:2, frame:1, motor:1},    time:6.0, machine:'asm', unlock:8 },
@@ -186,11 +186,13 @@ const B = F.BUILDINGS = {
   smelter2:{ name:'Arc furnace',     cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:2.2, power:4,  cost:{brick:12, plate:14, wire:10}, tech:'arcFurnaces',
              desc:'Electric smelting, over twice as fast.' },
   smelter3:{ name:'Plasma forge',    cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:4,   power:10, cost:{steel:40, advCircuit:10, plastic:20}, tech:'plasmaForges',
-             desc:'Star-hot. Smelts anything almost instantly.' },
+             desc:'Star-hot. Smelts anything almost instantly — and the only furnace, short of the Sunforge, that can melt titanium ore.' },
   smelter4:{ name:'Sunforge',        cat:'pro', kind:'machine', fam:'smelter', w:2, h:2, speed:7,   power:20, cost:{chromsteel:40, advCircuit:20, brick:50}, tech:'sunforge',
              desc:'A caged fragment of dawn. The final word in smelting.' },
   alloy:   { name:'Alloy furnace',   cat:'pro', kind:'machine', fam:'alloy', w:2, h:2, speed:1.6, power:5, cost:{brick:20, plate:18, wire:14}, unlock:4,
-             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — needs a powered grid.' },
+             desc:'Fuses two inputs: iron + coal → steel, quartz + coal → silicon. Electric — needs a powered grid. Too cool for chromite, though — that needs a Chrome furnace.' },
+  alloy2:  { name:'Chrome furnace',  cat:'pro', kind:'machine', fam:'alloy', w:2, h:2, speed:3, power:12, cost:{steel:30, circuit:12, glass:8}, tech:'chromeworks',
+             desc:'A far hotter alloy furnace — the only thing that can fuse chromite into chrome, and chrome into chromsteel. Smelts steel and silicon too, nearly twice as fast as the basic furnace.' },
   asm1:    { name:'Fabricator',      cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:1,   fuel:true, cost:{brick:8, ironIngot:8}, unlock:2,
              desc:'Crafts parts from a chosen recipe. Burns coal.' },
   asm2:    { name:'Assembler',       cat:'pro', kind:'machine', fam:'asm', w:2, h:2, speed:2.2, power:10, cost:{steel:12, gear:16, circuit:8}, tech:'poweredAssembly',
@@ -235,6 +237,21 @@ const B = F.BUILDINGS = {
 };
 F.BUILD_ORDER = Object.keys(B);
 
+/* Machine tiers: within a family, each mark is a harder machine than the last.
+   Some recipes demand a minimum tier (titanium needs a Plasma Forge; chrome
+   needs a Chrome furnace) — a machine below that tier simply won't touch the
+   material. Miners carry a tier too, for hard ores. */
+{
+  const TIERS = {
+    miner:   ['miner1', 'miner2', 'miner3', 'miner4'],
+    smelter: ['smelter1', 'smelter2', 'smelter3', 'smelter4'],
+    asm:     ['asm1', 'asm2', 'asm3', 'asm4'],
+    alloy:   ['alloy', 'alloy2'],
+    crusher: ['crusher1', 'crusher2'],
+  };
+  for (const fam in TIERS) TIERS[fam].forEach((k, i) => { if (B[k]) B[k].tier = i + 1; });
+}
+
 /* Power is precious: every electric consumer draws five times the draw
    written above (lamps stay cheap) — the grid is a thing you earn, not a
    thing you sprinkle. */
@@ -261,7 +278,7 @@ for (const k in B){
    NEVER shown to the player — machines simply break down one day. */
 {
   const LIFE = { miner1:500, miner2:800, miner3:1300, miner4:2000, pump:800,
-    smelter1:500, smelter2:800, smelter3:1300, smelter4:2000, alloy:800,
+    smelter1:500, smelter2:800, smelter3:1300, smelter4:2000, alloy:800, alloy2:1300,
     asm1:500, asm2:800, asm3:1300, asm4:2000, refinery:1000,
     crusher1:500, crusher2:800 };
   for (const k in LIFE) B[k].life = LIFE[k];
@@ -288,7 +305,7 @@ F.CATS = [
 ];
 
 /* ================= MILESTONES =================
-   The spine — twenty-one tiers, one new idea at a time, each followed by
+   The spine — twenty-two tiers, one new idea at a time, each followed by
    room to practise it. Tiers unlock only the most basic buildings + the
    spine recipes; everything else is researched in the tech tree.
    IDs are stable keys — saves store the id of the tier in progress, so
@@ -403,13 +420,20 @@ F.MILESTONES = [
     grant:{},
     hint:'Fuel cells also feed turbines — research Fuel turbines for serious power. Polymer science opens the deep branches of the tree.',
     recap:'What burns is tamed. Fuel cells hold the fire for later.' },
+  { id:'mChrome', name:'Chromework',
+    flavor:'A teal ore glitters in the deep rings — chromite, harder than steel and twice as proud. It will not melt in any furnace you own.',
+    req:{ chromsteel:90 },
+    unlocks:[],
+    grant:{},
+    hint:'Research <b>Chromeworks</b> in the tree: it builds the Chrome furnace, the only furnace hot enough for chromite. Chromite + coal → chrome, then chrome + steel → chromsteel — the metal every last machine is built from.',
+    recap:'Chromsteel — the metal of the final machines. Only the Chrome furnace can forge it.' },
   { id:'m7', name:'Polymer Mind',
     flavor:'Plastic and copper laid in impossible lattices. The machines improve the machines.',
     req:{ advCircuit:350, plastic:300 },
     unlocks:['r:titanIngot','r:frame'],
     grant:{},
-    hint:'Titanium waits at the far edges of the world — a violet ore for the last age of machines.',
-    recap:'The machines now improve the machines.' },
+    hint:'Titanium waits at the far edges — a violet ore for the last age of machines. Only star-hot machines can work it: plasma bores to mine it, plasma forges to smelt it, nano-forges to press the frames.',
+    recap:'The machines now improve the machines. Star-metal needs star-hot tools.' },
   { id:'m8', name:'Star Metal',
     flavor:'Titanium bones for a sleeping god.',
     req:{ titanIngot:350, frame:125 },
@@ -709,17 +733,17 @@ F.TECHS = {
     desc:'Concentrated mirrors around a molten-salt core: 45 P of silent, fuel-free power.',
     cost:{ pack2:18 }, req:['solarPower'], unlocks:['solar2'] },
   plasmaBores: { name:'Plasma bores', icon:'motor',
-    desc:'A drill that cuts ore with a plasma lance — 4.4× base speed.',
+    desc:'A drill that cuts ore with a plasma lance — 4.4× base speed, and the first drill hard enough to bite titanium. Weaker drills sit idle on a titanium deposit.',
     cost:{ pack2:14, pack3:12 }, req:['electricDrills'], unlocks:['miner3'] },
   plasmaForges:{ name:'Plasma forges', icon:'steel',
-    desc:'Star-hot smelting, 4× base speed.',
+    desc:'Star-hot smelting, 4× base speed — and the first furnace hot enough to melt titanium ore into ingots. Kilns and arc furnaces can\'t.',
     cost:{ pack2:14, pack3:12 }, req:['arcFurnaces'], unlocks:['smelter3'] },
   nanoForges:  { name:'Nano-forges', icon:'advCircuit',
-    desc:'Assembly at the molecular scale — 4× base speed.',
+    desc:'Assembly at the molecular scale — 4× base speed, and strong enough to press titanium frames. Fabricators and assemblers can\'t work the star-metal.',
     cost:{ pack2:14, pack3:14 }, req:['poweredAssembly'], unlocks:['asm3'] },
   chromeworks: { name:'Chromeworks', icon:'chromite',
-    desc:'Refine teal chromite (mid & far rings) in the alloy furnace: chromite + coal → chrome, chrome + steel → chromsteel — the metal of the last machines.',
-    cost:{ pack2:12, pack3:12 }, req:[], unlocks:['r:chrome','r:chromsteel'] },
+    desc:'The Chrome furnace, and the recipes it runs: chromite + coal → chrome, chrome + steel → chromsteel — the metal of the last machines. Teal chromite waits in the mid & far rings.',
+    cost:{ pack2:12, pack3:12 }, req:[], unlocks:['alloy2','r:chrome','r:chromsteel'] },
   beacons:     { name:'Beacons', icon:'glass',
     desc:'A transmitter that broadcasts its modules at half strength to every machine in a 10×10 area — one beacon, a whole block boosted.',
     cost:{ pack3:14, pack4:8 }, req:['modules'], unlocks:['beacon'] },

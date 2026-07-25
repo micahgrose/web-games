@@ -267,6 +267,9 @@ F.newGame = function(seed, genVer){
 
 F.buildingUnlocked = (S, key) => !!S.unlocked[key];
 F.recipeUnlocked = (S, key) => !!S.unlocked['r:' + key];
+// hard materials need hard machines: a recipe's minTier must not exceed the
+// machine's tier (titanium → plasma forge+, chrome → chrome furnace, …)
+F.recipeFits = (def, rk) => ((F.RECIPES[rk].minTier || 1) <= (def.tier || 1));
 
 F.canPlace = function(S, key, x, y, dir){
   const def = F.BUILDINGS[key];
@@ -562,6 +565,7 @@ function machineAccept(S, m, item){
     let need = 0;
     for (const rk of F.AUTO_RECIPES[def.fam]){
       if (!F.recipeUnlocked(S, rk)) continue;
+      if (!F.recipeFits(def, rk)) continue;   // too weak a machine for this material
       const r = F.RECIPES[rk];
       if (r.in[item]) need = Math.max(need, r.in[item]);
     }
@@ -570,9 +574,10 @@ function machineAccept(S, m, item){
       if ((m.inBuf[item] || 0) < lim){ m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true; }
     }
   } else {
-    // asm / refinery: only the chosen recipe's ingredients
+    // asm / refinery: only the chosen recipe's ingredients — and only if this
+    // machine is strong enough to actually run it
     const r = m.recipe && F.RECIPES[m.recipe];
-    if (r && r.in[item]){
+    if (r && F.recipeFits(def, m.recipe) && r.in[item]){
       const lim = r.in[item] * cap + F.bufBonus(S);
       if ((m.inBuf[item] || 0) < lim){ m.inBuf[item] = (m.inBuf[item] || 0) + 1; return true; }
     }
@@ -678,6 +683,7 @@ function machineCanStart(S, m, def){
   if (F.AUTO_RECIPES[def.fam]){
     for (const rk of F.AUTO_RECIPES[def.fam]){
       if (!F.recipeUnlocked(S, rk)) continue;
+      if (!F.recipeFits(def, rk)) continue;   // too weak a machine for this material
       const rc = F.RECIPES[rk];
       let ok = true;
       for (const k in rc.in) if ((m.inBuf[k] || 0) < rc.in[k]) { ok = false; break; }
@@ -685,7 +691,7 @@ function machineCanStart(S, m, def){
     }
   } else {
     const rk = m.recipe;
-    if (rk && F.recipeUnlocked(S, rk)){
+    if (rk && F.recipeUnlocked(S, rk) && F.recipeFits(def, rk)){
       const rc = F.RECIPES[rk];
       let ok = true;
       for (const k in rc.in) if ((m.inBuf[k] || 0) < rc.in[k]) { ok = false; break; }
@@ -877,7 +883,12 @@ F.tick = function(S, dt){
 function minerWants(S, e){
   if (e.outTotal >= 4 + F.bufBonus(S)) return false;
   const i = idx(S, e.x, e.y);
-  return S.oreType[i] !== 0 && S.oreType[i] !== F.OIL_TYPE && S.oreAmt[i] > 0;
+  const t = S.oreType[i];
+  if (t === 0 || t === F.OIL_TYPE || S.oreAmt[i] <= 0) return false;
+  // hard ores (titanium) need a hard drill — a weaker one sits idle on the seam
+  const ore = F.ORES[t], def = F.BUILDINGS[e.key];
+  if (ore && (ore.minTier || 1) > (def.tier || 1)) return false;
+  return true;
 }
 
 /* every finished operation grinds the machine down a little. At the end of
