@@ -422,7 +422,7 @@ F.MILESTONES = [
     recap:'What burns is tamed. Fuel cells hold the fire for later.' },
   { id:'mChrome', name:'Chromework',
     flavor:'A teal ore glitters in the deep rings — chromite, harder than steel and twice as proud. It will not melt in any furnace you own.',
-    req:{ chromsteel:90 },
+    req:{ chromsteel:200 },
     unlocks:[],
     grant:{},
     hint:'Research <b>Chromeworks</b> in the tree: it builds the Chrome furnace, the only furnace hot enough for chromite. Chromite + coal → chrome, then chrome + steel → chromsteel — the metal every last machine is built from.',
