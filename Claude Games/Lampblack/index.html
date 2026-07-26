@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LAMPBLACK — a stealth-heist roguelite</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #070a14; overflow: hidden;
+    font-family: Georgia, 'Times New Roman', serif; color: #c8ccd8; }
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  #screen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(7,10,20,0.92); overflow: auto; z-index: 10; }
+  .panel { background: #10131f; border: 1px solid #2a3146; padding: 24px 32px; max-width: 560px;
+    max-height: 92vh; overflow: auto; box-shadow: 0 0 60px rgba(255,184,92,0.06); }
+  .panel.wide { max-width: 860px; }
+  h1 { color: #ffdca8; letter-spacing: 6px; margin: 0 0 4px; font-weight: normal; }
+  h2 { color: #ffdca8; font-weight: normal; letter-spacing: 2px; margin-top: 0; }
+  h3 { color: #b8925a; font-weight: normal; margin: 6px 0; }
+  .tag { color: #6a7288; font-style: italic; margin-top: 0; }
+  .small { color: #6a7288; font-size: 13px; }
+  .keys { border-top: 1px solid #2a3146; padding-top: 8px; }
+  button { background: #1c2233; color: #e6d5ae; border: 1px solid #3a4258; padding: 10px 16px;
+    font-family: inherit; font-size: 15px; cursor: pointer; margin: 4px 2px; display: block; width: 100%; text-align: left; }
+  button:hover:not(:disabled) { background: #262d42; border-color: #c9a45c; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .row { display: flex; gap: 8px; } .row button { flex: 1; }
+  .jobs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .job { border: 1px solid #3a4258; padding: 12px; cursor: pointer; background: #141827; line-height: 1.5; }
+  .job:hover { border-color: #c9a45c; background: #1a1f31; }
+  .job .score { color: #ffd27a; }
+  .magpie { color: #e6d5ae; font-style: italic; border-left: 3px solid #c9a45c; padding-left: 10px; }
+  .ledger .acc { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; border-bottom: 1px solid #1c2233; }
+  .ledger .acc span { color: #c9a45c; }
+  .ledger .stub { opacity: 0.35; } /* unearned accolades stay visible — mastery taught by absence */
+  .shoprow { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+  .shoprow button { font-size: 13px; }
+  .magpieShop { position: relative; padding-left: 130px; }
+  .bustWrap { position: absolute; left: 16px; top: 20px; border: 1px solid #3a4258; }
+  #bust { display: block; image-rendering: pixelated; width: 96px; height: 96px; }
+  .paper { background: #e6d5ae; color: #26201a; }
+  .paper .masthead { text-align: center; letter-spacing: 8px; border-bottom: 3px double #26201a; padding-bottom: 6px; }
+  .paper .headline { color: #26201a; font-size: 26px; line-height: 1.2; letter-spacing: 0; }
+  .paper .columns { column-count: 2; column-gap: 22px; font-size: 13px; }
+  .paper .brief { border-bottom: 1px solid #c9b98e; padding-bottom: 6px; }
+  .paper .small { color: #5a4c34; }
+  .paper button { background: #26201a; color: #e6d5ae; }
+  @media (max-width: 1023px), (max-height: 599px) {
+    body::after { content: 'Lampblack wants at least 1024×600, dearie.'; position: fixed; inset: 0;
+      background: #070a14; color: #e6d5ae; display: flex; align-items: center; justify-content: center; z-index: 99; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="screen"></div>
+<script src="js/core.js"></script>
+<script src="js/content.js"></script>
+<script src="js/gen.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/guards.js"></script>
+<script src="js/player.js"></script>
+<script src="js/run.js"></script>
+<script src="js/teach.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/art.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

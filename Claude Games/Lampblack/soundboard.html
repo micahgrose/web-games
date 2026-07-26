@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LAMPBLACK — soundboard (feel-review harness)</title>
+<style>
+  body { background: #070a14; color: #c8ccd8; font-family: Georgia, serif; margin: 0; padding: 24px; }
+  h1 { color: #ffdca8; letter-spacing: 4px; font-weight: normal; }
+  h2 { color: #b8925a; font-weight: normal; margin: 22px 0 8px; border-bottom: 1px solid #2a3146; }
+  .grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: #1c2233; color: #e6d5ae; border: 1px solid #3a4258; padding: 8px 14px;
+    font-family: inherit; font-size: 14px; cursor: pointer; }
+  button:hover { border-color: #c9a45c; }
+  button.active { background: #3a3222; border-color: #ffdca8; }
+  .hint { color: #6a7288; font-style: italic; }
+  .knob { display: inline-block; margin-right: 18px; }
+  input[type=range] { vertical-align: middle; }
+</style>
+</head>
+<body>
+<h1>LAMPBLACK SOUNDBOARD</h1>
+<p class="hint">Every WebAudio recipe in the game, by name (DESIGN §4.5). Click anything — first click unlocks audio.
+Report by name: “the creak is too shrill”, “snore too fast”, etc.</p>
+<div class="knob">pan <input type="range" id="pan" min="-100" max="100" value="0"></div>
+<div class="knob">gain <input type="range" id="gain" min="0" max="100" value="80"></div>
+<div class="knob">muffle (closed-door lowpass) <input type="range" id="cutoff" min="600" max="8000" value="8000"></div>
+<div id="board"></div>
+<h2>THE LEITMOTIF — [D5 F5 E5 A4 D5], D minor, lazy swing, 84bpm</h2>
+<div class="grid">
+  <button id="leit">Whistle the theme</button>
+  <button id="leitminor">Theme + minor sting (Morning Edition, loss)</button>
+</div>
+<h2>MUSIC — 4 alertness layers, all always running, 3s crossfade</h2>
+<div class="grid" id="stages"></div>
+<div class="grid" style="margin-top:6px"><button id="chase">Toggle chase swell (+6dB tremolo)</button></div>
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script>
+  var audio = LB.Audio();
+  function sp() {
+    return { pan: +document.getElementById('pan').value / 100,
+      gain: +document.getElementById('gain').value / 100,
+      cutoff: +document.getElementById('cutoff').value < 7900 ? +document.getElementById('cutoff').value : 0 };
+  }
+  function ensure() { if (!audio.ok) { audio.init(); audio.resume(); } }
+  var groups = {
+    'Footsteps by material': ['step_carpet', 'step_wood', 'step_marble', 'step_glass', 'creak'],
+    'The signature verb': ['snuff_fwip', 'relight_foomp'],
+    'Hands: locks & safes': ['pick_tick', 'pick_success', 'dial_tick', 'dial_stop_thunk', 'drill'],
+    'Windows & doors': ['glass_cut', 'glass_smash', 'door_force', 'door_creakopen', 'bell_trap'],
+    'Rough work': ['blackjack_thump', 'body_drag', 'oil_slip', 'smoke_burst', 'gas_hiss', 'dumbwaiter_clunk'],
+    'Lures': ['coin_lure', 'songbird'],
+    'Alarm class': ['whistle_blast', 'scream'],
+    'Guard tells': ['whistle_note', 'snore_in', 'snore_out', 'key_jangle', 'dog_pant', 'dog_snuffle', 'dog_bark',
+      'order_bark', 'rifle_cock', 'tough_hum', 'civ_murmur', 'gasp'],
+    'OLD COPPER': ['copper_boot_heavy', 'copper_boot_light', 'shk_clack'],
+    'UI & stingers': ['ui_coin', 'paper_rustle', 'jackdaw_chirp', 'stinger_brass']
+  };
+  var board = document.getElementById('board');
+  Object.keys(groups).forEach(function (g) {
+    var h = document.createElement('h2'); h.textContent = g; board.appendChild(h);
+    var div = document.createElement('div'); div.className = 'grid'; board.appendChild(div);
+    groups[g].forEach(function (name) {
+      var b = document.createElement('button');
+      b.textContent = name;
+      b.onclick = function () { ensure(); audio.play(name, sp()); };
+      div.appendChild(b);
+    });
+  });
+  document.getElementById('leit').onclick = function () { ensure(); audio.playLeitmotif(sp(), false); };
+  document.getElementById('leitminor').onclick = function () { ensure(); audio.playLeitmotif(sp(), true); };
+  var stagesDiv = document.getElementById('stages');
+  ['CALM (crackle + harbor bell + pad)', 'WARY (+ brushed hats + pizz bass)', 'ALARMED (+ tremolo strings)', 'LOCKDOWN (+ timpani heartbeat + pedal whine)']
+    .forEach(function (label, i) {
+      var b = document.createElement('button');
+      b.textContent = label;
+      b.onclick = function () {
+        ensure(); if (!audio.music) audio.startMusic();
+        audio.setStage(i);
+        Array.prototype.forEach.call(stagesDiv.children, function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+      };
+      stagesDiv.appendChild(b);
+    });
+  var chaseOn = false;
+  document.getElementById('chase').onclick = function () {
+    ensure(); if (!audio.music) audio.startMusic();
+    chaseOn = !chaseOn; audio.setChase(chaseOn);
+    this.classList.toggle('active', chaseOn);
+  };
+</script>
+</body>
+</html>
