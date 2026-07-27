@@ -66,6 +66,91 @@ try { audio.play('snuff_fwip', {}); audio.setStage(2); audio.playLeitmotif({}, t
 assert(!threw, 'audio calls are safe when uninitialized');
 assert(Object.keys(audio.recipes).length >= 40, '>=40 named recipes for the soundboard (got ' + Object.keys(audio.recipes).length + ')');
 
+// ---------- audio: every recipe actually BUILDS under a stub AudioContext ----------
+// Without this, recipe bodies never execute in tests (init() bails with no
+// AudioContext) — 47 synthesis routines would ship completely unexercised.
+section('audio recipes (stub AudioContext)');
+(function () {
+  var started = 0, scheduled = 0, negGain = 0;
+  function Param(v) {
+    this.value = v === undefined ? 1 : v;
+    this._pts = [];
+  }
+  ['setValueAtTime', 'linearRampToValueAtTime', 'exponentialRampToValueAtTime', 'setTargetAtTime'].forEach(function (fn) {
+    Param.prototype[fn] = function (v, t) {
+      if (typeof v !== 'number' || isNaN(v)) throw new Error(fn + ' got non-number: ' + v);
+      if (typeof t !== 'number' || isNaN(t) || t < 0) throw new Error(fn + ' got bad time: ' + t);
+      if (fn === 'exponentialRampToValueAtTime' && v === 0) throw new Error('exponential ramp to 0 (silently fails in browsers)');
+      this._pts.push([v, t]); scheduled++;
+      return this;
+    };
+  });
+  function Node(kind) {
+    this.kind = kind; this.gain = new Param(1); this.frequency = new Param(440);
+    this.Q = new Param(1); this.pan = new Param(0); this.detune = new Param(0);
+    this.type = 'sine'; this.buffer = null; this.loop = false;
+    this.threshold = new Param(-24); this.knee = new Param(30); this.ratio = new Param(12);
+    this.attack = new Param(0.003); this.release = new Param(0.25);
+  }
+  Node.prototype.connect = function (d) {
+    if (!d) throw new Error('connect(undefined) from ' + this.kind);
+    return d;
+  };
+  Node.prototype.disconnect = function () { };
+  Node.prototype.start = function (t, off) {
+    if (t !== undefined && (isNaN(t) || t < 0)) throw new Error(this.kind + '.start bad time ' + t);
+    if (off !== undefined && (isNaN(off) || off < 0)) throw new Error(this.kind + '.start bad offset ' + off);
+    started++;
+  };
+  Node.prototype.stop = function (t) {
+    if (t !== undefined && (isNaN(t) || t < 0)) throw new Error(this.kind + '.stop bad time ' + t);
+  };
+  function StubCtx() {
+    this.currentTime = 12.5; this.sampleRate = 44100; this.state = 'running';
+    this.destination = new Node('destination');
+  }
+  ['createGain', 'createBiquadFilter', 'createOscillator', 'createBufferSource',
+    'createStereoPanner', 'createDynamicsCompressor'].forEach(function (fn) {
+      StubCtx.prototype[fn] = function () { return new Node(fn); };
+    });
+  StubCtx.prototype.createBuffer = function (ch, len) {
+    if (!len || len <= 0) throw new Error('createBuffer with length ' + len);
+    var data = new Float32Array(len);
+    return { length: len, getChannelData: function () { return data; } };
+  };
+  var savedWindow = G.window;
+  G.window = { AudioContext: StubCtx };
+  var A2 = LB.Audio();
+  assert(A2.init() === true, 'audio initializes against an AudioContext');
+  var names = Object.keys(A2.recipes);
+  assert(names.length >= 40, names.length + ' named recipes (soundboard coverage)');
+  var broke = [];
+  names.forEach(function (n) {
+    // exercise each recipe dry, muffled, panned, and (for tells) with a pitch arg
+    [{}, { pan: -0.8, gain: 0.4, cutoff: 900 }, { pan: 1, gain: 1, bus: 'tells' }].forEach(function (sp) {
+      try { A2.recipes[n](sp, n === 'whistle_note' ? LB.noteHz('F5') : undefined); }
+      catch (e) { if (broke.indexOf(n) < 0) broke.push(n + ': ' + e.message); }
+    });
+  });
+  assert(broke.length === 0, 'every recipe builds its graph without throwing' +
+    (broke.length ? ' — BROKEN: ' + broke.join(' | ') : ''));
+  assert(started > names.length, 'recipes actually start sources (' + started + ' starts, ' + scheduled + ' scheduled params)');
+  // the leitmotif must schedule its five notes on the audio clock, not setTimeout
+  var before = started;
+  A2.playLeitmotif({}, true);
+  assert(started - before >= 5, 'leitmotif schedules >=5 sources on the audio clock (got ' + (started - before) + ')');
+  // music: all four layers exist and crossfade without restarting
+  A2.startMusic();
+  assert(!!A2.music && Object.keys(A2.music.layers).length === 4, '4 music layers running');
+  var padRef = A2.music.pad0;
+  A2.setStage(2);
+  assert(A2.music.stage === 2 && A2.music.pad0 === padRef, 'stage change crossfades without restarting layers');
+  A2.setChase(true); A2.setChase(false);
+  A2.stopMusic();
+  assert(A2.music === null, 'music stops cleanly');
+  G.window = savedWindow;
+})();
+
 // ---------- art construction rules ----------
 section('art');
 LB.Art.init();
