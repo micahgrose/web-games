@@ -1277,6 +1277,7 @@ function buildSelPanel(e){
     html += `<div data-bufs>${bufsFor(e)}</div>`;
   }
   if (e.kind === 'pump'){
+    html += row('Draw rate', `${(def.rate * F.pumpMul(S)).toFixed(2)} crude/s`);
     html += row('Tank', dv.tank, 'tank');
     html += row('Power draw', def.power + ' P');
   }
@@ -2083,7 +2084,8 @@ const TREE_LANES = [
     [1, 'tunnels', null, 'deepTunnels'],
     [1, 'depots', 'massStorage'],
     [1, 'platforms'],
-    [2, 'pumpjacks', 'reservoirs']],
+    [2, 'pumpjacks', 'reservoirs'],
+    [2, 'up:pumping']],
   ['Production',
     [1, 'up:metallurgy'],
     [1, 'up:fabrication'],

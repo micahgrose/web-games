@@ -1019,7 +1019,7 @@ function tickPump(S, e, def, dt, ratio){
   }
   e.active = false;
   if (oil != null && e.tank < 30 && ratio > 0){
-    const drawn = Math.min(def.rate * ratio * dt, 30 - e.tank);
+    const drawn = Math.min(def.rate * F.pumpMul(S) * ratio * dt, 30 - e.tank);
     e.tank += drawn;   // seeps are endless
     e.active = drawn > 0;
     // wear accrues per whole unit of crude drawn

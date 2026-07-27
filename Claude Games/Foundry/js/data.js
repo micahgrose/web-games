@@ -863,6 +863,8 @@ F.UPGRADES = {
     costs:[ {copperIngot:20, wire:10}, {plate:15, circuit:5}, {glass:12, circuit:12}, {steel:15, plastic:10}, {advCircuit:12, frame:4} ] },
   durability: { name:'Durability',  desc:'All drills and machines last +16% longer before wearing out per rank. At rank V, all machines become immortal and nothing wears out.', per:.16, max:5,
     costs:[ {plate:25, gear:20}, {steel:20, circuit:10}, {steel:40, motor:12}, {advCircuit:12, plastic:20}, {processor:5, frame:5} ] },
+  pumping:    { name:'Deep pumping', desc:'All pumpjacks draw crude +18% faster per rank.', per:.18, max:5,
+    costs:[ {gear:15, plate:10}, {steel:15, circuit:8}, {motor:12, plastic:10}, {motor:20, advCircuit:8}, {processor:5, frame:5} ] },
 };
 
 /* Upgrade rank costs compound like the tech tree — triple per rank — and
@@ -884,6 +886,7 @@ F.asmMul    = S => 1 + F.upRank(S,'fabrication')* F.UPGRADES.fabrication.per;
 F.powerMul  = S => 1 + F.upRank(S,'gridOutput') * F.UPGRADES.gridOutput.per;
 F.powerUseMul = S => Math.max(.2, 1 - F.upRank(S,'efficiency') * F.UPGRADES.efficiency.per);
 F.handMul   = S => 1 + F.upRank(S,'prospecting')* F.UPGRADES.prospecting.per;
+F.pumpMul   = S => 1 + F.upRank(S,'pumping')    * F.UPGRADES.pumping.per;
 F.bufBonus  = S => F.upRank(S,'capacitors') * 2;
 F.lifeMul   = S => 1 + F.upRank(S,'durability') * F.UPGRADES.durability.per;
 
