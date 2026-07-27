@@ -96,21 +96,39 @@ LB.Audio = function () {
     c.start(t); c.stop(t + dur); m.start(t); m.stop(t + dur);
   }
 
-  // A creak is not a note: high squeaky saw grains with irregular gaps, and
-  // little low "undertone breaks" poking through between them (user audit).
+  // A creak is not a note (user audit r1+r2): many FAST high squeaky grains
+  // RISING in pitch, undertone breaks between, and a big drop at the very end.
   function creakGrains(sp, g, stretch) {
-    var t = 0, n = 4 + Math.floor(Math.random() * 2);
+    var t = 0, n = 7 + Math.floor(Math.random() * 3);
     for (var i = 0; i < n; i++) {
-      (function (i, t) {
+      (function (i, t, last) {
         setTimeout(function () {
           if (!A.ok) return;
-          var f0 = 980 - i * 55 + Math.random() * 90;
-          tone(sp2(sp, g * (0.5 + Math.random() * 0.5)), 0.05 + Math.random() * 0.04, 'sawtooth', f0, f0 - 140);
-          if (i % 2 === 1) tone(sp2(sp, g * 0.22), 0.04, 'square', 175 + Math.random() * 45, 155);
+          if (last) { tone(sp2(sp, g * 0.8), 0.09, 'sawtooth', 520, 230); return; } // the end: drop a LOT
+          var f0 = 680 + (i / n) * 520 + Math.random() * 60; // rising
+          tone(sp2(sp, g * (0.45 + Math.random() * 0.4)), 0.035 + Math.random() * 0.02, 'sawtooth', f0, f0 + 60);
+          if (i % 3 === 2) tone(sp2(sp, g * 0.2), 0.03, 'square', 180 + Math.random() * 40, 165);
         }, t * 1000);
-      })(i, t);
-      t += (0.045 + Math.random() * 0.05) * stretch;
+      })(i, t, i === n - 1);
+      t += (0.028 + Math.random() * 0.022) * stretch;
     }
+  }
+  // Guttural undertone: low saw roughened by ~28Hz amplitude modulation.
+  function growl(sp, g, dur, f0) {
+    if (!A.ok) return;
+    var t = A.ctx.currentTime;
+    var o = A.ctx.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.linearRampToValueAtTime(f0 * 0.8, t + dur);
+    var f = A.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 350;
+    var e = A.ctx.createGain();
+    e.gain.setValueAtTime(g, t);
+    e.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    var am = A.ctx.createOscillator(); am.frequency.value = 28;
+    var ag = A.ctx.createGain(); ag.gain.value = g * 0.6;
+    am.connect(ag); ag.connect(e.gain);
+    o.connect(f); f.connect(e); e.connect(out(sp2(sp, 1), dur));
+    o.start(t); o.stop(t + dur); am.start(t); am.stop(t + dur);
   }
 
   // ---------- foley recipes (§4.5) — each named, each soundboard-addressable ----------
@@ -138,7 +156,7 @@ LB.Audio = function () {
     pick_tick: function (sp) { envNoise(sp2(sp, 1.0), 0.03, 'bandpass', 1100, 7); tone(sp2(sp, 0.5), 0.02, 'square', 1600, 1500); },
     pick_success: function (sp) { fmPing(sp2(sp, 0.5), 0.25, 2400, 2.1, 1.5); },
     dial_tick: function (sp) { envNoise(sp2(sp, 0.85), 0.025, 'bandpass', 1300, 8); },
-    dial_stop_thunk: function (sp) { tone(sp2(sp, 0.7), 0.09, 'sine', 350, 320); }, // the felt-click — the audio IS the interface
+    dial_stop_thunk: function (sp) { tone(sp2(sp, 0.22), 0.07, 'sine', 320, 290); }, // the felt-click — subtle, you LISTEN for it
     drill: function (sp) { // quiet high whine, sustained (~2.5s), not a half-second buzz
       if (!A.ok) return;
       var t = A.ctx.currentTime, dur = 2.5;
@@ -149,8 +167,8 @@ LB.Audio = function () {
       var f = A.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 3000; f.Q.value = 2;
       var e = A.ctx.createGain();
       e.gain.setValueAtTime(0.0001, t);
-      e.gain.linearRampToValueAtTime(0.2, t + 0.15);
-      e.gain.setValueAtTime(0.2, t + dur - 0.25);
+      e.gain.linearRampToValueAtTime(0.32, t + 0.15);
+      e.gain.setValueAtTime(0.32, t + dur - 0.25);
       e.gain.exponentialRampToValueAtTime(0.001, t + dur);
       o.connect(f); f.connect(e); e.connect(out(sp2(sp, 1), dur));
       o.start(t); o.stop(t + dur); v.start(t); v.stop(t + dur);
@@ -161,10 +179,11 @@ LB.Audio = function () {
         if (A.ok) envNoise(sp2(sp, 0.35 + Math.random() * 0.25), 0.04 + Math.random() * 0.05, 'bandpass', 2400 + Math.random() * 900, 12);
       }, i * 70 + Math.random() * 30);
     },
-    glass_smash: function (sp) { // crack — KSHHHH — light tinkling
-      envNoise(sp2(sp, 0.9), 0.03, 'highpass', 800, 1);
-      tone(sp2(sp, 0.5), 0.06, 'sine', 180, 90);
-      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.8), 0.35, 'highpass', 2000, 1); }, 30);
+    glass_smash: function (sp) { // CRACK (splitting, not slapping) — KSHHHH — light tinkling
+      envNoise(sp2(sp, 1.0), 0.012, 'bandpass', 1800, 6);
+      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.7), 0.02, 'bandpass', 1400, 5); }, 22);
+      tone(sp2(sp, 0.25), 0.05, 'sine', 160, 90);
+      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.8), 0.35, 'highpass', 2000, 1); }, 45);
       for (var i = 0; i < 6; i++) setTimeout(function () {
         if (A.ok) fmPing(sp2(sp, 0.12 + Math.random() * 0.1), 0.12, 3000 + Math.random() * 3000, 3.7, 2);
       }, 250 + i * 90 + Math.random() * 60);
@@ -177,7 +196,12 @@ LB.Audio = function () {
     door_creakopen: function (sp) { creakGrains(sp, 0.7, 1.8); },
     bell_trap: function (sp) { for (var i = 0; i < 4; i++) setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.6), 0.4, 2800, 1.4, 3); }, i * 130); },
     blackjack_thump: function (sp) { tone(sp2(sp, 0.9), 0.1, 'sine', 90, 60); envNoise(sp2(sp, 0.4), 0.09, 'lowpass', 600, 1); },
-    body_drag: function (sp) { envNoise(sp2(sp, 0.4), 1.1, 'lowpass', 300, 1, 0.25); }, // one long scrape; game throttles so it sustains, never machine-guns
+    body_drag: function (sp) { // SCRAPE over whoosh: mid-high scratchy grains on a quiet low bed
+      for (var i = 0; i < 6; i++) setTimeout(function () {
+        if (A.ok) envNoise(sp2(sp, 0.3 + Math.random() * 0.15), 0.22, 'bandpass', 1200 + Math.random() * 600, 4, 0.05);
+      }, i * 175 + Math.random() * 40);
+      envNoise(sp2(sp, 0.15), 1.1, 'lowpass', 250, 1, 0.25);
+    },
     coin_lure: function (sp) { for (var i = 0; i < 3; i++) setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.4), 0.15, 4200 + Math.random() * 800, 3.7, 2); }, i * 70); },
     songbird: function (sp) { for (var i = 0; i < 3; i++) setTimeout(function () { if (A.ok) tone(sp2(sp, 0.35), 0.07, 'sine', 2600 + i * 300, 3100 + i * 200); }, i * 110); },
     smoke_burst: function (sp) { envNoise(sp2(sp, 0.7), 0.4, 'lowpass', 500, 1, 0.01); },
@@ -185,26 +209,56 @@ LB.Audio = function () {
     oil_slip: function (sp) { envNoise(sp2(sp, 0.7), 0.35, 'highpass', 3200, 1, 0.01); }, // "ssssst"
     dumbwaiter_clunk: function (sp) { tone(sp2(sp, 0.7), 0.1, 'sine', 140, 90); envNoise(sp2(sp, 0.3), 0.2, 'lowpass', 350, 1); },
     // alarm class
-    whistle_blast: function (sp) { // shrill alarm wavering on ONE pitch + rumble undertone
+    whistle_blast: function (sp) { // shrill single-pitch waver + LOW GUTTURAL undertone
       tone(sp2(sp, 0.9), 0.65, 'square', 2600, 2600, { rate: 11, depth: 40 });
-      envNoise(sp2(sp, 0.25), 0.65, 'lowpass', 150, 1, 0.05);
+      growl(sp, 0.3, 0.65, 80);
     },
-    scream: function (sp) { // wavering high wail + breath rasp + low undertone
+    scream: function (sp) { // wavering wail + breath rasp + guttural low
       tone(sp2(sp, 0.8), 0.55, 'sawtooth', 950, 1150, { rate: 9, depth: 90 });
       envNoise(sp2(sp, 0.35), 0.5, 'bandpass', 1400, 1, 0.02);
-      envNoise(sp2(sp, 0.2), 0.5, 'lowpass', 200, 1, 0.05);
+      growl(sp, 0.28, 0.5, 90);
     },
     // tells (loops assembled from these one-shots)
-    whistle_note: function (sp, hz) { tone(sp2(sp, 0.35), 0.28, 'triangle', hz || 587, hz || 587, { rate: 5.5, depth: 6 }); },
-    snore_in: function (sp) { envNoise(sp2(sp, 0.4), 0.7, 'lowpass', 350, 1, 0.3); },
+    whistle_note: function (sp, hz) { // much airier: breath noise rides the pitch
+      tone(sp2(sp, 0.26), 0.28, 'triangle', hz || 587, hz || 587, { rate: 5.5, depth: 6 });
+      envNoise(sp2(sp, 0.24), 0.28, 'bandpass', (hz || 587) * 4, 3, 0.05);
+    },
+    snore_in: function (sp) { // inhale + low low clicks underneath
+      envNoise(sp2(sp, 0.4), 0.7, 'lowpass', 350, 1, 0.3);
+      for (var i = 0; i < 4; i++) setTimeout(function () { if (A.ok) tone(sp2(sp, 0.2), 0.025, 'sine', 62, 55); }, 80 + i * 150 + Math.random() * 40);
+    },
     snore_out: function (sp) { envNoise(sp2(sp, 0.25), 0.5, 'lowpass', 250, 1, 0.05); },
-    key_jangle: function (sp) { var n = 4 + Math.floor(Math.random() * 3); for (var i = 0; i < n; i++) setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.3), 0.08, 2000 + Math.random() * 2000, 3.7, 2); }, i * 30); },
-    dog_pant: function (sp) { envNoise(sp2(sp, 0.4), 0.09, 'bandpass', 800, 2); },
-    dog_snuffle: function (sp) { for (var i = 0; i < 2; i++) setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.4), 0.06, 'bandpass', 500, 3); }, i * 90); },
-    dog_bark: function (sp) { tone(sp2(sp, 0.9), 0.15, 'sawtooth', 300, 180); envNoise(sp2(sp, 0.4), 0.12, 'bandpass', 600, 2); },
-    order_bark: function (sp) { tone(sp2(sp, 0.7), 0.18, 'square', 220, 160); envNoise(sp2(sp, 0.3), 0.15, 'bandpass', 900, 1); },
-    rifle_cock: function (sp) { envNoise(sp2(sp, 0.6), 0.02, 'bandpass', 2200, 8); setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.6), 0.03, 'bandpass', 1600, 8); }, 80); },
-    tough_hum: function (sp) { var notes = [196, 233, 175, 220]; tone(sp2(sp, 0.25), 0.4, 'triangle', notes[Math.floor(Math.random() * 4)]); },
+    key_jangle: function (sp) { // clacking tinkle, one pitch region — not a xylophone
+      var base = 3100 + Math.random() * 200;
+      var n = 5 + Math.floor(Math.random() * 3);
+      for (var i = 0; i < n; i++) setTimeout(function () {
+        if (A.ok) envNoise(sp2(sp, 0.35), 0.025, 'bandpass', base + Math.random() * 250 - 125, 14);
+      }, i * 28 + Math.random() * 12);
+    },
+    dog_pant: function (sp) { envNoise(sp2(sp, 0.35), 0.13, 'lowpass', 850, 1, 0.03); }, // short high snore_out
+    dog_snuffle: function (sp) { for (var i = 0; i < 2; i++) setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.8), 0.06, 'bandpass', 500, 3); }, i * 90); },
+    dog_bark: function (sp) { // depth + growling snuffleness, not one note
+      growl(sp, 0.5, 0.22, 110);
+      tone(sp2(sp, 0.8), 0.14, 'sawtooth', 340, 170);
+      envNoise(sp2(sp, 0.5), 0.12, 'bandpass', 700, 2);
+      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.3), 0.07, 'bandpass', 500, 3); }, 150);
+    },
+    order_bark: function (sp) { // chesty shout: growl under the voice
+      growl(sp, 0.35, 0.25, 95);
+      tone(sp2(sp, 0.7), 0.2, 'square', 230, 150);
+      envNoise(sp2(sp, 0.35), 0.18, 'bandpass', 1100, 1);
+    },
+    rifle_cock: function (sp) { // LOUD mechanical double-clack + metallic ring
+      envNoise(sp2(sp, 1.3), 0.022, 'bandpass', 2200, 8);
+      fmPing(sp2(sp, 0.5), 0.06, 2600, 3.7, 2);
+      setTimeout(function () { if (A.ok) { envNoise(sp2(sp, 1.3), 0.03, 'bandpass', 1600, 8); fmPing(sp2(sp, 0.4), 0.07, 1900, 3.7, 2); } }, 85);
+    },
+    tough_hum: function (sp) { // breathy, like the whistle
+      var notes = [196, 233, 175, 220];
+      var hz = notes[Math.floor(Math.random() * 4)];
+      tone(sp2(sp, 0.2), 0.4, 'triangle', hz);
+      envNoise(sp2(sp, 0.18), 0.4, 'bandpass', hz * 4, 3, 0.08);
+    },
     civ_murmur: function (sp) { for (var i = 0; i < 3; i++) setTimeout(function () { if (A.ok) tone(sp2(sp, 0.12), 0.12, 'sine', 200 + Math.random() * 150); }, i * 140); },
     gasp: function (sp) { envNoise(sp2(sp, 0.5), 0.15, 'highpass', 900, 1, 0.1); },
     // OLD COPPER: heavy/light boot + the shutter
