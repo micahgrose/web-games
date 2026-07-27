@@ -73,6 +73,17 @@ LB.Audio = function () {
     param.linearRampToValueAtTime(peak, t + (attack || 0.004));
     param.exponentialRampToValueAtTime(0.0001, t + dur);
   }
+  // Sustained shape: attack, HOLD, then release. A pure exponential decay makes
+  // every "long" sound audibly much shorter than its nominal duration (the lab
+  // measured a 0.7s whistle as 0.40s of audible sound) and nothing can hold a
+  // steady note — wrong for whistles, screams, alarms.
+  function holdTo(param, t, dur, peak, attack, releaseFrac) {
+    var rel = dur * (releaseFrac || 0.25);
+    param.setValueAtTime(0.0001, t);
+    param.linearRampToValueAtTime(peak, t + (attack || 0.02));
+    param.setValueAtTime(peak, t + Math.max(attack || 0.02, dur - rel));
+    param.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
 
   // Filtered noise burst. at = seconds from now (sample-accurate).
   function noiseHit(sp, dur, type, freq, q, attack, at) {
@@ -166,7 +177,8 @@ LB.Audio = function () {
       lfo.connect(lg); lg.connect(src.frequency); lfo.start(t); lfo.stop(t + dur);
     }
     var e = A.ctx.createGain();
-    decayTo(e.gain, t, dur, o.gain === undefined ? 1 : o.gain, o.attack || 0.012);
+    if (o.hold) holdTo(e.gain, t, dur, o.gain === undefined ? 1 : o.gain, o.attack || 0.012, 0.35);
+    else decayTo(e.gain, t, dur, o.gain === undefined ? 1 : o.gain, o.attack || 0.012);
     var amps = [1, 0.55, 0.25];
     (o.formants || [720, 1180, 2600]).forEach(function (fq, i) {
       var bp = A.ctx.createBiquadFilter(); bp.type = 'bandpass';
@@ -211,24 +223,48 @@ LB.Audio = function () {
         (o.at || 0) + body * (0.2 + k * 0.3) + Math.random() * 0.04);
   }
   // Breathy whistle: noise in a high-Q resonator (physically what a whistle is)
-  // plus a weak pure core. Airy by construction.
+  // plus a pure core and a little breath. Airy, but the LAB caught the balance —
+  // a highpassed air layer swamped the tone (spectral flatness 0.66 = mostly
+  // hiss, so it read as noise rather than a pitch). Air is now band-limited
+  // around the note and much quieter, and the whistle HOLDS instead of decaying.
   function airWhistle(sp, hz, dur, g, vibRate, vibDepth, at) {
     if (!A.ok) return;
     var t = now(at);
     var src = A.ctx.createBufferSource(); src.buffer = noiseBuf(); src.loop = true;
     var bp = A.ctx.createBiquadFilter(); bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(hz, t); bp.Q.value = 26;
+    bp.frequency.setValueAtTime(hz, t); bp.Q.value = 30;
     if (vibRate) {
       var lfo = A.ctx.createOscillator(); lfo.frequency.value = vibRate;
       var lg = A.ctx.createGain(); lg.gain.value = vibDepth || hz * 0.012;
       lfo.connect(lg); lg.connect(bp.frequency); lfo.start(t); lfo.stop(t + dur);
     }
     var e = A.ctx.createGain();
-    decayTo(e.gain, t, dur, g * 5.5, 0.02); // high-Q bandpass loses a lot of level
+    holdTo(e.gain, t, dur, g * 6, 0.02, 0.22); // high-Q bandpass loses a lot of level
     src.connect(bp); bp.connect(e); e.connect(out(sp));
     src.start(t, Math.random() * 1.5); src.stop(t + dur + 0.02);
-    tone(sp2(sp, g * 0.35), dur, 'sine', hz, hz, vibRate ? { rate: vibRate, depth: (vibDepth || hz * 0.012) } : null, at, 0.02);
-    noiseHit(sp2(sp, g * 0.3), dur, 'highpass', hz * 1.6, 0.8, 0.03, at); // the air itself
+    // pure core, held — this is what carries the PITCH
+    if (A.ok) {
+      var o = A.ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(hz, t);
+      if (vibRate) {
+        var l2 = A.ctx.createOscillator(); l2.frequency.value = vibRate;
+        var g2 = A.ctx.createGain(); g2.gain.value = vibDepth || hz * 0.012;
+        l2.connect(g2); g2.connect(o.frequency); l2.start(t); l2.stop(t + dur);
+      }
+      var e2 = A.ctx.createGain();
+      holdTo(e2.gain, t, dur, g * 0.75, 0.02, 0.22);
+      o.connect(e2); e2.connect(out(sp2(sp, 1)));
+      o.start(t); o.stop(t + dur + 0.02);
+    }
+    // breath, coloured by the note rather than broadband hiss
+    if (A.ok) {
+      var ns = A.ctx.createBufferSource(); ns.buffer = noiseBuf(); ns.loop = true;
+      var nb = A.ctx.createBiquadFilter(); nb.type = 'bandpass';
+      nb.frequency.value = hz * 2; nb.Q.value = 1.3;
+      var ne = A.ctx.createGain();
+      holdTo(ne.gain, t, dur, g * 0.5, 0.03, 0.22);
+      ns.connect(nb); nb.connect(ne); ne.connect(out(sp2(sp, 1)));
+      ns.start(t, Math.random() * 1.5); ns.stop(t + dur + 0.02);
+    }
   }
   function sp2(sp, gain, bus) {
     sp = sp || {};
@@ -262,8 +298,12 @@ LB.Audio = function () {
     // ----- hands -----
     pick_tick: function (sp) { noiseHit(sp2(sp, 1.0), 0.028, 'bandpass', 1150, 7, 0.001); tone(sp2(sp, 0.4), 0.02, 'square', 1700, 1500, null, 0, 0.001); },
     pick_success: function (sp) { fmPing(sp2(sp, 0.5), 0.25, 2400, 2.1, 1.5, 0); },
-    dial_tick: function (sp) { noiseHit(sp2(sp, 0.85), 0.022, 'bandpass', 1350, 8, 0.001); },
-    dial_stop_thunk: function (sp) { tone(sp2(sp, 0.24), 0.07, 'sine', 315, 285, null, 0, 0.004); }, // subtle — you LISTEN for it
+    // Lab finding: raising a high-Q bandpass's gain barely raises its LEVEL —
+    // dial_tick measured 14dB under pick_tick despite similar gain numbers, and
+    // the "subtle" thunk measured 8dB LOUDER than the tick it hides between.
+    // The tick now carries a tonal layer; the thunk is genuinely under it.
+    dial_tick: function (sp) { noiseHit(sp2(sp, 0.9), 0.022, 'bandpass', 1350, 8, 0.001); tone(sp2(sp, 0.5), 0.018, 'square', 1500, 1350, null, 0, 0.001); },
+    dial_stop_thunk: function (sp) { tone(sp2(sp, 0.14), 0.07, 'sine', 315, 285, null, 0, 0.004); }, // subtle — you LISTEN for it
     drill: function (sp) { // quiet high whine, sustained ~2.5s
       if (!A.ok) return;
       var t = now(0), dur = 2.5;
@@ -303,8 +343,9 @@ LB.Audio = function () {
     // ----- rough work -----
     blackjack_thump: function (sp) { tone(sp2(sp, 0.9), 0.1, 'sine', 90, 60, null, 0, 0.003); noiseHit(sp2(sp, 0.4), 0.09, 'lowpass', 600, 1); },
     body_drag: function (sp) { // SCRAPE: fast micro-impacts over a faint low bed
-      grains(sp, { count: 34, spread: 1.05, grain: 0.018, f0: 900, f1: 2200, Q: 8, gain: 0.3, jitter: 0.014 });
-      noiseHit(sp2(sp, 0.13), 1.1, 'lowpass', 240, 1, 0.25);
+      // (lab: measured 18dB under the median — a dragged body should be audible)
+      grains(sp, { count: 34, spread: 1.05, grain: 0.018, f0: 900, f1: 2200, Q: 5, gain: 0.85, jitter: 0.014 });
+      noiseHit(sp2(sp, 0.3), 1.1, 'lowpass', 240, 1, 0.25);
     },
     oil_slip: function (sp) { noiseHit(sp2(sp, 0.7), 0.35, 'highpass', 3200, 1, 0.01); }, // "ssssst"
     smoke_burst: function (sp) { noiseHit(sp2(sp, 0.7), 0.4, 'lowpass', 500, 1, 0.01); },
@@ -320,10 +361,10 @@ LB.Audio = function () {
       airWhistle(sp, 2650, 0.7, 0.55, 12, 55, 0);
       growl(sp, 0.34, 0.7, 74, 27, 0);
     },
-    scream: function (sp) { // a VOICE: formants + rasp + guttural chest
-      voice(sp, { dur: 0.6, f0: 880, f1: 1080, formants: [900, 1500, 3000], gain: 0.85,
-        vib: { rate: 9, depth: 85 }, breath: 0.3, Q: 6, attack: 0.03 });
-      growl(sp, 0.3, 0.55, 88, 29, 0.01);
+    scream: function (sp) { // a VOICE: formants + rasp + guttural chest, HELD
+      voice(sp, { dur: 0.8, f0: 880, f1: 1080, formants: [900, 1500, 3000], gain: 0.85,
+        vib: { rate: 9, depth: 85 }, breath: 0.3, Q: 6, attack: 0.03, hold: true });
+      growl(sp, 0.3, 0.7, 88, 29, 0.01);
     },
 
     // ----- tells -----
@@ -362,10 +403,12 @@ LB.Audio = function () {
       voice(sp, { dur: 0.24, f0: 175, f1: 130, formants: [680, 1150, 2500], gain: 0.75, breath: 0.2, Q: 6 });
     },
     rifle_cock: function (sp) { // loud mechanical double-clack + metallic ring
+      // (lab: the first ping's ring overlapped the second clack, so the DOUBLE
+      // read as one event — widened the gap and shortened the first ring)
       noiseHit(sp2(sp, 1.35), 0.02, 'bandpass', 2300, 8, 0.001);
-      fmPing(sp2(sp, 0.5), 0.06, 2600, 3.7, 2, 0);
-      noiseHit(sp2(sp, 1.35), 0.028, 'bandpass', 1650, 8, 0.001, 0.085);
-      fmPing(sp2(sp, 0.42), 0.08, 1900, 3.7, 2, 0.085);
+      fmPing(sp2(sp, 0.5), 0.04, 2600, 3.7, 2, 0);
+      noiseHit(sp2(sp, 1.35), 0.028, 'bandpass', 1650, 8, 0.001, 0.125);
+      fmPing(sp2(sp, 0.42), 0.08, 1900, 3.7, 2, 0.125);
     },
     tough_hum: function (sp) { // breathy, tuneless, off-key
       var notes = [196, 233, 175, 220];
