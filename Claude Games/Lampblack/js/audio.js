@@ -96,42 +96,104 @@ LB.Audio = function () {
     c.start(t); c.stop(t + dur); m.start(t); m.stop(t + dur);
   }
 
+  // A creak is not a note: high squeaky saw grains with irregular gaps, and
+  // little low "undertone breaks" poking through between them (user audit).
+  function creakGrains(sp, g, stretch) {
+    var t = 0, n = 4 + Math.floor(Math.random() * 2);
+    for (var i = 0; i < n; i++) {
+      (function (i, t) {
+        setTimeout(function () {
+          if (!A.ok) return;
+          var f0 = 980 - i * 55 + Math.random() * 90;
+          tone(sp2(sp, g * (0.5 + Math.random() * 0.5)), 0.05 + Math.random() * 0.04, 'sawtooth', f0, f0 - 140);
+          if (i % 2 === 1) tone(sp2(sp, g * 0.22), 0.04, 'square', 175 + Math.random() * 45, 155);
+        }, t * 1000);
+      })(i, t);
+      t += (0.045 + Math.random() * 0.05) * stretch;
+    }
+  }
+
   // ---------- foley recipes (§4.5) — each named, each soundboard-addressable ----------
   A.recipes = {
     // footsteps by material
     step_carpet: function (sp) { envNoise(sp2(sp, 0.35), 0.06, 'bandpass', 200, 1); },
-    step_wood: function (sp) { envNoise(sp2(sp, 0.5), 0.08, 'bandpass', 400, 1.5); },
-    step_marble: function (sp) {
-      envNoise(sp2(sp, 0.5), 0.05, 'bandpass', 900, 4);
-      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.2), 0.05, 'bandpass', 900, 4); }, 90); // slap-back
+    step_wood: function (sp) { // dark knock, not mid-noise (audit: "only wood when muffled")
+      envNoise(sp2(sp, 0.55), 0.07, 'lowpass', 260, 1);
+      tone(sp2(sp, 0.3), 0.06, 'sine', 95, 70);
     },
-    step_glass: function (sp) { for (var i = 0; i < 3; i++) envNoise(sp2(sp, 0.3), 0.03, 'bandpass', 1600 + Math.random() * 900, 5); },
-    creak: function (sp) { tone(sp2(sp, 0.45), 0.12, 'sawtooth', 300, 180); },
-    // the signature verb
-    snuff_fwip: function (sp) { envNoise(sp2(sp, 0.6), 0.08, 'highpass', 1200, 1); tone(sp2(sp, 0.4), 0.1, 'sine', 800, 200); },
-    relight_foomp: function (sp) { envNoise(sp2(sp, 0.5), 0.15, 'lowpass', 400, 1, 0.06); tone(sp2(sp, 0.2), 0.25, 'sine', 90, 70, { rate: 9, depth: 12 }); },
+    step_marble: function (sp) { // single clack, no slap-back double
+      envNoise(sp2(sp, 0.6), 0.03, 'bandpass', 1900, 9);
+      tone(sp2(sp, 0.15), 0.03, 'sine', 620, 540);
+    },
+    step_glass: function (sp) { // tinkle - crunch - tinkle
+      fmPing(sp2(sp, 0.25), 0.08, 3800 + Math.random() * 600, 3.1, 2);
+      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.5), 0.08, 'highpass', 1400, 1); }, 60);
+      setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.2), 0.09, 4400 + Math.random() * 800, 2.7, 2); }, 150);
+    },
+    creak: function (sp) { creakGrains(sp, 0.9, 1.0); },
+    // the signature verb — snuff is the soft foomp; relight is the same, EXTRA quiet
+    snuff_fwip: function (sp) { envNoise(sp2(sp, 0.5), 0.15, 'lowpass', 400, 1, 0.06); tone(sp2(sp, 0.2), 0.25, 'sine', 90, 70, { rate: 9, depth: 12 }); },
+    relight_foomp: function (sp) { envNoise(sp2(sp, 0.09), 0.15, 'lowpass', 400, 1, 0.06); tone(sp2(sp, 0.04), 0.25, 'sine', 90, 70, { rate: 9, depth: 12 }); },
     // hands
-    pick_tick: function (sp) { envNoise(sp2(sp, 0.4), 0.025, 'bandpass', 900, 8); },
+    pick_tick: function (sp) { envNoise(sp2(sp, 1.0), 0.03, 'bandpass', 1100, 7); tone(sp2(sp, 0.5), 0.02, 'square', 1600, 1500); },
     pick_success: function (sp) { fmPing(sp2(sp, 0.5), 0.25, 2400, 2.1, 1.5); },
-    dial_tick: function (sp) { envNoise(sp2(sp, 0.3), 0.02, 'bandpass', 1100, 8); },
+    dial_tick: function (sp) { envNoise(sp2(sp, 0.85), 0.025, 'bandpass', 1300, 8); },
     dial_stop_thunk: function (sp) { tone(sp2(sp, 0.7), 0.09, 'sine', 350, 320); }, // the felt-click — the audio IS the interface
-    drill: function (sp) { tone(sp2(sp, 0.4), 0.5, 'sawtooth', 120, 120); envNoise(sp2(sp, 0.25), 0.5, 'bandpass', 800, 1); },
-    glass_cut: function (sp) { envNoise(sp2(sp, 0.3), 0.4, 'highpass', 3000, 2, 0.1); },
-    glass_smash: function (sp) { for (var i = 0; i < 8; i++) setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.5), 0.06, 'bandpass', 1500 + Math.random() * 2500, 6); }, i * 25); },
-    door_force: function (sp) { tone(sp2(sp, 0.9), 0.12, 'sine', 80, 50); envNoise(sp2(sp, 0.6), 0.15, 'lowpass', 500, 1); },
-    door_creakopen: function (sp) { tone(sp2(sp, 0.25), 0.3, 'sawtooth', 220, 260); },
+    drill: function (sp) { // quiet high whine, sustained (~2.5s), not a half-second buzz
+      if (!A.ok) return;
+      var t = A.ctx.currentTime, dur = 2.5;
+      var o = A.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(2900, t);
+      var v = A.ctx.createOscillator(); v.frequency.value = 26;
+      var vg = A.ctx.createGain(); vg.gain.value = 60;
+      v.connect(vg); vg.connect(o.frequency);
+      var f = A.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 3000; f.Q.value = 2;
+      var e = A.ctx.createGain();
+      e.gain.setValueAtTime(0.0001, t);
+      e.gain.linearRampToValueAtTime(0.2, t + 0.15);
+      e.gain.setValueAtTime(0.2, t + dur - 0.25);
+      e.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(f); f.connect(e); e.connect(out(sp2(sp, 1), dur));
+      o.start(t); o.stop(t + dur); v.start(t); v.stop(t + dur);
+      envNoise(sp2(sp, 0.06), dur, 'highpass', 4000, 1, 0.2);
+    },
+    glass_cut: function (sp) { // scratching grains, not a whoosh
+      for (var i = 0; i < 6; i++) setTimeout(function () {
+        if (A.ok) envNoise(sp2(sp, 0.35 + Math.random() * 0.25), 0.04 + Math.random() * 0.05, 'bandpass', 2400 + Math.random() * 900, 12);
+      }, i * 70 + Math.random() * 30);
+    },
+    glass_smash: function (sp) { // crack — KSHHHH — light tinkling
+      envNoise(sp2(sp, 0.9), 0.03, 'highpass', 800, 1);
+      tone(sp2(sp, 0.5), 0.06, 'sine', 180, 90);
+      setTimeout(function () { if (A.ok) envNoise(sp2(sp, 0.8), 0.35, 'highpass', 2000, 1); }, 30);
+      for (var i = 0; i < 6; i++) setTimeout(function () {
+        if (A.ok) fmPing(sp2(sp, 0.12 + Math.random() * 0.1), 0.12, 3000 + Math.random() * 3000, 3.7, 2);
+      }, 250 + i * 90 + Math.random() * 60);
+    },
+    door_force: function (sp) { // the thump, LOUD, with a crack in it
+      tone(sp2(sp, 1.4), 0.16, 'sine', 70, 40);
+      envNoise(sp2(sp, 0.9), 0.03, 'bandpass', 500, 2);
+      envNoise(sp2(sp, 0.8), 0.18, 'lowpass', 400, 1);
+    },
+    door_creakopen: function (sp) { creakGrains(sp, 0.7, 1.8); },
     bell_trap: function (sp) { for (var i = 0; i < 4; i++) setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.6), 0.4, 2800, 1.4, 3); }, i * 130); },
     blackjack_thump: function (sp) { tone(sp2(sp, 0.9), 0.1, 'sine', 90, 60); envNoise(sp2(sp, 0.4), 0.09, 'lowpass', 600, 1); },
-    body_drag: function (sp) { envNoise(sp2(sp, 0.35), 0.3, 'lowpass', 300, 1, 0.1); },
+    body_drag: function (sp) { envNoise(sp2(sp, 0.4), 1.1, 'lowpass', 300, 1, 0.25); }, // one long scrape; game throttles so it sustains, never machine-guns
     coin_lure: function (sp) { for (var i = 0; i < 3; i++) setTimeout(function () { if (A.ok) fmPing(sp2(sp, 0.4), 0.15, 4200 + Math.random() * 800, 3.7, 2); }, i * 70); },
     songbird: function (sp) { for (var i = 0; i < 3; i++) setTimeout(function () { if (A.ok) tone(sp2(sp, 0.35), 0.07, 'sine', 2600 + i * 300, 3100 + i * 200); }, i * 110); },
     smoke_burst: function (sp) { envNoise(sp2(sp, 0.7), 0.4, 'lowpass', 500, 1, 0.01); },
     gas_hiss: function (sp) { envNoise(sp2(sp, 0.5), 1.8, 'highpass', 2500, 1, 0.2); },
-    oil_slip: function (sp) { tone(sp2(sp, 0.5), 0.3, 'sine', 300, 60); envNoise(sp2(sp, 0.5), 0.2, 'lowpass', 400, 1); },
+    oil_slip: function (sp) { envNoise(sp2(sp, 0.7), 0.35, 'highpass', 3200, 1, 0.01); }, // "ssssst"
     dumbwaiter_clunk: function (sp) { tone(sp2(sp, 0.7), 0.1, 'sine', 140, 90); envNoise(sp2(sp, 0.3), 0.2, 'lowpass', 350, 1); },
     // alarm class
-    whistle_blast: function (sp) { tone(sp2(sp, 0.8), 0.3, 'square', 2400, 2900); envNoise(sp2(sp, 0.3), 0.3, 'highpass', 2000, 1); },
-    scream: function (sp) { envNoise(sp2(sp, 0.4), 0.08, 'highpass', 1200, 1); tone(sp2(sp, 0.6), 0.5, 'square', 800, 1200, { rate: 8, depth: 60 }); },
+    whistle_blast: function (sp) { // shrill alarm wavering on ONE pitch + rumble undertone
+      tone(sp2(sp, 0.9), 0.65, 'square', 2600, 2600, { rate: 11, depth: 40 });
+      envNoise(sp2(sp, 0.25), 0.65, 'lowpass', 150, 1, 0.05);
+    },
+    scream: function (sp) { // wavering high wail + breath rasp + low undertone
+      tone(sp2(sp, 0.8), 0.55, 'sawtooth', 950, 1150, { rate: 9, depth: 90 });
+      envNoise(sp2(sp, 0.35), 0.5, 'bandpass', 1400, 1, 0.02);
+      envNoise(sp2(sp, 0.2), 0.5, 'lowpass', 200, 1, 0.05);
+    },
     // tells (loops assembled from these one-shots)
     whistle_note: function (sp, hz) { tone(sp2(sp, 0.35), 0.28, 'triangle', hz || 587, hz || 587, { rate: 5.5, depth: 6 }); },
     snore_in: function (sp) { envNoise(sp2(sp, 0.4), 0.7, 'lowpass', 350, 1, 0.3); },

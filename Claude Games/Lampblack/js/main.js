@@ -127,8 +127,8 @@ var LB = (typeof LB !== 'undefined') ? LB : {};
     bus.on('lockPicked', function () { audio.play('pick_success', { gain: 0.5 }); });
     bus.on('safeOpened', function () { audio.play('pick_success', { gain: 0.6 }); });
     bus.on('deskOpened', function () { audio.play('pick_success', { gain: 0.4 }); });
-    bus.on('dialTick', function () { audio.play('dial_tick', { gain: 0.35 }); });
-    bus.on('dialNearStop', function () { audio.play('dial_stop_thunk', { gain: 0.5 }); });
+    bus.on('dialTick', function () { audio.play('dial_tick', { gain: 0.7 }); });
+    bus.on('dialNearStop', function () { audio.play('dial_stop_thunk', { gain: 0.8 }); });
     bus.on('dialNotch', function () { audio.play('pick_success', { gain: 0.45 }); });
     bus.on('guardKO', function () { audio.play('blackjack_thump', { gain: 0.7 }); });
     bus.on('doorForced', function () { R.addShake(C.SHAKE.doorForce); });
@@ -149,9 +149,23 @@ var LB = (typeof LB !== 'undefined') ? LB : {};
     bus.on('bribeOffer', function (ev) { pendingBribe = ev.guard; showBribe(); });
     bus.on('vaultOpened', function () { audio.play('door_force', { gain: 0.4 }); });
     bus.on('civilianScream', function () { });
+    // your own hands are audible too — throttled per class so long recipes
+    // (drag scrape, drill whine) SUSTAIN instead of retriggering (user audit)
+    var selfFoley = { bodyDrag: ['body_drag', 1.05, 0.45], pickTick: ['pick_tick', 0.9, 0.5],
+      drillTick: ['drill', 2.45, 0.9], cutTick: ['glass_cut', 0.45, 0.5],
+      disarmTick: ['pick_tick', 0.9, 0.4], pickpocketTick: ['pick_tick', 0.9, 0.3] };
+    var selfLast = {};
     // world sounds reach the player's ears through the same door-graph BFS
     bus.on('sound', function (ev) {
-      if (!audio.ok || !player || ev.src === 'player') return;
+      if (!audio.ok || !player) return;
+      if (ev.src === 'player') {
+        var sf = selfFoley[ev.cls];
+        if (sf) {
+          var now = Date.now() / 1000;
+          if (now - (selfLast[ev.cls] || 0) >= sf[1]) { selfLast[ev.cls] = now; audio.play(sf[0], { gain: sf[2] }); }
+        }
+        return;
+      }
       var recv = ev.prop.at(player.x, player.y);
       if (recv <= 0.2) return;
       var atten = recv / ev.L;
