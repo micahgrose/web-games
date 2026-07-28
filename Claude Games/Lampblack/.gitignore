@@ -1,0 +1,10 @@
+# Dev-only. The GAME ships with zero dependencies and zero assets — everything
+# is procedural. node_modules exists purely for test/audio-lab.js, which needs a
+# WebAudio implementation to render recipes offline:
+#   npm install node-web-audio-api
+node_modules/
+package-lock.json
+package.json
+
+# Offline renders written by `node test/audio-lab.js --wav DIR`
+*.wav

@@ -76,6 +76,31 @@ var N = 1024, HOP = 256;
 var HANN = new Float32Array(N);
 for (var h = 0; h < N; h++) HANN[h] = 0.5 - 0.5 * Math.cos(2 * Math.PI * h / (N - 1));
 
+// Direct f0 estimate by normalized autocorrelation. Spectral centroid is NOT a
+// usable proxy for "does the pitch rise": a source swept 620->1180Hz through a
+// fixed 1500Hz bandpass barely moves its centroid, because the filter — not the
+// oscillator — sets the spectral shape. This measures the period itself.
+function estimateF0(s, from, to) {
+  var minLag = Math.floor(SR / 2500), maxLag = Math.floor(SR / 150);
+  from = Math.max(0, Math.floor(from)); to = Math.min(s.length, Math.floor(to));
+  var n = to - from;
+  if (n < maxLag * 2) return 0;
+  var mean = 0, i;
+  for (i = from; i < to; i++) mean += s[i];
+  mean /= n;
+  var best = 0, bestLag = 0;
+  for (var lag = minLag; lag <= maxLag; lag++) {
+    var num = 0, d1 = 0, d2 = 0;
+    for (i = from; i + lag < to; i++) {
+      var a = s[i] - mean, b = s[i + lag] - mean;
+      num += a * b; d1 += a * a; d2 += b * b;
+    }
+    var c = num / Math.sqrt(d1 * d2 + 1e-12);
+    if (c > best) { best = c; bestLag = lag; }
+  }
+  return (bestLag && best > 0.2) ? SR / bestLag : 0;
+}
+
 function analyze(mono) {
   var peak = 0, sumSq = 0;
   for (var i = 0; i < mono.length; i++) { var a = Math.abs(mono[i]); if (a > peak) peak = a; sumSq += mono[i] * mono[i]; }
@@ -112,26 +137,42 @@ function analyze(mono) {
   // Onsets: flux must run over ALL frames, not just active ones — starting at
   // the first loud frame hides the rise out of silence, so an isolated single
   // hit (a marble step) scored ZERO onsets.
-  var flux = [], prev = null;
+  // prev starts as SILENCE, not null. Every recipe begins at t=0, so its first
+  // FFT frame already contains the attack — with a null seed there is no "before"
+  // frame to rise from and the opening transient is invisible to spectral flux.
+  // (This silently cost every recipe its first onset: a 2-clack rifle read as 1,
+  // a single marble step as 0.)
+  var flux = [], prev = { mag: new Float64Array(N / 2) };
   frames.forEach(function (f) {
     var d = 0;
-    if (prev) for (var b2 = 1; b2 < N / 2; b2++) { var df = f.mag[b2] - prev.mag[b2]; if (df > 0) d += df; }
+    for (var b2 = 1; b2 < N / 2; b2++) { var df = f.mag[b2] - prev.mag[b2]; if (df > 0) d += df; }
     flux.push({ t: f.t, v: d });
     prev = f;
   });
   // Onsets: a peak-relative threshold misses everything after a loud transient
   // (one bright ping hid the crunch grains behind it). Use a LOCAL moving median
   // so quieter events after a big hit still register.
+  var gmax = 0; flux.forEach(function (f) { if (f.v > gmax) gmax = f.v; });
   var onsets = 0, lastOn = -1, W = 12;
-  for (var q = 1; q < flux.length - 1; q++) {
+  for (var q = 0; q < flux.length; q++) {
     var lo = Math.max(0, q - W), hi = Math.min(flux.length, q + W + 1);
     var win = flux.slice(lo, hi).map(function (f) { return f.v; }).sort(function (a2, b3) { return a2 - b3; });
     var localMed = win[Math.floor(win.length / 2)];
-    var gmax = 0; flux.forEach(function (f) { if (f.v > gmax) gmax = f.v; });
-    if (flux[q].v > localMed * 1.7 + gmax * 0.02 &&
-        flux[q].v >= flux[q - 1].v && flux[q].v > flux[q + 1].v &&
-        (lastOn < 0 || flux[q].t - lastOn > 0.025)) { onsets++; lastOn = flux[q].t; }
+    var pv = q > 0 ? flux[q - 1].v : 0;                     // before the start = silence
+    var nx = q < flux.length - 1 ? flux[q + 1].v : 0;
+    // 18ms min separation: a transient's flux spans ~2 frames (11.6ms), but a
+    // dense clatter (key jangle, scrape) places events ~18ms apart and a 25ms
+    // gate merged them into a handful.
+    if (flux[q].v > localMed * 1.7 + gmax * 0.02 && flux[q].v >= pv && flux[q].v > nx &&
+        (lastOn < 0 || flux[q].t - lastOn > 0.018)) { onsets++; lastOn = flux[q].t; }
   }
+  // Pitch trajectory across the BODY of the sound, then the tail separately —
+  // a creak is specced to rise through its body and then drop hard at the end,
+  // so measuring "start third vs end third" would read the drop as a fall.
+  var sFrom = first * SR, span = (last - first) * SR;
+  var f0Early = estimateF0(mono, sFrom + span * 0.10, sFrom + span * 0.30);
+  var f0Late = estimateF0(mono, sFrom + span * 0.60, sFrom + span * 0.80);
+  var f0Tail = estimateF0(mono, sFrom + span * 0.86, sFrom + span * 1.0);
   // pitch wobble of the dominant partial (vibrato / waver detection)
   var pk = loud.map(function (f) { return f.peakHz; });
   var pkMean = pk.reduce(function (a2, b3) { return a2 + b3; }, 0) / Math.max(1, pk.length);
@@ -147,7 +188,8 @@ function analyze(mono) {
     flatness: mean(active, 'flatness'),
     onsets: onsets,
     onsetRate: onsets / Math.max(0.05, last - first),
-    peakHz: pkMean, peakHzSd: pkSd
+    peakHz: pkMean, peakHzSd: pkSd,
+    f0Early: f0Early, f0Late: f0Late, f0Tail: f0Tail
   };
 }
 
@@ -269,7 +311,13 @@ function writeWav(file, mono) {
     if (s.fl && (a.flatness < s.fl[0] || a.flatness > s.fl[1])) why('flatness ' + a.flatness.toFixed(2) + ' outside [' + s.fl + '] (tonal 0 .. noisy 1)');
     if (s.on && (a.onsets < s.on[0] || a.onsets > s.on[1])) why('onsets ' + a.onsets + ' outside [' + s.on + ']');
     if (s.sustain && (a.sustain < s.sustain[0] || a.sustain > s.sustain[1])) why('sustain ' + a.sustain.toFixed(2) + ' outside [' + s.sustain + ']');
-    if (s.rise && !(a.centroidEnd > a.centroidStart * 1.05)) why('pitch does NOT rise (' + Math.round(a.centroidStart) + ' -> ' + Math.round(a.centroidEnd) + 'Hz)');
+    if (s.rise) {
+      if (!a.f0Early || !a.f0Late) warns.push(n + ': could not track f0 to verify the rise');
+      else if (!(a.f0Late > a.f0Early * 1.08))
+        why('pitch does NOT rise through the body (f0 ' + Math.round(a.f0Early) + ' -> ' + Math.round(a.f0Late) + 'Hz)');
+    }
+    if (s.drop && a.f0Late && a.f0Tail && !(a.f0Tail < a.f0Late * 0.85))
+      why('no drop at the end (f0 ' + Math.round(a.f0Late) + ' -> ' + Math.round(a.f0Tail) + 'Hz)');
     if (s.wobble && !(a.peakHzSd > a.peakHz * 0.008)) why('no audible waver (dominant partial sd ' + a.peakHzSd.toFixed(1) + 'Hz on ' + Math.round(a.peakHz) + 'Hz)');
     if (s.quieterThan && results[s.quieterThan]) {
       var other = results[s.quieterThan];

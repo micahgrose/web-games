@@ -201,7 +201,7 @@ LB.Audio = function () {
     bp.frequency.value = o.band || 1500; bp.Q.value = 1.1;
     var e = A.ctx.createGain();
     e.gain.setValueAtTime(0.0001, t);
-    var body = dur * 0.82, sd = body / steps;
+    var body = dur * 0.76, sd = body / steps; // leave real room for the end drop
     for (var i = 0; i < steps; i++) {
       var frac = i / (steps - 1);
       var hz = o.f0 + (o.f1 - o.f0) * frac + (Math.random() - 0.5) * (o.jitter || 70);
@@ -210,10 +210,13 @@ LB.Audio = function () {
       e.gain.setValueAtTime(g * (0.3 + Math.random() * 0.7), t + i * sd);
       e.gain.linearRampToValueAtTime(g * 0.06, t + (i + 0.85) * sd);
     }
-    // the end: drop a LOT
+    // The end: drop a LOT — and STAY AUDIBLE while it drops. Originally the gain
+    // decayed to silence across the same window the pitch fell, so the whole
+    // drop happened below the noise floor: it read as the creak simply stopping.
     osc.frequency.setValueAtTime(o.f1, t + body);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(50, o.fEnd || o.f0 * 0.35), t + dur);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(50, o.fEnd || o.f0 * 0.35), t + dur * 0.97);
     e.gain.setValueAtTime(g * 0.95, t + body);
+    e.gain.linearRampToValueAtTime(g * 0.8, t + dur * 0.95);
     e.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(bp); bp.connect(e); e.connect(out(sp));
     osc.start(t); osc.stop(t + dur + 0.03);
@@ -302,7 +305,9 @@ LB.Audio = function () {
     // dial_tick measured 14dB under pick_tick despite similar gain numbers, and
     // the "subtle" thunk measured 8dB LOUDER than the tick it hides between.
     // The tick now carries a tonal layer; the thunk is genuinely under it.
-    dial_tick: function (sp) { noiseHit(sp2(sp, 0.9), 0.022, 'bandpass', 1350, 8, 0.001); tone(sp2(sp, 0.5), 0.018, 'square', 1500, 1350, null, 0, 0.001); },
+    // ...but not TOO loud: the lab then measured the tick above the rifle bolt,
+    // and this one repeats every quarter-second through the whole minigame.
+    dial_tick: function (sp) { noiseHit(sp2(sp, 0.75), 0.022, 'bandpass', 1350, 8, 0.001); tone(sp2(sp, 0.2), 0.018, 'square', 1500, 1350, null, 0, 0.001); },
     dial_stop_thunk: function (sp) { tone(sp2(sp, 0.14), 0.07, 'sine', 315, 285, null, 0, 0.004); }, // subtle — you LISTEN for it
     drill: function (sp) { // quiet high whine, sustained ~2.5s
       if (!A.ok) return;
