@@ -168,7 +168,7 @@ const B = F.BUILDINGS = {
   platform:{ name:'Platform',        cat:'log', kind:'platform', w:1, h:1, cost:{stone:4, plate:1}, tech:'platforms',
              desc:'A steel-pinned deck over open water. Anything builds on it — belts, machines, even power poles. Drag to deck a crossing; remove it only once it\'s clear.' },
   port:    { name:'Drone depot',     cat:'log', kind:'port', w:2, h:2, power:8, cap:100, cost:{steel:40, processor:5, motor:20, glass:20}, tech:'drones',
-             desc:'Long-haul air freight. Set one depot to PROVIDE an item (feed it by belt), another to REQUEST it — two drones ferry the cargo across any distance, no belts needed.' },
+             desc:'Long-haul air freight. Set one depot to PROVIDE an item (feed it by belt), another to REQUEST it — two drones ferry the cargo across any distance, no belts needed. A REQUEST depot splits its goods evenly across every side that has a conveyor leading directly out — run one, two, or up to eight belts off it.' },
   /* --- extraction --- */
   miner1:  { name:'Burner drill',    cat:'ext', kind:'miner', w:1, h:1, speed:1, mineTime:2.4, fuel:true, cost:{ironOre:6, stone:4}, unlock:0,
              desc:'Chews ore out of a deposit. Burns coal — feed it by belt or by hand.' },

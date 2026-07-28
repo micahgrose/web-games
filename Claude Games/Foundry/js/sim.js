@@ -655,6 +655,27 @@ function outPort(e){
 }
 F.outPort = outPort;
 
+/* Every perimeter tile of a depot that has a conveyor leading DIRECTLY out of
+   it (a belt/tunnel oriented away, or any other acceptor). Returns
+   [px, py, outDir] per tile; request-mode depots split their goods evenly
+   across all of these. A belt pointing back into the depot is fed-in, not
+   led-out, so it's excluded (head-on) — as is a tunnel whose mouth doesn't
+   align with the outward push. */
+function portOutTiles(S, e){
+  const out = [];
+  const add = (px, py, od) => {
+    const t = F.entAt(S, px, py);
+    if (!t || t.broken) return;
+    if ((t.kind === 'belt' || t.kind === 'splitter') && od === OPP(t.dir)) return; // pointing in
+    if (t.kind === 'ubelt' && (t.isExit || od !== t.dir)) return;                   // misaligned mouth
+    out.push([px, py, od]);
+  };
+  for (let i = 0; i < e.w; i++){ add(e.x + i, e.y - 1, 0); add(e.x + i, e.y + e.h, 2); }
+  for (let j = 0; j < e.h; j++){ add(e.x + e.w, e.y + j, 1); add(e.x - 1, e.y + j, 3); }
+  return out;
+}
+F.portOutTiles = portOutTiles;
+
 function tryEject(S, e){
   let any = false;
   for (const k in e.outBuf){
@@ -1134,23 +1155,33 @@ F.techAvailable = function(S, id){
    provider: a belt-fed larder, emptied only by visiting drones.
    requester: owns two drones; each flies to the nearest stocked provider of
    the configured item, loads up to DRONE_CAP, flies home, unloads; the depot
-   dispenses its store out the front like a chest. Depots need grid power to
-   dispatch (airborne drones always finish their run). */
+   then dispenses its store, split evenly across every side that has a conveyor
+   leading directly out (see portOutTiles). Depots need grid power to dispatch
+   (airborne drones always finish their run). */
 function portCenter(e){ return [e.x + e.w / 2, e.y + e.h / 2]; }
 
 function tickPort(S, e, def, dt, ratio){
   if (e.mode === 'request'){
-    // dispense out the front
+    // dispense evenly across every side that has a conveyor leading out
     if (e.total > 0){
-      for (const k in e.store){
-        if (e.store[k] <= 0) continue;
-        const [px, py] = outPort(e);
-        const tgt = F.entAt(S, px, py);
-        if (tgt && F.tryInsert(S, tgt, k, e.dir, 0)){
-          e.store[k]--; e.total--;
-          if (e.store[k] <= 0) delete e.store[k];
+      const outs = portOutTiles(S, e);
+      if (outs.length){
+        const n = outs.length;
+        const start = (e.outRot || 0) % n;
+        // one item to each available exit per tick; rotate the starting exit so
+        // that when goods are scarce the split still comes out even
+        for (let i = 0; i < n; i++){
+          const [px, py, od] = outs[(start + i) % n];
+          let item = null;
+          for (const k in e.store){ if (e.store[k] > 0){ item = k; break; } }
+          if (!item) break;
+          const tgt = F.entAt(S, px, py);
+          if (tgt && F.tryInsert(S, tgt, item, od, 0)){
+            e.store[item]--; e.total--;
+            if (e.store[item] <= 0) delete e.store[item];
+          }
         }
-        break;
+        e.outRot = (start + 1) % n;
       }
     }
     if (!e.portItem) return;

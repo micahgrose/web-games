@@ -614,7 +614,7 @@ function drawEntBody(x, e, s, time, S){
     case 'pole': drawPole(x, e, s, time, S); break;
     case 'pump': drawPump(x, e, s, time, def); break;
     case 'tank': drawTank(x, e, s, def); break;
-    case 'port': drawPortPad(x, e, s, time); break;
+    case 'port': drawPortPad(x, e, s, time, S); break;
     case 'lab': drawLab(x, e, s, time, def); break;
     case 'beacon': drawBeacon(x, e, s, time, S); break;
     case 'core': drawCore(x, e, s, time, S); break;
@@ -1671,7 +1671,7 @@ function drawPump(x, e, s, time, def){
 
 /* ---- THE CORE ---- */
 /* ---- drone depot ---- */
-function drawPortPad(x, e, s, time){
+function drawPortPad(x, e, s, time, S){
   const w = e.w * s, h = e.h * s, cx = w / 2, cy = h / 2;
   const pad = s * .08;
   x.fillStyle = '#2b323d';
@@ -1725,6 +1725,26 @@ function drawPortPad(x, e, s, time){
   x.beginPath(); x.moveTo(s * .22, s * .3); x.lineTo(s * .22, s * .02); x.stroke();
   x.fillStyle = e.mode ? `rgba(110,198,255,${.5 + .4 * Math.sin(time * 3 + e.id)})` : '#5b6674';
   x.beginPath(); x.arc(s * .22, s * .02, s * .05, 0, 7); x.fill();
+  // request depots split out every side with a conveyor leading out — mark them
+  if (S && e.mode === 'request' && F.portOutTiles){
+    x.fillStyle = 'rgba(110,198,255,.9)';
+    for (const [px, py, od] of F.portOutTiles(S, e)){
+      // centre of the footprint edge cell bordering this exit, nudged to the rim
+      const lx = (px - e.x), ly = (py - e.y);
+      let ax, ay;
+      if (od === 0){ ax = (lx + .5) * s; ay = s * .12; }
+      else if (od === 2){ ax = (lx + .5) * s; ay = h - s * .12; }
+      else if (od === 1){ ax = w - s * .12; ay = (ly + .5) * s; }
+      else { ax = s * .12; ay = (ly + .5) * s; }
+      const r = s * .12, dx = [0, 1, 0, -1][od], dy = [-1, 0, 1, 0][od];
+      // outward triangle
+      x.beginPath();
+      x.moveTo(ax + dx * r, ay + dy * r);
+      x.lineTo(ax - dx * r * .6 + dy * r * .7, ay - dy * r * .6 + dx * r * .7);
+      x.lineTo(ax - dx * r * .6 - dy * r * .7, ay - dy * r * .6 - dx * r * .7);
+      x.closePath(); x.fill();
+    }
+  }
 }
 
 /* a drone chassis at screen-space center (bx,by); sc ≈ tile px */
