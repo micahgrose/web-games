@@ -230,6 +230,11 @@ function writeWav(file, mono) {
     if (a.peakDb > -0.5) problems.push(id + ': clipping risk (peak ' + a.peakDb.toFixed(1) + 'dB)');
     if (Math.abs(a.dur - r.c.dur) > r.c.dur * 0.35)
       problems.push(id + ': measured ' + a.dur.toFixed(2) + 's vs intended ' + r.c.dur + 's');
+    // Autocorrelation assumes ONE period. On a candidate with several
+    // simultaneous slip generators it locks onto whichever source happens to
+    // dominate a window and reports nonsense trajectories, so skip the f0
+    // checks there rather than pretend the number means something.
+    if (r.c.poly) return;
     if (a.f0Early && a.f0Late && a.f0Late < a.f0Early * 1.05)
       problems.push(id + ': slip rate does not rise (' + Math.round(a.f0Early) + ' > ' + Math.round(a.f0Late) + 'Hz)');
     if (a.f0Late && a.f0Tail && a.f0Tail > a.f0Late * 0.92)

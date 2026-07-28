@@ -55,11 +55,15 @@
       var relS = Math.max(2, Math.round((o.release === undefined ? 0.0007 : o.release) * SR));
       var jit = o.jitter === undefined ? 0.08 : o.jitter;
       var ajit = o.ampJitter === undefined ? 0.45 : o.ampJitter;
-      var i = 0, wander = 0;
+      var i = 0, wander = 0, mult = 1;
       while (i < n) {
         wander = wander * 0.9 + rnd(-1, 1) * (o.wander || 0);
+        // Real stick-slip is a NONLINEAR oscillator: under changing load a joint
+        // jumps between release regimes rather than gliding smoothly, usually by
+        // halving or doubling its rate. o.regime = chance per cycle of a jump.
+        if (o.regime && Math.random() < o.regime) mult = [0.5, 1, 1, 2][Math.floor(Math.random() * 4)];
         var rate = Math.max(18, rateAt(i / n) * (1 + wander));
-        var per = Math.max(relS + 3, Math.round(SR / rate * (1 + rnd(-jit, jit))));
+        var per = Math.max(relS + 3, Math.round(SR / rate * mult * (1 + rnd(-jit, jit))));
         var amp = 1 - Math.random() * ajit;
         var load = per - relS;
         for (var k = 0; k < per && i < n; k++, i++) {
@@ -238,6 +242,91 @@
       loadThump(t, 88, g * 0.22);
     };
 
+    // ================================================================
+    // ROUND 2 — B won. All three keep its low register, and NONE of them has a
+    // free-running noise layer: round 1 proved that a noise bed sharing only an
+    // envelope still detaches into its own object (A's whoosh). Any brightness
+    // here is a resonance excited by the slips themselves.
+    // ================================================================
+
+    // The low slip contour B won with, shared so the round varies one thing.
+    function groanRate(u) {
+      return u < 0.85 ? 54 + 44 * Math.pow(u / 0.85, 0.7) : 98 - 46 * ((u - 0.85) / 0.15);
+    }
+    // RELEASE TIME IS THE BRIGHTNESS CONTROL. The lab caught this: R2-A first
+    // measured a LOWER centroid than the sound it was supposed to brighten
+    // (233Hz vs 453Hz) despite adding modes up to 2.4kHz. A 1.6ms release rolls
+    // the excitation off above ~1/(2·1.6ms) ≈ 300Hz, so the high modes were
+    // being handed nothing to ring with. Round 1's "surface" was coming entirely
+    // from its noise bed, not from the wood. 0.4ms = a drier, stiffer joint,
+    // with real energy up past 1kHz. All of round 2 shares it.
+    var REL = 0.0004;
+    var WOOD = [[118, 1.0, 5], [255, 0.85, 8], [685, 0.62, 7], [1430, 0.52, 9], [2395, 0.34, 10]];
+
+    // R2-A "BOUND BRIGHTNESS" — question: does wood get its material from
+    // RESONANCE rather than from hiss? Same slips, same low body, but the
+    // resonance stack now reaches up to 2.4kHz with high Q, and the 1.9kHz
+    // lowpass that was capping B is gone. Every bright thing you hear is a
+    // wooden mode ringing from a slip, not an added layer.
+    L.r2a = function (g, at) {
+      var t = ctx.currentTime + (at || 0), dur = 1.0;
+      g = (g === undefined ? 1 : g) * 1.0;
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, groanRate, { jitter: 0.13, ampJitter: 0.6, wander: 0.035, release: REL });
+      var env = ctx.createGain();
+      surge(env.gain, t, dur, g * 0.55, 4, 0.06);
+      src.connect(env);
+      // WOOD's mode ratios are inharmonic (1 : 2.16 : 5.8 : 12.1 : 20.3) — a
+      // board is a plate, not a string, so its modes are NOT integer multiples.
+      // Integer ratios fuse into one pitched note and sound like an instrument.
+      body(env, WOOD, dest);
+      src.start(t); src.stop(t + dur + 0.02);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    };
+
+    // R2-B "UNSTABLE REGIME" — question: is a creak's identity in INSTABILITY
+    // rather than in a smooth rise? The joint jumps between release regimes
+    // (rate halving and doubling) instead of gliding, which is what a real
+    // nonlinear stick-slip oscillator does under changing load. Same body as
+    // R2-A so the only variable is the behaviour of the slip rate.
+    L.r2b = function (g, at) {
+      var t = ctx.currentTime + (at || 0), dur = 1.0;
+      g = (g === undefined ? 1 : g) * 1.0;
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, groanRate,
+        { jitter: 0.10, ampJitter: 0.6, wander: 0.02, release: REL, regime: 0.045 });
+      var env = ctx.createGain();
+      surge(env.gain, t, dur, g * 0.55, 4, 0.06);
+      src.connect(env);
+      body(env, WOOD, dest);
+      src.start(t); src.stop(t + dur + 0.02);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    };
+
+    // R2-C "MULTI-CONTACT" — question: does thickness come from MULTIPLE slip
+    // sources? A floorboard is not one joint: several contacts along the board
+    // creak at once at slightly different rates, beating against each other.
+    // Three generators at inharmonic rate scalings through one shared body.
+    L.r2c = function (g, at) {
+      var t = ctx.currentTime + (at || 0), dur = 1.0;
+      g = (g === undefined ? 1 : g) * 1.0;
+      var bus = ctx.createGain(); bus.gain.value = 1;
+      [[1.0, 0.0, 1.0], [1.27, 0.03, 0.62], [0.79, 0.07, 0.5]].forEach(function (v) {
+        var s = ctx.createBufferSource();
+        s.buffer = slipBuffer(dur, function (u) { return groanRate(u) * v[0]; },
+          { jitter: 0.14, ampJitter: 0.65, wander: 0.04, release: REL });
+        var e = ctx.createGain();
+        surge(e.gain, t, dur, g * 0.34 * v[2], 4, 0.06); // each contact surges on its own schedule
+        s.connect(e); e.connect(bus);
+        s.start(at0(t + v[1])); s.stop(t + dur + 0.02);
+      });
+      body(bus, WOOD, dest);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    };
+
     return L;
   }
 
@@ -249,7 +338,14 @@
     { id: 'r1b', round: 1, label: 'B — DOOR GROAN', dur: 1.0,
       blurb: 'Same relaxation oscillator run so slowly (54-98/sec) you hear the individual slips fuse into a low growl. The material complaining, not the joint.' },
     { id: 'r1c', round: 1, label: 'C — RUSTY HINGE', dur: 0.42,
-      blurb: 'No pulse train at all: noise through a swept high-Q resonator with a random-walk waver. Short, high, thin, unpleasant.' }
+      blurb: 'No pulse train at all: noise through a swept high-Q resonator with a random-walk waver. Short, high, thin, unpleasant. VERDICT: reads as a scream — kept as the seed for scream work.' },
+
+    { id: 'r2a', round: 2, label: 'A — BOUND BRIGHTNESS', dur: 1.0,
+      blurb: 'Round 1\'s winner with its 1.9kHz lid taken off: five inharmonic wooden modes up to 2.4kHz, all rung by the slips themselves. No noise layer anywhere. Does "material" come from resonance rather than hiss?' },
+    { id: 'r2b', round: 2, label: 'B — UNSTABLE REGIME', dur: 1.0,
+      blurb: 'The joint JUMPS between release regimes — rate halving and doubling mid-creak — instead of gliding up. What a real nonlinear stick-slip oscillator does under load. Is the identity in the instability?' },
+    { id: 'r2c', round: 2, label: 'C — MULTI-CONTACT', dur: 1.0, poly: true,
+      blurb: 'Three slip generators at inharmonic rates, each surging on its own schedule, through one shared body. A board is not one joint. Does thickness come from several contacts beating?' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
