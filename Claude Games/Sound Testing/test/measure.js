@@ -52,10 +52,9 @@ function fft(re, im) {
 var N = 1024, HOP = 256, HANN = new Float32Array(N);
 for (var h = 0; h < N; h++) HANN[h] = 0.5 - 0.5 * Math.cos(2 * Math.PI * h / (N - 1));
 
-// Autocorrelation f0. Spectral centroid is NOT a proxy for the slip rate: the
-// body resonance — not the source — sets the spectral shape, which is the whole
-// design premise. Measure the period itself.
-// Normalized autocorrelation, peak-picked AFTER the first zero crossing.
+// Slip rate by normalized autocorrelation, peak-picked AFTER the first zero
+// crossing. Spectral centroid is NOT a proxy for it: the body resonance — not
+// the source — sets the spectral shape, which is the whole design premise.
 // Taking the global max over all lags is wrong and silently returns the minimum
 // lag for anything low-pitched: correlation is ~1 for tiny lags on any smooth
 // signal, so a 110Hz groan reads as 2756Hz (= SR/minLag). Skipping past the
@@ -81,6 +80,28 @@ function f0(s, from, to) {
   var best = 0, bestLag = 0;
   for (var l = start; l <= maxLag; l++) if (corr[l] > best) { best = corr[l]; bestLag = l; }
   return (bestLag && best > 0.25) ? SR / bestLag : 0;
+}
+
+// The end drop is a fast glide, and a single autocorrelation window landing on
+// it can octave-lock (one read a collapse to 68 as a rise to 281). Take the
+// LOWEST reading across several overlapping windows in the last stretch: the
+// question is whether the rate gets substantially lower than the body, and one
+// bad window shouldn't be able to answer it.
+//
+// Two other estimators were tried and discarded, both defeated by things this
+// one handles for free: counting waveform zero crossings reads the body
+// resonance rather than the slip rate whenever the wood rings above it (a
+// 54→98/sec groan measured as a flat 98 off its own 118Hz mode), and
+// autocorrelating the amplitude envelope octave-locks on the load ramp. The
+// waveform IS periodic at the slip rate — the body modes are just its harmonics
+// being filtered — so the plain waveform period is the right thing to measure.
+function tailF0(s, from, to) {
+  var best = 0, w = (to - from) / 2;
+  for (var k = 0; k < 3; k++) {
+    var v = f0(s, from + k * w / 2, from + k * w / 2 + w);
+    if (v && (!best || v < best)) best = v;
+  }
+  return best;
 }
 
 function analyze(mono) {
@@ -148,7 +169,7 @@ function analyze(mono) {
     ioiCv: ioiCv,
     f0Early: f0(mono, sFrom + span * 0.10, sFrom + span * 0.32),
     f0Late: f0(mono, sFrom + span * 0.58, sFrom + span * 0.80),
-    f0Tail: f0(mono, sFrom + span * 0.86, sFrom + span * 1.0)
+    f0Tail: tailF0(mono, sFrom + span * 0.84, sFrom + span * 1.0)
   };
 }
 
@@ -212,8 +233,9 @@ function writeWav(file, mono) {
 
   console.log('\nCREAK LAB — ' + rows.length + ' candidates, median of ' + REPS + ' renders @' + SR + 'Hz\n');
   console.log(pad('id', 6) + pad('peak', 9) + pad('±', 6) + pad('dur', 8) + pad('centroid', 10) +
-    pad('cent s>e', 12) + pad('flat', 7) + pad('onsets', 8) + pad('ioiCV', 7) + 'f0  early>late>tail');
-  console.log('-'.repeat(106));
+    pad('cent s>e', 12) + pad('flat', 7) + pad('onsets', 8) + pad('ioiCV', 7) +
+    'slip rate (Hz)  early > late > tail');
+  console.log('-'.repeat(124));
   rows.forEach(function (r) {
     var a = r.a;
     console.log(pad(r.c.id, 6) + pad(num(a.peakDb, 1) + 'dB', 9) + pad(num(a.peakSpread, 1), 6) + pad(num(a.dur, 2) + 's', 8) +
@@ -236,7 +258,7 @@ function writeWav(file, mono) {
     // checks there rather than pretend the number means something.
     if (r.c.poly) return;
     if (a.f0Early && a.f0Late && a.f0Late < a.f0Early * 1.05)
-      problems.push(id + ': slip rate does not rise (' + Math.round(a.f0Early) + ' > ' + Math.round(a.f0Late) + 'Hz)');
+      problems.push(id + ': rate does not rise (' + Math.round(a.f0Early) + ' > ' + Math.round(a.f0Late) + 'Hz)');
     if (a.f0Late && a.f0Tail && a.f0Tail > a.f0Late * 0.92)
       problems.push(id + ': no release/collapse at the end (' + Math.round(a.f0Late) + ' > ' + Math.round(a.f0Tail) + 'Hz)');
   });

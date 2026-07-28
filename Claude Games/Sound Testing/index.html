@@ -37,6 +37,15 @@ than a ranking; a ranking tells me which, a reason tells me what.</p>
   <button id="seq">Play all in sequence</button>
   <button id="rep">Repeat last ×3</button>
 </div>
+<div class="row" id="pitchrow">
+  <span class="knob">round 3 pitch
+    <input type="range" id="pitch" min="60" max="230" value="100">
+    <b id="pitchv" style="color:#e6d5ae">×1.00</b>
+    <span id="pitchhz" style="color:#4e556b"></span>
+  </span>
+</div>
+<p class="sub" style="margin-top:-6px">Rather than guess the height one round at a time: drag this until it's right and
+tell me the number. It scales the slip rate of every round-3 candidate.</p>
 
 <div id="rounds"></div>
 
@@ -53,8 +62,20 @@ than a ranking; a ranking tells me which, a reason tells me what.</p>
     }
     if (ctx.state === 'suspended') ctx.resume();
     master.gain.value = +document.getElementById('gain').value / 100;
+    lab.pitch = +document.getElementById('pitch').value / 100;
   }
   function play(id, at) { ensure(); last = id; lab[id](1, at || 0); }
+
+  var pitchEl = document.getElementById('pitch');
+  function showPitch() {
+    var p = +pitchEl.value / 100;
+    document.getElementById('pitchv').textContent = '×' + p.toFixed(2);
+    document.getElementById('pitchhz').textContent =
+      '  (' + Math.round(92 * p) + '–' + Math.round(172 * p) + ' slips/sec)';
+    if (lab) lab.pitch = p;
+  }
+  pitchEl.oninput = showPitch;
+  showPitch();
 
   var rounds = {};
   Creaks.CATALOG.forEach(function (c) { (rounds[c.round] = rounds[c.round] || []).push(c); });

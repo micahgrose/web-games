@@ -61,7 +61,10 @@
         // Real stick-slip is a NONLINEAR oscillator: under changing load a joint
         // jumps between release regimes rather than gliding smoothly, usually by
         // halving or doubling its rate. o.regime = chance per cycle of a jump.
-        if (o.regime && Math.random() < o.regime) mult = [0.5, 1, 1, 2][Math.floor(Math.random() * 4)];
+        if (o.regime && Math.random() < o.regime) {
+          var set = o.regimeSet || [0.5, 1, 1, 2];
+          mult = set[Math.floor(Math.random() * set.length)];
+        }
         var rate = Math.max(18, rateAt(i / n) * (1 + wander));
         var per = Math.max(relS + 3, Math.round(SR / rate * mult * (1 + rnd(-jit, jit))));
         var amp = 1 - Math.random() * ajit;
@@ -327,6 +330,91 @@
       loadThump(t + dur * 0.95, 62, g * 0.22);
     };
 
+    // ================================================================
+    // ROUND 3 — B won, A close, C (multi-contact) too unnatural. Two notes
+    // drive this round: it needs a HIGHER pitch, and the rise reads as a
+    // "compound raise" when it should be linear with a drop at the end.
+    //
+    // Everything here keeps r2b's regime jumps and the WOOD body. The pitch
+    // BAND is up (92-172 slips/sec, from 54-98) and is live on L.pitch so the
+    // height can be dialled in by ear instead of guessed a round at a time.
+    // ================================================================
+
+    L.pitch = 1; // page slider multiplies every round-3 slip rate
+
+    // Round 2 climbed on a pow(0.7) curve — fast early, flattening — which is
+    // the shape being heard as "compound". Two honest readings of "linear",
+    // and they do not sound the same: pitch perception is logarithmic, so a
+    // straight line in Hz decelerates to the ear, and a line that sounds
+    // straight to the ear is a geometric climb in Hz. Only the ear can pick.
+    function rate3(geo) {
+      var lo = 92, hi = 172, end = 68, top = 0.90;
+      return function (u) {
+        var p = L.pitch;
+        if (u < top) {
+          var x = u / top;
+          return p * (geo ? lo * Math.pow(hi / lo, x) : lo + (hi - lo) * x);
+        }
+        var y = (u - top) / (1 - top); // the drop: last tenth, and it goes BELOW where it started
+        return p * (geo ? hi * Math.pow(end / hi, y) : hi - (hi - end) * y);
+      };
+    }
+
+    // One long swell instead of 3-4 separate ones. Round 2's envelope re-attacked
+    // several times across a rising pitch, which is a second candidate cause of
+    // the "compound" feel — each surge restarts higher than the last.
+    function swell(param, t, dur, peak, attack) {
+      param.setValueAtTime(0.0001, t);
+      param.linearRampToValueAtTime(peak * 0.42, t + (attack || 0.06));
+      param.linearRampToValueAtTime(peak, t + dur * 0.55);
+      param.linearRampToValueAtTime(peak * 0.74, t + dur * 0.97);
+      param.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+
+    // Shared spine so each candidate differs in exactly one way.
+    function creak3(t, dur, g, o) {
+      var src = ctx.createBufferSource();
+      // REGIME JUMPS ARE THE "COMPOUND RAISE". r2b's ±octave jumps didn't just
+      // colour the climb, they CANCELLED it: the lab measured the rate falling
+      // 108→93 across a contour built to rise 92→172, because half-rate and
+      // double-rate stretches average out the trend. Sudden octave leaps are
+      // exactly what "compound" describes. Kept, because r2b beat the smooth
+      // r2a, but rarer (4.5%→1.2%) and much milder (±2× → ±~40%), so the climb
+      // survives them.
+      src.buffer = slipBuffer(dur, rate3(o.geo),
+        { jitter: 0.10, ampJitter: 0.6, wander: o.wander, release: REL,
+          regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+      var env = ctx.createGain();
+      // bodyFrac 0.97: hold level THROUGH the end drop. At round 1/2's 0.88 the
+      // whole drop happened inside the release ramp — the lab can't even find a
+      // slip rate down there, which means the ear can't hear the drop either.
+      if (o.swell) swell(env.gain, t, dur, g * 0.55, 0.06);
+      else surge(env.gain, t, dur, g * 0.55, 4, 0.06, 0.97);
+      src.connect(env);
+      body(env, WOOD, dest);
+      src.start(t); src.stop(t + dur + 0.02);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    }
+
+    // R3-A "STRAIGHT CLIMB" — linear in Hz, and the random wander is GONE.
+    // The plainest possible reading of the note.
+    L.r3a = function (g, at) {
+      creak3(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 1.0, { geo: false, wander: 0 });
+    };
+
+    // R3-B "LINEAR TO THE EAR" — geometric in Hz, constant semitones/sec, so
+    // the climb sounds even rather than measuring even.
+    L.r3b = function (g, at) {
+      creak3(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 1.0, { geo: true, wander: 0 });
+    };
+
+    // R3-C "STEADY EFFORT" — linear in Hz like A, but one long swell instead of
+    // four. If A still feels compound, the envelope was the culprit, not the curve.
+    L.r3c = function (g, at) {
+      creak3(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 1.0, { geo: false, wander: 0, swell: true });
+    };
+
     return L;
   }
 
@@ -345,7 +433,14 @@
     { id: 'r2b', round: 2, label: 'B — UNSTABLE REGIME', dur: 1.0,
       blurb: 'The joint JUMPS between release regimes — rate halving and doubling mid-creak — instead of gliding up. What a real nonlinear stick-slip oscillator does under load. Is the identity in the instability?' },
     { id: 'r2c', round: 2, label: 'C — MULTI-CONTACT', dur: 1.0, poly: true,
-      blurb: 'Three slip generators at inharmonic rates, each surging on its own schedule, through one shared body. A board is not one joint. Does thickness come from several contacts beating?' }
+      blurb: 'Three slip generators at inharmonic rates, each surging on its own schedule, through one shared body. A board is not one joint. Does thickness come from several contacts beating?' },
+
+    { id: 'r3a', round: 3, label: 'A — STRAIGHT CLIMB', dur: 1.0, pitchable: true,
+      blurb: 'Linear in Hz, 92→172 slips/sec, random wander removed, then a hard drop below where it started. The plainest reading of "linear with a drop at the end".' },
+    { id: 'r3b', round: 3, label: 'B — LINEAR TO THE EAR', dur: 1.0, pitchable: true,
+      blurb: 'Same climb but geometric — constant semitones/sec. Pitch perception is logarithmic, so a straight line in Hz decelerates to the ear; this one SOUNDS even instead of measuring even.' },
+    { id: 'r3c', round: 3, label: 'C — STEADY EFFORT', dur: 1.0, pitchable: true,
+      blurb: 'Linear in Hz like A, but one long swell instead of four surges. If A still feels compound, the envelope re-attacking at ever-higher pitch was the culprit, not the curve.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

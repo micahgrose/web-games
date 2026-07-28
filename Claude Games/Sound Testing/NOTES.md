@@ -119,7 +119,9 @@ r2b   -8.1dB  1.02s  424Hz     420>368    0.01   19    0.55    65 >  92 >  -
 r2c   -8.1dB  1.02s  424Hz     453>359    0.01   17    0.48    83 > 113 > 61
 ```
 
-**Verdict: pending user listen.**
+**Verdict: B best, A close, C too unnatural.** Plus two notes that drove round 3:
+it needs a **higher pitch**, and the rise reads as a **"compound raise"** when it
+should be linear with a drop at the end.
 
 ### RELEASE TIME IS THE BRIGHTNESS CONTROL — the round's real discovery
 
@@ -149,3 +151,77 @@ None of which is "add noise until it sounds rough".
 - Autocorrelation f0 is meaningless on a multi-source candidate — it locks onto
   whichever generator dominates a window. r2c is flagged `poly` and skips those
   checks rather than reporting a number that doesn't mean anything.
+
+---
+
+## Round 3 — higher, and a straight climb with a real drop
+
+Two round-level changes, then three variants of the climb.
+
+### Round-level fix 1: the "compound raise" is the REGIME JUMPS
+
+r2b's ±octave regime jumps didn't merely colour the climb — they **cancelled**
+it. Carried into round 3, the lab measured the rate going 108 → 93 across a
+contour built to rise 92 → 172, because half-rate and double-rate stretches
+average the trend away. Sudden octave leaps in the slip rate are exactly what
+"a compound raise" describes.
+
+Kept, because r2b (with jumps) beat the smooth r2a — but rarer and much milder:
+4.5% → 1.2% chance per cycle, ±2× → ±~40%. The climb now survives them.
+
+### Round-level fix 2: rounds 1 and 2 had NO AUDIBLE END DROP
+
+Measured end-of-sound slip rate:
+
+```
+r1b  94 > 91 Hz      r2a  92 > 93     r2b  93 > 90      <- no drop at all
+r3a 141 > 59 Hz      r3b 139 > 56     r3c 141 > 58      <- a drop
+```
+
+The contour always fell; the *envelope* was already in its release ramp when it
+did, so the whole drop happened below the noise floor. Round 3 holds level to
+97% of the duration. **"Hold level through the drop" has now bitten three times
+in this repo** — round 1's hinge smear, the original Lampblack `stickSlip`, and
+this. A pitch move that isn't loud enough to hear did not happen.
+
+### Round-level fix 3: pitch is on a slider now
+
+Guessing the height one round at a time wastes rounds. The page exposes
+`L.pitch` (×0.6–×2.3) over a new 92→172 slips/sec band, so the right height can
+be dialled in and reported as a number.
+
+| id | name | the question it asks |
+|----|------|----------------------|
+| r3a | STRAIGHT CLIMB | linear in Hz, wander removed — the plainest reading of the note |
+| r3b | LINEAR TO THE EAR | geometric, constant semitones/sec. Pitch perception is logarithmic, so a straight line in Hz *decelerates* to the ear; this sounds even instead of measuring even |
+| r3c | STEADY EFFORT | linear in Hz like A, but one long swell instead of four surges — is the compound feel the envelope re-attacking at ever-higher pitch, rather than the curve? |
+
+```
+id    peak    dur    centroid  cent s>e   flat  onsets ioiCV  slip rate e>l>t
+r3a   -8.1dB  1.04s  472Hz     384>540    0.01   14    0.69   111 > 141 > 59
+r3b   -8.1dB  1.03s  452Hz     393>516    0.01   17    0.52   108 > 139 > 56
+r3c   -8.1dB  1.04s  466Hz     376>544    0.01   19    0.54   115 > 141 > 58
+```
+
+**Verdict: pending user listen.**
+
+### On the measuring instrument
+
+Three slip-rate estimators were tried this round; two were discarded, and the
+discarded ones are worth recording because each failed for a *structural*
+reason, not a tuning one:
+
+- **Counting waveform zero crossings** reads the body resonance instead of the
+  slip rate whenever the wood rings above it — a 54→98/sec groan measured as a
+  flat 98, which is just its own 118Hz mode.
+- **Autocorrelating the amplitude envelope** octave-locks on the load ramp.
+- **Waveform autocorrelation** (kept) works because the slip waveform *is*
+  periodic at the slip rate; the body modes are only its harmonics being
+  filtered. Its one weakness — octave-locking on the fast end glide, which once
+  reported a collapse to 68 as a rise to 281 — is handled by taking the lowest
+  of three overlapping windows.
+
+Two hours of this went into the ruler rather than the sound, and it was worth it:
+every real finding above (the cancelled climb, the inaudible drop, release time
+as the brightness control) came from a number that contradicted what the code
+was supposed to be doing.
