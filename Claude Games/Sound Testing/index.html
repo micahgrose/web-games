@@ -80,9 +80,22 @@ tell me the number. It scales the slip rate of every round-3 candidate.</p>
   var rounds = {};
   Creaks.CATALOG.forEach(function (c) { (rounds[c.round] = rounds[c.round] || []).push(c); });
   var host = document.getElementById('rounds');
-  Object.keys(rounds).sort().forEach(function (r) {
+  // Ten rounds and forty candidates in, the newest work is a long way down the
+  // page. Jump straight to it.
+  var newest = Math.max.apply(null, Object.keys(rounds).map(Number));
+  var jump = document.createElement('p');
+  jump.innerHTML = '<button id="jump">↓ jump to the newest round (' + newest + ')</button>';
+  host.parentNode.insertBefore(jump, host);
+  jump.querySelector('#jump').onclick = function () {
+    var h = document.getElementById('round-' + newest);
+    if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  // Numeric sort. A plain .sort() compares these keys as STRINGS, which put
+  // round 10 directly after round 1 and looked like it hadn't been added.
+  Object.keys(rounds).sort(function (a, b) { return a - b; }).forEach(function (r) {
     var h = document.createElement('h2');
-    h.textContent = 'ROUND ' + r;
+    h.id = 'round-' + r;
+    h.textContent = 'ROUND ' + r + (+r === newest ? '   ← newest' : '');
     host.appendChild(h);
     var grid = document.createElement('div'); grid.className = 'cards';
     rounds[r].forEach(function (c) {
