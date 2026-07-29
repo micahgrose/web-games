@@ -805,11 +805,18 @@
         var sq = ctx.createBiquadFilter();
         sq.type = 'bandpass'; sq.Q.value = o.squealQ || 26;
         var hz = o.squealHz || [2300, 1350], w = 0;
-        for (var st = 0; st <= dur; st += 0.015) {
+        for (var st = 0; st <= dur; st += 0.012) {
           var u = st / dur;
           w = w * 0.75 + rnd(-1, 1) * 0.045;
-          sq.frequency.setValueAtTime(
-            Math.max(300, hz[0] * Math.pow(hz[1] / hz[0], u) * (1 + w)), at0(t + st));
+          // TRACK THE SLIPS. Given its own glide the squeal fell 1.7x while the
+          // joint under it fell 3.5x, on a different curve — so it read as a
+          // separate tone laid over the creak instead of the same joint heard
+          // higher up. Following the slip contour makes it slip too: same shape,
+          // same initial catch, same collapse, just an octave and a half up.
+          var f = o.squealTrack
+            ? hz[0] * Math.pow(rate(u) / rate(0.08), o.squealTrack)
+            : hz[0] * Math.pow(hz[1] / hz[0], u);
+          sq.frequency.setValueAtTime(Math.max(300, f * (1 + w)), at0(t + st));
         }
         var sg = ctx.createGain(); sg.gain.value = g * o.squeal;
         env.connect(sq); sq.connect(sg); sg.connect(dest);
@@ -918,6 +925,25 @@
     L.v25 = base17(mix(SLOW, RING), 2.545);                      // + all of v14
     L.v26 = base17(mix(SLOW, RING, { squeal: 0.7 }), 2.482);     // + all of v14 + squeal
 
+    // ---------- ROUND 11 — the squeal slips, and a bit of v13 ----------
+    // squealTrack ties the squeal's frequency to the slip contour instead of
+    // giving it a glide of its own, so it grabs and lets go with the joint
+    // rather than singing over it.
+    //
+    // v13's contribution is its BODY: resonances twice as narrow again (Q ×8)
+    // with the room almost gone. v26 already carries v14's Q ×4 / room 0.22, so
+    // "a bit of v13" is the step between them, and v31 goes all the way for the
+    // bracket.
+    var TRACK = { squeal: 0.7, squealTrack: 1, squealHz: [2300] };
+    var V13BODY = { qMul: 8, room: 0.1 };
+    var HALF13  = { qMul: 6, room: 0.16 };
+
+    L.v27 = base17(mix(TRACK, { squeal: 0.5 }), 1.07);            // slipping squeal, no v14
+    L.v28 = base17(mix(SLOW, RING, TRACK), 2.005);                 // v26 with the squeal fixed
+    L.v29 = base17(mix(SLOW, RING, TRACK, HALF13), 2.189);         // ... + a bit of v13
+    L.v30 = base17(mix(SLOW, RING, TRACK, V13BODY), 2.278);        // ... + all of v13's body
+    L.v31 = base17(mix(SLOW, RING, TRACK, HALF13, { squeal: 1.2 }), 1.826); // ... squeal pushed
+
     return L;
   }
 
@@ -1020,7 +1046,18 @@
     { id: 'v25', round: 10, falls: true, label: 'v25 — + all of v14', dur: 1.0, pitchable: true,
       blurb: 'Both halves of v14 together on the v17 base, no squeal.' },
     { id: 'v26', round: 10, falls: true, poly: true, label: 'v26 — + all of v14 + squeal', dur: 1.0, pitchable: true,
-      blurb: 'Everything: v17\'s gesture and load curve, v14\'s slower rate and ringing body, and the squeal.' }
+      blurb: 'Everything: v17\'s gesture and load curve, v14\'s slower rate and ringing body, and the squeal.' },
+
+    { id: 'v27', round: 11, falls: true, poly: true, label: 'v27 — slipping squeal, no v14', dur: 1.0, pitchable: true,
+      blurb: 'The squeal now follows the slip contour instead of gliding on its own schedule — same shape, same catch, same collapse, an octave and a half up. Isolated on the v17 base so the fix can be heard by itself.' },
+    { id: 'v28', round: 11, falls: true, poly: true, label: 'v28 — v26 with the squeal fixed', dur: 1.0, pitchable: true,
+      blurb: 'v26 exactly, but the squeal slips. Given its own glide it fell 1.7× while the joint under it fell 3.5×, which is why it sat on top of the creak rather than inside it.' },
+    { id: 'v29', round: 11, falls: true, poly: true, label: 'v29 — + a bit of v13', dur: 1.0, pitchable: true,
+      blurb: 'v28 with the body stepped partway toward v13: resonances narrower again and less room. v26 already carried v14\'s Q×4; this is the step between that and v13.' },
+    { id: 'v30', round: 11, falls: true, poly: true, label: 'v30 — + all of v13\'s body', dur: 1.0, pitchable: true,
+      blurb: 'v28 with v13\'s body in full — Q×8, room almost gone. The far end of the same bracket, so v29 has something to be measured against.' },
+    { id: 'v31', round: 11, falls: true, poly: true, label: 'v31 — v29, squeal pushed', dur: 1.0, pitchable: true,
+      blurb: 'v29 with the squeal noticeably louder. Round 1 found this register turns into a scream when it gets too present, so this is where that ceiling gets tested with a squeal that slips.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
