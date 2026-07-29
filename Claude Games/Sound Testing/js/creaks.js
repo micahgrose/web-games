@@ -802,25 +802,34 @@
       // The small random walk on its frequency is what makes it read as a fault
       // rather than as a performance — an LFO here would sound like vibrato.
       if (o.squeal) {
-        var sq = ctx.createBiquadFilter();
-        sq.type = 'bandpass'; sq.Q.value = o.squealQ || 26;
-        var hz = o.squealHz || [2300, 1350], w = 0;
-        for (var st = 0; st <= dur; st += 0.012) {
-          var u = st / dur;
-          w = w * 0.75 + rnd(-1, 1) * 0.045;
-          // TRACK THE SLIPS. Given its own glide the squeal fell 1.7x while the
-          // joint under it fell 3.5x, on a different curve — so it read as a
-          // separate tone laid over the creak instead of the same joint heard
-          // higher up. Following the slip contour makes it slip too: same shape,
-          // same initial catch, same collapse, just an octave and a half up.
-          var f = o.squealTrack
-            ? hz[0] * Math.pow(rate(u) / rate(0.08), o.squealTrack)
-            : hz[0] * Math.pow(hz[1] / hz[0], u);
-          sq.frequency.setValueAtTime(Math.max(300, f * (1 + w)), at0(t + st));
-        }
-        var sg = ctx.createGain(); sg.gain.value = g * o.squeal;
-        env.connect(sq); sq.connect(sg); sg.connect(dest);
-        if (o.room) room(sg, o.room * 0.9, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+        var hz = o.squealHz || [2300, 1350];
+        var addSqueal = function (ratio, gain) {
+          var sq = ctx.createBiquadFilter();
+          sq.type = 'bandpass'; sq.Q.value = o.squealQ || 26;
+          var w = 0;
+          for (var st = 0; st <= dur; st += 0.012) {
+            var u = st / dur;
+            w = w * 0.75 + rnd(-1, 1) * 0.045;
+            // TRACK THE SLIPS. Given its own glide the squeal fell 1.7x while
+            // the joint under it fell 3.5x, on a different curve — so it read as
+            // a separate tone laid over the creak instead of the same joint
+            // heard higher up. Following the slip contour makes it slip too:
+            // same shape, same catch, same collapse, an octave and a half up.
+            var f = o.squealTrack
+              ? hz[0] * Math.pow(rate(u) / rate(0.08), o.squealTrack)
+              : hz[0] * Math.pow(hz[1] / hz[0], u);
+            sq.frequency.setValueAtTime(Math.max(300, f * ratio * (1 + w)), at0(t + st));
+          }
+          var sg = ctx.createGain(); sg.gain.value = g * gain;
+          env.connect(sq); sq.connect(sg); sg.connect(dest);
+          if (o.room) room(sg, o.room * 0.9, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+        };
+        addSqueal(1, o.squeal);
+        // A second mode. One narrow resonance turned up far enough starts to
+        // read as a sine sitting in the mix; a real squeaking joint has more
+        // than one squeaking mode, and 1.5x is inharmonic enough not to fuse
+        // into a musical interval.
+        if (o.squeal2) addSqueal(o.squeal2Ratio || 1.5, o.squeal2);
       }
       if (o.room) room(env, o.room, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
       src.start(t); src.stop(t + dur + 0.02);
@@ -944,6 +953,30 @@
     L.v30 = base17(mix(SLOW, RING, TRACK, V13BODY), 2.278);        // ... + all of v13's body
     L.v31 = base17(mix(SLOW, RING, TRACK, HALF13, { squeal: 1.2 }), 1.826); // ... squeal pushed
 
+    // ---------- ROUND 12 — v27, squeal much louder ----------
+    // v27 had it at 0.5. These run 2.4x, 5x and 9x that, bracketed rather than
+    // guessed at a single value, because "much louder" has a wide range and
+    // round 1 found this register has a ceiling somewhere — though it found it
+    // with a squeal that SUSTAINED, and this one stops and starts with the
+    // joint, so the ceiling may well sit somewhere else entirely.
+    //
+    // Everything stays level-matched, which is the point: turning the squeal up
+    // pushes the low part DOWN in the mix, and that trade is exactly what is
+    // being judged. An unmatched version would just be a louder sound.
+    var V27 = mix(TRACK, {});
+    L.v32 = base17(mix(V27, { squeal: 1.2 }), 1.073);   // 2.4x v27
+    L.v33 = base17(mix(V27, { squeal: 2.5 }), 1.01);   // 5x
+    L.v34 = base17(mix(V27, { squeal: 4.5 }), 0.855);   // 9x
+    L.v35 = base17(mix(V27, { squeal: 2.5, squeal2: 1.4 }), 0.91); // 5x + a second mode
+    // Tracking the slips FULLY means the squeal falls 3.5x as well — 2300Hz down
+    // to about 650, which is out of squeal register and inside the body. The lab
+    // caught it: at nine times the level the spectral centroid did not move,
+    // because the squeal spends most of its life below 1kHz. Inaudible at v27's
+    // level; the loudest thing in the sound at five times that. Half-tracking
+    // keeps it slipping with the joint — same shape, same catch, same collapse —
+    // while it stays up where a squeal lives, bottoming out near 1200Hz.
+    L.v36 = base17(mix(V27, { squeal: 2.5, squealTrack: 0.55 }), 0.929);
+
     return L;
   }
 
@@ -1057,7 +1090,18 @@
     { id: 'v30', round: 11, falls: true, poly: true, label: 'v30 — + all of v13\'s body', dur: 1.0, pitchable: true,
       blurb: 'v28 with v13\'s body in full — Q×8, room almost gone. The far end of the same bracket, so v29 has something to be measured against.' },
     { id: 'v31', round: 11, falls: true, poly: true, label: 'v31 — v29, squeal pushed', dur: 1.0, pitchable: true,
-      blurb: 'v29 with the squeal noticeably louder. Round 1 found this register turns into a scream when it gets too present, so this is where that ceiling gets tested with a squeal that slips.' }
+      blurb: 'v29 with the squeal noticeably louder. Round 1 found this register turns into a scream when it gets too present, so this is where that ceiling gets tested with a squeal that slips.' },
+
+    { id: 'v32', round: 12, falls: true, poly: true, label: 'v32 — squeal ×2.4', dur: 1.0, pitchable: true,
+      blurb: 'v27 with the squeal at 2.4× its level there. Everything stays level-matched, so turning the squeal up pushes the low part down in the mix — that trade is the thing being judged.' },
+    { id: 'v33', round: 12, falls: true, poly: true, label: 'v33 — squeal ×5', dur: 1.0, pitchable: true,
+      blurb: 'The same, five times v27\'s squeal. Around here it stops being a colour on the creak and becomes the loudest thing in it.' },
+    { id: 'v34', round: 12, falls: true, poly: true, label: 'v34 — squeal ×9', dur: 1.0, pitchable: true,
+      blurb: 'Nine times. Deliberately past where I would have stopped: round 1\'s ceiling was found with a squeal that SUSTAINED, and this one stops and starts with the joint, so that ceiling may not apply.' },
+    { id: 'v35', round: 12, falls: true, poly: true, label: 'v35 — ×5, two modes', dur: 1.0, pitchable: true,
+      blurb: 'v33 plus a second squealing mode at 1.5× — inharmonic, so it does not fuse into a musical interval. One narrow resonance turned up far enough starts to read as a sine in the mix; a real squeaking joint has more than one mode.' },
+    { id: 'v36', round: 12, falls: true, poly: true, label: 'v36 — ×5, half-tracking', dur: 1.0, pitchable: true,
+      blurb: 'Tracking the slips fully makes the squeal fall 3.5× too — 2300Hz down to ~650, out of squeal register and into the body. Inaudible at v27\'s level; at ×5 it is the loudest thing in the sound doing it. This one still slips with the joint but bottoms out near 1200Hz.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
