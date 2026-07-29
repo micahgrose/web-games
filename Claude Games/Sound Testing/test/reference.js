@@ -99,7 +99,6 @@ function profile(name, s, sr) {
   var a = D.analyze(s, sr);
   if (!a) { console.log('\n' + name + ': no analyzable audio'); return null; }
   var contour = D.slipContour(s, sr);
-  var voiced = contour.filter(function (p) { return p.hz > 0; });
   var env = D.envelope(s, sr, 0.01);
   var res = D.resonances(s, sr, 6);
   var shape = fitShape(contour);
@@ -112,6 +111,17 @@ function profile(name, s, sr) {
     '        flatness ' + a.flatness.toFixed(2) + '  (0 tonal … 1 noise)');
   console.log('  swells     ' + D.countSwells(env) + '        onsets ' + a.onsets +
     '        onset irregularity ' + a.ioiCv.toFixed(2));
+  var bn = ['<500Hz', '0.5-2k', '2-8k', '>8k'];
+  console.log('  energy     ' + a.bands.map(function (v, i) {
+    return bn[i] + ' ' + (v * 100).toFixed(0) + '%';
+  }).join('   '));
+  // How much of the sound is actually a periodic pulse train? A real creak
+  // turns out to be episodic — stretches of clean slipping broken by scraping
+  // that has no period at all — and a synth that slips continuously for its
+  // whole duration is structurally a different object.
+  var voiced = contour.filter(function (p) { return p.hz > 0; });
+  console.log('  periodic   ' + Math.round(100 * voiced.length / Math.max(1, contour.length)) +
+    '% of the sound has a stable slip period');
 
   if (voiced.length) {
     var hzs = voiced.map(function (p) { return p.hz; });

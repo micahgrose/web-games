@@ -258,3 +258,100 @@ This removes the guesswork from everything below the ear. Slip rate, resonances,
 swell count, duration, brightness — all of it is measurable off a phone
 recording of a real door, instead of being set by my taste and then tested one
 round at a time.
+
+---
+
+## THE BIG ONE — three real creaks, and what they say I got wrong
+
+`creak1.mp3`, `creak2.mp3`, `creak3.mp3`, profiled against my candidates with
+the same code:
+
+```
+                    <500Hz    0.5-2k     2-8k      >8k     slip rate    periodic
+real creak1           17%       30%       34%      19%     36-143Hz       76%
+real creak2           29%       33%       33%       5%     30- 88Hz       86%
+real creak3           20%       24%       44%      12%     31-149Hz       43%
+
+mine (r2/r3)       74-78%    19-23%     2-3%       0%     32-160Hz    91-100%
+```
+
+### 1. The slip rate was never the problem
+
+Real creaks slip at **30-150Hz**. Mine slip at 32-160Hz. That has been right
+since round 2.
+
+### 2. "It needs a higher pitch" was a MISSING TOP END
+
+Real creaks put **a third to a half of their energy above 2kHz**. Mine put 3%.
+The ear was reporting brightness and I heard "pitch" — and every round since has
+been chasing the wrong variable. This is the single largest error in the log.
+
+### 3. Round 1 confounded the two, and I read the result wrong
+
+r1a was bright (38% above 2kHz) but slipped far too fast (98-356Hz). r1b had the
+right rate and no top end. So "B won" got read as *go low*, when only the RATE
+needed to be low. **The winning combination — r1b's rate with r1a's brightness —
+was never built until round 4.** A comparison that varies two things at once
+can't tell you which one won, and I varied register and brightness together for
+three rounds without noticing.
+
+### 4. The 2-8k energy cannot come from the body
+
+The strongest resonances in all three recordings are at or below 1.5kHz, yet a
+third of the energy sits above 2kHz. So that band is **broadband, not resonant**
+— it comes from the excitation and reaches the ear without being filtered
+through the wood. My architecture put everything through `body()`, which
+discards anything not near a mode. That is precisely why I measured 3%.
+
+Round 4 adds a direct path alongside the modes: the contact radiating straight
+out, not through the material.
+
+### 5. Real creaks are EPISODIC
+
+43-86% of a reference has a stable slip period; the rest is chatter with none at
+all. Every candidate I have built runs 91-100% periodic — structurally a
+different object: mine slips cleanly for its entire duration.
+
+### 6. A resonance table does not carry balance
+
+Pasting creak3's modes in verbatim gave 59% of energy below 500Hz against the
+references' 17-29%. The mode *frequencies* transfer; their relative levels in a
+recording reflect the mic, the room and the distance, so they still have to be
+balanced by measurement. (Caveat in the other direction: phone recordings and
+mp3 both thin the bass, so the references probably understate the true low end.
+Round 4 aims between the two.)
+
+---
+
+## Round 4 — the first round aimed at measured targets
+
+| id | name | mechanism |
+|----|------|-----------|
+| r4a | SHARP RELEASE | top end from the release edge alone: 0.4ms → 0.08ms, moving the excitation rolloff from ~1.2kHz to ~6kHz |
+| r4b | PER-SLIP GRIT | moderate edge, but every release throws a burst of noise scaled to that slip's strength — the contact shattering as it lets go |
+| r4c | EPISODIC | B plus stretches where the joint stops slipping and just grinds, matching the references' intermittency |
+
+```
+              <500Hz   0.5-2k    2-8k    >8k     centroid
+target        17-29%   24-33%   33-44%   5-19%   1800-3800Hz
+r4a             43%      24%      30%      3%       1728Hz
+r4b             35%      18%      33%     14%       2943Hz
+r4c             26%      15%      41%     18%       3646Hz
+```
+
+All three now sit in or near the reference envelope where every previous
+candidate was off by a factor of ten.
+
+**Verdict: pending user listen.**
+
+### Two things the lab caught building it
+
+- **White grit is digital fizz.** Raw white noise at each release put 20% of the
+  energy above 8kHz. Shaping it with a two-sample average (roughly -6dB/oct
+  above 5kHz) brought it into the references' range.
+- **Jittering the period does not make a sound aperiodic.** r4c's scrape
+  stretches still measured 100% periodic when only the timing was randomized —
+  autocorrelation still finds a mean period. The WAVEFORM has to stop being a
+  load-and-release for those stretches. Even after fixing that it measures 96%,
+  which is likely the 120ms contour window being too coarse to see 40-150ms
+  episodes rather than the synthesis failing.

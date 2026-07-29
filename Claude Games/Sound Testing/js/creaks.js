@@ -55,7 +55,7 @@
       var relS = Math.max(2, Math.round((o.release === undefined ? 0.0007 : o.release) * SR));
       var jit = o.jitter === undefined ? 0.08 : o.jitter;
       var ajit = o.ampJitter === undefined ? 0.45 : o.ampJitter;
-      var i = 0, wander = 0, mult = 1;
+      var i = 0, wander = 0, mult = 1, chaos = 0;
       while (i < n) {
         wander = wander * 0.9 + rnd(-1, 1) * (o.wander || 0);
         // Real stick-slip is a NONLINEAR oscillator: under changing load a joint
@@ -66,11 +66,46 @@
           mult = set[Math.floor(Math.random() * set.length)];
         }
         var rate = Math.max(18, rateAt(i / n) * (1 + wander));
-        var per = Math.max(relS + 3, Math.round(SR / rate * mult * (1 + rnd(-jit, jit))));
+        // Real creaks are EPISODIC: 43-86% of a reference recording has a stable
+        // slip period and the rest is chatter with no period at all. o.chaos =
+        // chance per cycle of falling into a scrape for a stretch of cycles.
+        if (o.chaos && chaos <= 0 && Math.random() < o.chaos) chaos = Math.round(rnd(5, 18));
+        var j2 = chaos > 0 ? Math.max(jit, 0.1) * 6 : jit;
+        if (chaos > 0) chaos--;
+        var per = Math.max(relS + 3, Math.round(SR / rate * mult * (1 + rnd(-j2, j2))));
         var amp = 1 - Math.random() * ajit;
         var load = per - relS;
+        // In a scrape there is no coherent release at all — the contact is
+        // grinding continuously. Jittering the period alone was not enough:
+        // autocorrelation still found a mean period, and the candidate measured
+        // 100% periodic against references at 43-86%. The WAVEFORM has to stop
+        // being a load-and-release for those stretches.
+        if (chaos > 0) {
+          var pv = 0;
+          for (var k2 = 0; k2 < per && i < n; k2++, i++) {
+            var w3 = Math.random() * 2 - 1;
+            d[i] = amp * 0.8 * (w3 + pv * 1.4) * 0.42;
+            pv = w3;
+          }
+        } else
         for (var k = 0; k < per && i < n; k++, i++) {
           d[i] = amp * (k < load ? (k / load) * 2 - 1 : 1 - ((k - load) / relS) * 2);
+        }
+        // GRIT: noise at the moment of release, scaled by how hard that slip
+        // was — the contact point shattering as it lets go. Broadband energy
+        // BOUND to the event, which is the distinction round 1 taught: a
+        // free-running noise bed detaches and becomes a whoosh.
+        // Shaped, not white: a two-sample average rolls it off above ~5kHz.
+        // Raw white grit measured 20% of total energy above 8kHz where the
+        // references sit at 5-19% and mostly nearer the bottom of that — it
+        // read as digital fizz sitting on top of the wood.
+        if (o.grit) {
+          var prevG = 0;
+          for (var q = relS + 2; q >= 1 && i - q >= 0; q--) {
+            var w2 = Math.random() * 2 - 1;
+            d[i - q] += amp * o.grit * (w2 + prevG) * 0.5;
+            prevG = w2;
+          }
         }
       }
       return buf;
@@ -415,6 +450,91 @@
       creak3(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 1.0, { geo: false, wander: 0, swell: true });
     };
 
+    // ================================================================
+    // ROUND 4 — the first round aimed at MEASURED targets instead of at my
+    // intuition. Three real creak recordings profiled in reference/ say:
+    //
+    //   energy      <500Hz 17-29%   0.5-2k 24-33%   2-8k 33-44%   >8k 5-19%
+    //   mine were   <500Hz 74-78%   0.5-2k 19-23%   2-8k   2-3%   >8k    0%
+    //
+    //   slip rate   30-150Hz, rising then collapsing to ~30% of peak
+    //   mine were   32-160Hz  <- already correct
+    //
+    //   periodic    43-86% of the sound
+    //   mine were   91-100%
+    //
+    // So the slip rate was never the problem. "It needs a higher pitch" was the
+    // ear reporting a MISSING TOP END: real creaks put a third to a half of
+    // their energy above 2kHz and mine put 3%. Round 1 confounded these — r1a
+    // was bright (38% above 2k) but slipped far too fast, r1b had the right
+    // rate and no top end, and "B won" was read as "go low" when only the RATE
+    // needed to be low. This round separates them for the first time.
+    // ================================================================
+
+    // Read off creak3.mp3 by test/reference.js — a real thing's actual modes.
+    // Note what is NOT here: nothing above 1.5kHz. The references' 2-8k energy
+    // is broadband, not resonant, so it cannot come from the body at all — it
+    // has to come from the excitation and reach the ear unfiltered.
+    // Two adjustments to what was read off the file, both deliberate:
+    //  * the low pair is pulled down. A straight copy measured 59% of energy
+    //    below 500Hz against the references' 17-29% — the modes are right, the
+    //    BALANCE in a recording is not something a resonance table carries.
+    //  * the 861/1421 modes are widened from Q16/Q15. At that Q they pass almost
+    //    no energy, and the references want 24-33% in the 0.5-2k band.
+    var WOOD4 = [[129, 0.3, 1], [172, 0.62, 4], [323, 0.68, 4], [484, 0.55, 2],
+                 [861, 0.62, 6], [1421, 0.6, 6], [2300, 0.34, 5]];
+
+    // The direct path: the contact radiating straight out, not through the
+    // wood. body() alone throws away everything that isn't near a mode, which
+    // is exactly why my creaks measured 3% above 2kHz.
+    function bright(input, g, hz) {
+      var hp = ctx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = hz || 1300; hp.Q.value = 0.7;
+      var lp = ctx.createBiquadFilter(); // no real object radiates flat to 20k
+      lp.type = 'lowpass'; lp.frequency.value = 8500; lp.Q.value = 0.7;
+      var gn = ctx.createGain(); gn.gain.value = g;
+      input.connect(hp); hp.connect(lp); lp.connect(gn); gn.connect(dest);
+    }
+
+    function creak4(t, dur, g, o) {
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, rate3(false),
+        { jitter: 0.10, ampJitter: 0.6, wander: 0, release: o.rel, grit: o.grit,
+          chaos: o.chaos, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+      var env = ctx.createGain();
+      surge(env.gain, t, dur, g * 0.55, o.swells || 6, 0.05, 0.97);
+      src.connect(env);
+      body(env, WOOD4, dest);
+      bright(env, o.bright, o.brightHz);
+      src.start(t); src.stop(t + dur + 0.02);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    }
+
+    // R4-A "SHARP RELEASE" — brightness from release time alone. 0.4ms → 0.08ms
+    // moves the excitation's rolloff from ~1.2kHz to ~6kHz. The cleanest test of
+    // the hypothesis that release sharpness IS the material's hardness.
+    L.r4a = function (g, at) {
+      creak4(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.83,
+        { rel: 0.00008, bright: 0.5 });
+    };
+
+    // R4-B "PER-SLIP GRIT" — moderate release, but every release throws a burst
+    // of noise scaled to how hard that slip was. Same top end, arrived at by
+    // event-bound noise rather than by a sharper edge.
+    L.r4b = function (g, at) {
+      creak4(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.72,
+        { rel: 0.0004, grit: 0.95, bright: 0.7 });
+    };
+
+    // R4-C "EPISODIC" — R4-B plus the intermittency the references show:
+    // stretches where the joint stops slipping cleanly and just chatters. The
+    // references run 43-86% periodic; every candidate I have built runs ~100%.
+    L.r4c = function (g, at) {
+      creak4(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.83,
+        { rel: 0.0004, grit: 0.95, bright: 0.7, chaos: 0.045, swells: 8 });
+    };
+
     return L;
   }
 
@@ -440,7 +560,14 @@
     { id: 'r3b', round: 3, label: 'B — LINEAR TO THE EAR', dur: 1.0, pitchable: true,
       blurb: 'Same climb but geometric — constant semitones/sec. Pitch perception is logarithmic, so a straight line in Hz decelerates to the ear; this one SOUNDS even instead of measuring even.' },
     { id: 'r3c', round: 3, label: 'C — STEADY EFFORT', dur: 1.0, pitchable: true,
-      blurb: 'Linear in Hz like A, but one long swell instead of four surges. If A still feels compound, the envelope re-attacking at ever-higher pitch was the culprit, not the curve.' }
+      blurb: 'Linear in Hz like A, but one long swell instead of four surges. If A still feels compound, the envelope re-attacking at ever-higher pitch was the culprit, not the curve.' },
+
+    { id: 'r4a', round: 4, label: 'A — SHARP RELEASE', dur: 1.0, pitchable: true,
+      blurb: 'Real creaks put 33-44% of their energy above 2kHz; mine put 3%. Here the top end comes from the release edge alone — 0.4ms sharpened to 0.08ms, which moves the excitation rolloff from 1.2kHz to 6kHz. Body modes read off a real recording.' },
+    { id: 'r4b', round: 4, label: 'B — PER-SLIP GRIT', dur: 1.0, pitchable: true,
+      blurb: 'Same top end reached differently: every release throws a burst of noise scaled to how hard that slip was — the contact shattering as it lets go. Noise bound to the events, never a free-running layer.' },
+    { id: 'r4c', round: 4, label: 'C — EPISODIC', dur: 1.0, pitchable: true,
+      blurb: 'B plus the intermittency the recordings show: stretches where the joint stops slipping cleanly and just chatters. References run 43-86% periodic; every candidate before this ran ~100%.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

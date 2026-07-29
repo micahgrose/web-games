@@ -252,8 +252,22 @@ function analyze(mono, sr) {
   var ioiMean = iois.length ? iois.reduce(function (x, y) { return x + y; }, 0) / iois.length : 0;
   var ioiCv = iois.length > 1 ? Math.sqrt(iois.reduce(function (x, y) { return x + Math.pow(y - ioiMean, 2); }, 0) / iois.length) / ioiMean : 0;
 
+  // Where the energy actually sits. Centroid alone is a single number that a
+  // little hiss can drag anywhere; the band split says whether a sound is dark
+  // because its body is low or dark because its excitation has no high content.
+  var bands = [0, 0, 0, 0], btot = 0;
+  active.forEach(function (f) {
+    for (var b3 = 1; b3 < N / 2; b3++) {
+      var hz = b3 * sr / N, m2 = f.mag[b3];
+      bands[hz < 500 ? 0 : hz < 2000 ? 1 : hz < 8000 ? 2 : 3] += m2;
+      btot += m2;
+    }
+  });
+  if (btot > 0) for (i = 0; i < 4; i++) bands[i] /= btot;
+
   var sFrom = first * sr, span = (last - first) * sr;
   return {
+    bands: bands,
     peakDb: 20 * Math.log10(peak + 1e-9),
     rmsDb: 20 * Math.log10(Math.sqrt(sumSq / mono.length) + 1e-9),
     dur: last - first,
