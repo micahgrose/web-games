@@ -225,3 +225,36 @@ Two hours of this went into the ruler rather than the sound, and it was worth it
 every real finding above (the cancelled climb, the inaudible drop, release time
 as the brightness control) came from a number that contradicted what the code
 was supposed to be doing.
+
+### Round 3 may contain a null experiment
+
+The curve fitter, run on r3a (known to be linear in Hz), reports **linear
+R²=0.97, geometric R²=0.95** — statistically indistinguishable. Over a range of
+less than an octave the two shapes barely differ; the distinction only becomes
+audible across a wide sweep. So if A and B sound the same to the ear, that is
+the correct answer rather than a failure to hear, and the real variable in
+round 3 is C's envelope.
+
+---
+
+## The reference rig (added after round 3)
+
+`test/reference.js` profiles real recordings dropped into `reference/` with the
+same DSP the candidates go through (`test/dsp.js`, shared deliberately — if the
+two used different code every comparison between them would be worthless).
+
+It reports the slip-rate contour, fits the climb (linear vs geometric), counts
+swells, and — the valuable part — **extracts the body resonances as a `WOOD`
+table ready to paste into `js/creaks.js`**. That works for a physical reason: in
+a stick-slip sound the source rate sweeps while the resonances stay put, so a
+long-term average spectrum smears the harmonics into a floor and leaves the
+material standing.
+
+Validated by round-tripping a candidate through it: fed r3a, whose body is
+`[118, 255, 685, 1430, 2395]`, it read back `118, 258, 668` — the top three
+modes recovered to within 2.5%.
+
+This removes the guesswork from everything below the ear. Slip rate, resonances,
+swell count, duration, brightness — all of it is measurable off a phone
+recording of a real door, instead of being set by my taste and then tested one
+round at a time.

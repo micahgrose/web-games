@@ -15,22 +15,43 @@ family at a time. Currently: **creaks**.
 3. I build three more from what that told me. Repeat until one lands.
 4. Findings go in `NOTES.md`, and the durable ones go into my memory.
 
+## Reference recordings — the shortcut
+
+Drop real creak audio into `reference/` and run `node test/reference.js`. It
+reports the slip-rate contour of an actual creaking thing, fits its climb, and
+extracts its **body resonances as a table I can paste straight into
+`js/creaks.js`**. That last part works because the source rate sweeps while the
+resonances stay put, so a long-term average spectrum leaves the material
+standing. See [reference/README.md](reference/README.md) for what makes a
+recording useful.
+
+This replaces guessing. Every number I have been setting by taste — how fast a
+joint really releases, where the wood resonates, how many times it surges — is
+measurable off a phone recording.
+
 ## Files
 
 - `index.html` — the audition page. Open it directly; no server needed.
 - `js/creaks.js` — every candidate, plus the shared synthesis primitives.
   Loads in both the browser and node so the sound you hear is the same code I
   measure.
+- `test/dsp.js` — the analysis, shared by both tools below so a recording and a
+  synth candidate are measured by identical code.
 - `test/measure.js` — renders each candidate offline through a real WebAudio
   implementation and reports duration, level, spectral centroid and its
-  trajectory, tonal-vs-noisy, onset count, onset irregularity, and the f0
+  trajectory, tonal-vs-noisy, onset count, onset irregularity, and the slip-rate
   contour (early → late → tail).
+- `test/reference.js` — the same analysis applied to real audio files.
 
 ```
 node test/measure.js              # median of 7 renders, plus sanity checks
 node test/measure.js --reps 15    # more renders (these sounds are stochastic)
 node test/measure.js --wav out    # also dump WAVs
 node test/measure.js r1a r1c      # only these candidates
+
+node test/reference.js            # profile everything in reference/
+node test/reference.js --split    # one file holding several creaks
+node test/reference.js --compare  # references and my candidates, same analysis
 ```
 
 Needs `node-web-audio-api`; it falls back to the copy already installed under
