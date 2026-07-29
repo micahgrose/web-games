@@ -52,6 +52,10 @@
     function slipBuffer(dur, rateAt, o) {
       o = o || {};
       var n = Math.ceil(dur * SR), buf = ctx.createBuffer(1, n, SR), d = buf.getChannelData(0);
+      // Optional second excitation track carrying ONLY the strong slips, for
+      // driving a squeal that bursts instead of sustaining. See o.exc below.
+      var excD = null;
+      if (o.exc) { o.exc.buffer = ctx.createBuffer(1, n, SR); excD = o.exc.buffer.getChannelData(0); }
       var relS = Math.max(2, Math.round((o.release === undefined ? 0.0007 : o.release) * SR));
       var jit = o.jitter === undefined ? 0.08 : o.jitter;
       var ajit = o.ampJitter === undefined ? 0.45 : o.ampJitter;
@@ -132,6 +136,20 @@
             d[i - q] += amp * o.grit * (w2 + prevG) * 0.5;
             prevG = w2;
           }
+        }
+        // SQUEAL EXCITATION — only the STRONG slips. Driving a high-Q resonator
+        // from every slip cannot produce bursts: its ring time integrates across
+        // several of them, smoothing away the very amplitude crackle that makes
+        // the low part sound bursty, and at 100+ slips/sec the modulation is far
+        // above the ~20Hz where the ear still hears separate events. Weighting
+        // by amp^p (p≈4-8) means only the hardest releases set the squeal
+        // ringing, so it speaks in bursts at a rate the ear can follow — and
+        // those bursts land on the loud moments of the low part, because they
+        // are the same slips.
+        if (excD) {
+          var wgt = Math.pow(amp, o.excPow || 4), len = relC + 3;
+          for (var e2 = 0; e2 < len && i - 1 - e2 >= 0; e2++)
+            excD[i - 1 - e2] += wgt * (1 - e2 / len);
         }
       }
       return buf;
@@ -782,10 +800,12 @@
         return p * (hi - (hi - lo) * Math.pow((u - 0.08) / 0.92, 0.75));
       };
       var src = ctx.createBufferSource();
+      var exc = o.squealBurst ? {} : null;
       src.buffer = slipBuffer(dur, rate,
         { ampJitter: o.ampJitter || 0.55, jitter: 0.16, wander: 0.01,
           release: o.release || 0.00012, grit: o.grit === undefined ? 0.35 : o.grit,
-          relVar: 1, loadCurve: o.loadCurve, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+          relVar: 1, loadCurve: o.loadCurve, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38],
+          exc: exc, excPow: o.squealBurst });
       var env = ctx.createGain();
       arch(env.gain, t, dur, g * 0.55, o.humps || 4, o.peakAt || 0.45);
       src.connect(env);
@@ -821,7 +841,16 @@
             sq.frequency.setValueAtTime(Math.max(300, f * ratio * (1 + w)), at0(t + st));
           }
           var sg = ctx.createGain(); sg.gain.value = g * gain;
-          env.connect(sq); sq.connect(sg); sg.connect(dest);
+          if (exc) {
+            // Driven by the strong-slip track, with the same arch over it so it
+            // still belongs to the gesture.
+            var es = ctx.createBufferSource(); es.buffer = exc.buffer;
+            var ee = ctx.createGain();
+            arch(ee.gain, t, dur, 1, o.humps || 4, o.peakAt || 0.45);
+            es.connect(ee); ee.connect(sq);
+            es.start(t); es.stop(t + dur + 0.02);
+          } else env.connect(sq);
+          sq.connect(sg); sg.connect(dest);
           if (o.room) room(sg, o.room * 0.9, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
         };
         addSqueal(1, o.squeal);
@@ -977,6 +1006,30 @@
     // while it stays up where a squeal lives, bottoming out near 1200Hz.
     L.v36 = base17(mix(V27, { squeal: 2.5, squealTrack: 0.55 }), 0.929);
 
+    // ---------- ROUND 13 — the squeal BURSTS ----------
+    // Every squeal so far was driven by every slip, which cannot burst: a Q=26
+    // resonator rings across several slips and smooths away the amplitude
+    // crackle that makes the low part sound bursty, and at 100+ slips/sec that
+    // modulation sits far above the ~20Hz where the ear still hears separate
+    // events. So it fused into a tone no matter how it was tracked or tuned.
+    //
+    // Now the squeal is driven by a separate excitation carrying ONLY the strong
+    // slips (weighted amp^p), so it speaks in bursts at a rate the ear can
+    // follow — and those bursts land on the loud moments of the low part,
+    // because they are literally the same slips.
+    // Burst drive is a short impulse per STRONG slip, so it hands the resonator
+    // far less energy than the continuous slip stream did. At gain 2.5 it
+    // measured 27% of energy in the squeal band — exactly what v27 measured with
+    // the squeal barely present — while the sustained version at ×5 reached 42%.
+    // Burst gains are therefore several times larger for the same audible
+    // presence, and these numbers are NOT comparable to the sustained rounds'.
+    var BURST = mix(V27, { squeal: 8, squealBurst: 4 });
+    L.v37 = base17(BURST, 0.943);                                          // bursting squeal
+    L.v38 = base17(mix(BURST, { squealBurst: 9 }), 1.034);                 // sparser, only the hardest
+    L.v39 = base17(mix(BURST, { squealQ: 45 }), 1.033);                    // each burst rings longer
+    L.v40 = base17(mix(BURST, { squeal: 16 }), 0.683);                      // bursts twice as loud
+    L.v41 = base17(mix(BURST, { squealTrack: 0.55 }), 0.877);              // bursts + v36's half-track
+
     return L;
   }
 
@@ -1101,7 +1154,18 @@
     { id: 'v35', round: 12, falls: true, poly: true, label: 'v35 — ×5, two modes', dur: 1.0, pitchable: true,
       blurb: 'v33 plus a second squealing mode at 1.5× — inharmonic, so it does not fuse into a musical interval. One narrow resonance turned up far enough starts to read as a sine in the mix; a real squeaking joint has more than one mode.' },
     { id: 'v36', round: 12, falls: true, poly: true, label: 'v36 — ×5, half-tracking', dur: 1.0, pitchable: true,
-      blurb: 'Tracking the slips fully makes the squeal fall 3.5× too — 2300Hz down to ~650, out of squeal register and into the body. Inaudible at v27\'s level; at ×5 it is the loudest thing in the sound doing it. This one still slips with the joint but bottoms out near 1200Hz.' }
+      blurb: 'Tracking the slips fully makes the squeal fall 3.5× too — 2300Hz down to ~650, out of squeal register and into the body. Inaudible at v27\'s level; at ×5 it is the loudest thing in the sound doing it. This one still slips with the joint but bottoms out near 1200Hz.' },
+
+    { id: 'v37', round: 13, falls: true, poly: true, label: 'v37 — the squeal BURSTS', dur: 1.0, pitchable: true,
+      blurb: 'Driven by only the STRONG slips instead of every one. A resonator fed by every slip cannot burst — it rings across several of them and smooths away the crackle, and at 100+ slips/sec that modulation is above the ~20Hz where the ear still hears separate events.' },
+    { id: 'v38', round: 13, falls: true, poly: true, label: 'v38 — sparser bursts', dur: 1.0, pitchable: true,
+      blurb: 'Only the very hardest releases set it ringing, so the bursts are fewer and further apart.' },
+    { id: 'v39', round: 13, falls: true, poly: true, label: 'v39 — each burst rings longer', dur: 1.0, pitchable: true,
+      blurb: 'Same bursts, but a much narrower resonance so each one sings after it is struck instead of just chirping.' },
+    { id: 'v40', round: 13, falls: true, poly: true, label: 'v40 — bursts twice as loud', dur: 1.0, pitchable: true,
+      blurb: 'v37 with the squeal at twice the level, since bursts spend less time sounding than a sustain did and may need more to read as present.' },
+    { id: 'v41', round: 13, falls: true, poly: true, label: 'v41 — bursts + half-tracking', dur: 1.0, pitchable: true,
+      blurb: 'v37 with v36\'s correction as well, so the bursts stay up in squeal register instead of descending into the body.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
