@@ -1051,6 +1051,22 @@
     L.v52 = base17(mix(V27FULL, { room: 0 }), 1.162);                 // bone dry
     L.v53 = base17(mix(V27FULL, { peakAt: 0.45, humps: 4, thump: 0.12 }), 1.029); // worked, not given way
 
+    // ---------- ROUND 15 — v47 compacted to 0.5s ----------
+    // "Compact into 0.5s" has two readings and they do not sound alike. The rate
+    // contour is defined over the sound's own length, so halving the duration
+    // COMPRESSES it: the same 156→44 fall happens twice as fast. The other
+    // reading is TRUNCATION — the joint falls at the rate it always did and the
+    // sound simply stops early, ending around 78 instead of 44.
+    //
+    // And one thing that does not scale by itself: the room. A 0.26s tail on a
+    // 1.0s sound is a quarter of it; on a 0.5s sound it is half, so the shorter
+    // version is proportionally far wetter unless the room is shortened too.
+    var V47 = mix(V27FULL, { grit: 0.85 });
+    L.v54 = base17(mix(V47, { dur: 0.5 }), 1.149);                                  // compressed
+    L.v55 = base17(mix(V47, { dur: 0.5, rateLo: 78 }), 1.038);                      // truncated
+    L.v56 = base17(mix(V47, { dur: 0.5, roomDur: 0.14 }), 1.038);                   // compressed + room scaled
+    L.v57 = base17(mix(V47, { dur: 0.5, roomDur: 0.14, rateLo: 60, rateHi: 200 }), 1.066); // ... and quicker slipping
+
     return L;
   }
 
@@ -1211,7 +1227,16 @@
     { id: 'v52', round: 14, falls: true, poly: true, label: 'v52 — bone dry', dur: 1.0, pitchable: true,
       blurb: 'No room at all. Round 6 found that dryness was reading as synthetic, but that was before the body and the squeal were what they are now.' },
     { id: 'v53', round: 14, falls: true, poly: true, label: 'v53 — worked, not given way', dur: 1.0, pitchable: true,
-      blurb: 'Four swells peaking halfway with the contact thump back, instead of one early swell. v10\'s gesture reversed — something being worked rather than something giving way at once.' }
+      blurb: 'Four swells peaking halfway with the contact thump back, instead of one early swell. v10\'s gesture reversed — something being worked rather than something giving way at once.' },
+
+    { id: 'v54', round: 15, falls: true, poly: true, label: 'v54 — v47 compressed to 0.5s', dur: 0.5, pitchable: true,
+      blurb: 'The whole gesture at half length: the same 156→44 fall now happens twice as fast, so the joint lets go at twice the speed.' },
+    { id: 'v55', round: 15, falls: true, poly: true, label: 'v55 — v47 truncated to 0.5s', dur: 0.5, pitchable: true,
+      blurb: 'The other reading of "compact". The joint falls at the rate it always did and the sound simply stops early, ending near 78 instead of 44 — a shorter creak rather than a faster one.' },
+    { id: 'v56', round: 15, falls: true, poly: true, label: 'v56 — compressed, room scaled', dur: 0.5, pitchable: true,
+      blurb: 'v54 with the room shortened to match. A 0.26s tail is a quarter of a 1.0s sound but half of a 0.5s one, so without this the short version is proportionally far wetter.' },
+    { id: 'v57', round: 15, falls: true, poly: true, label: 'v57 — compressed, quicker slipping', dur: 0.5, pitchable: true,
+      blurb: 'v56 at 200→60 slips/sec. A shorter creak usually comes from something lighter or smaller, which slips faster as well as for less long.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
