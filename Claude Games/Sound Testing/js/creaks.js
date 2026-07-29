@@ -1030,6 +1030,27 @@
     L.v40 = base17(mix(BURST, { squeal: 16 }), 0.683);                      // bursts twice as loud
     L.v41 = base17(mix(BURST, { squealTrack: 0.55 }), 0.877);              // bursts + v36's half-track
 
+    // ---------- ROUND 14 — twelve variations on v27 ----------
+    // One clean change each, across axes that have never been varied ON v27:
+    // where the squeal sits and how narrow it is, how much grit, how sharp the
+    // release, how uneven the slips are, how far the rate falls (as opposed to
+    // where it starts), the room, and the gesture. v27 itself is the control,
+    // already on the page in round 11.
+    var V27FULL = mix(V17, TRACK, { squeal: 0.5 });
+
+    L.v42 = base17(mix(V27FULL, { squealHz: [3200] }), 1.082);        // squeal sits higher
+    L.v43 = base17(mix(V27FULL, { squealHz: [1600] }), 1.074);        // squeal sits lower
+    L.v44 = base17(mix(V27FULL, { squealQ: 12 }), 1.09);             // squeal broader, more airy
+    L.v45 = base17(mix(V27FULL, { squealQ: 45 }), 1.05);             // squeal narrower, more pure
+    L.v46 = base17(mix(V27FULL, { grit: 0 }), 1.137);                 // no per-slip grit at all
+    L.v47 = base17(mix(V27FULL, { grit: 0.85 }), 1.039);              // heavy grit
+    L.v48 = base17(mix(V27FULL, { release: 0.0005 }), 1.289);         // blunter release (softer material)
+    L.v49 = base17(mix(V27FULL, { ampJitter: 0.85 }), 1.294);         // very uneven slip strengths
+    L.v50 = base17(mix(V27FULL, { rateLo: 30, rateHi: 200 }), 1.041); // the rate falls much further
+    L.v51 = base17(mix(V27FULL, { rateLo: 65, rateHi: 120 }), 1.124); // ... and much less far
+    L.v52 = base17(mix(V27FULL, { room: 0 }), 1.162);                 // bone dry
+    L.v53 = base17(mix(V27FULL, { peakAt: 0.45, humps: 4, thump: 0.12 }), 1.029); // worked, not given way
+
     return L;
   }
 
@@ -1165,7 +1186,32 @@
     { id: 'v40', round: 13, falls: true, poly: true, label: 'v40 — bursts twice as loud', dur: 1.0, pitchable: true,
       blurb: 'v37 with the squeal at twice the level, since bursts spend less time sounding than a sustain did and may need more to read as present.' },
     { id: 'v41', round: 13, falls: true, poly: true, label: 'v41 — bursts + half-tracking', dur: 1.0, pitchable: true,
-      blurb: 'v37 with v36\'s correction as well, so the bursts stay up in squeal register instead of descending into the body.' }
+      blurb: 'v37 with v36\'s correction as well, so the bursts stay up in squeal register instead of descending into the body.' },
+
+    { id: 'v42', round: 14, falls: true, poly: true, label: 'v42 — squeal higher (3200Hz)', dur: 1.0, pitchable: true,
+      blurb: 'v27 with the squeal starting higher. Where the squeal sits has been fixed at 2300Hz since it was invented, on no evidence at all.' },
+    { id: 'v43', round: 14, falls: true, poly: true, label: 'v43 — squeal lower (1600Hz)', dur: 1.0, pitchable: true,
+      blurb: 'The other side of that bracket.' },
+    { id: 'v44', round: 14, falls: true, poly: true, label: 'v44 — squeal broader', dur: 1.0, pitchable: true,
+      blurb: 'A much wider resonance: airier and less pure, closer to a hiss with a pitch in it than a tone.' },
+    { id: 'v45', round: 14, falls: true, poly: true, label: 'v45 — squeal narrower', dur: 1.0, pitchable: true,
+      blurb: 'A much narrower one: purer, more singing, and it rings for longer after each slip.' },
+    { id: 'v46', round: 14, falls: true, poly: true, label: 'v46 — no grit', dur: 1.0, pitchable: true,
+      blurb: 'The noise burst at each release removed entirely. Grit has been on at roughly the same amount since round 4 without ever being questioned.' },
+    { id: 'v47', round: 14, falls: true, poly: true, label: 'v47 — heavy grit', dur: 1.0, pitchable: true,
+      blurb: 'Two and a half times the grit — much more shattering at the contact point.' },
+    { id: 'v48', round: 14, falls: true, poly: true, label: 'v48 — blunter release', dur: 1.0, pitchable: true,
+      blurb: 'The joint lets go four times more slowly. Release time is the brightness control, so this is a softer, less brittle material.' },
+    { id: 'v49', round: 14, falls: true, poly: true, label: 'v49 — very uneven slips', dur: 1.0, pitchable: true,
+      blurb: 'Slip strengths vary far more from one release to the next — more lurching, less even.' },
+    { id: 'v50', round: 14, falls: true, poly: true, label: 'v50 — rate falls much further', dur: 1.0, pitchable: true,
+      blurb: '200→30 instead of 156→44. How FAR the rate falls has never been varied — only where it starts.' },
+    { id: 'v51', round: 14, falls: true, poly: true, label: 'v51 — rate barely falls', dur: 1.0, pitchable: true,
+      blurb: '120→65: the same gesture with much less collapse in it.' },
+    { id: 'v52', round: 14, falls: true, poly: true, label: 'v52 — bone dry', dur: 1.0, pitchable: true,
+      blurb: 'No room at all. Round 6 found that dryness was reading as synthetic, but that was before the body and the squeal were what they are now.' },
+    { id: 'v53', round: 14, falls: true, poly: true, label: 'v53 — worked, not given way', dur: 1.0, pitchable: true,
+      blurb: 'Four swells peaking halfway with the contact thump back, instead of one early swell. v10\'s gesture reversed — something being worked rather than something giving way at once.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
