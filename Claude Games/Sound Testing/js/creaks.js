@@ -88,9 +88,13 @@
           if (o.pause && Math.random() < o.pause) jf *= rnd(3, 9);
           jf = Math.max(0.25, Math.min(12, jf));
         } else jf = 1 + rnd(-j2, j2);
-        var per = Math.max(relS + 3, Math.round(SR / rate * mult * jf));
+        var per = Math.max(relS + 4, Math.round(SR / rate * mult * jf));
         var amp = 1 - Math.random() * ajit;
-        var load = per - relS;
+        // A harder release lets go faster, so brightness varies slip to slip.
+        // The references' spectral centroid wobbles ±28-34% of its mean; a fixed
+        // release gave 17%, a timbre that barely moves.
+        var relC = o.relVar ? Math.max(2, Math.round(relS * (1.9 - amp))) : relS;
+        var load = per - relC;
         // In a scrape there is no coherent release at all — the contact is
         // grinding continuously. Jittering the period alone was not enough:
         // autocorrelation still found a mean period, and the candidate measured
@@ -105,7 +109,7 @@
           }
         } else
         for (var k = 0; k < per && i < n; k++, i++) {
-          d[i] = amp * (k < load ? (k / load) * 2 - 1 : 1 - ((k - load) / relS) * 2);
+          d[i] = amp * (k < load ? (k / load) * 2 - 1 : 1 - ((k - load) / relC) * 2);
         }
         // GRIT: noise at the moment of release, scaled by how hard that slip
         // was — the contact point shattering as it lets go. Broadband energy
@@ -117,7 +121,7 @@
         // read as digital fizz sitting on top of the wood.
         if (o.grit) {
           var prevG = 0;
-          for (var q = relS + 2; q >= 1 && i - q >= 0; q--) {
+          for (var q = relC + 2; q >= 1 && i - q >= 0; q--) {
             var w2 = Math.random() * 2 - 1;
             d[i - q] += amp * o.grit * (w2 + prevG) * 0.5;
             prevG = w2;
@@ -619,6 +623,133 @@
         { cv: 0.85, pause: 0.05, ampJitter: 0.85, bright: 0.62 });
     };
 
+    // ================================================================
+    // ROUND 6 — "these sound NOTHING like a creak", so measure everything.
+    // test/full.js profiles structure, envelope shape, spectral moments, per-
+    // band modulation, periodicity, decay and impulsiveness. Three gaps, none
+    // of which any previous round had looked at, and all three are large:
+    //
+    //                        real            mine (r4a/r5b)
+    //   decay to -40dB       0.25 - 0.32s    0.03 - 0.05s     ~10x too short
+    //   0.7-2kHz energy      19 - 38%        4 - 6%           the big hole
+    //   60-250Hz energy      27 - 39%        67 - 75%         far too bass-heavy
+    //   zero crossings       1845 - 3708/s   328 - 587/s
+    //   envelope peak at     30 - 52%        0%               mine front-load
+    //
+    // The decay is the interesting one. 250-300ms of tail is not wood ringing —
+    // no plausible Q on a 1kHz mode holds that long — it is the ROOM the
+    // recording was made in. Every candidate so far has been bone dry, and a
+    // bone dry sound reads as synthetic no matter how right its spectrum is.
+    // ================================================================
+
+    // Rebalanced hard toward the mids. The mode FREQUENCIES still come from the
+    // recordings; the gains are set to hit the measured band energies, because
+    // a resonance table carries frequencies and not balance.
+    var WOOD6 = [[129, 0.09, 2], [172, 0.16, 4], [323, 0.26, 4], [484, 0.4, 3],
+                 [861, 0.95, 5], [1180, 1.0, 5], [1560, 0.95, 5], [2300, 0.66, 4]];
+
+    // A room, built procedurally: exponentially decaying noise, damped so the
+    // tail is darker than the source. This is what the reference recordings have
+    // that every candidate of mine has lacked.
+    var _ir = {};
+    function roomIR(dur, decay, damp) {
+      var key = dur + '/' + decay + '/' + damp;
+      if (_ir[key]) return _ir[key];
+      var n = Math.round(dur * SR), b = ctx.createBuffer(2, n, SR);
+      for (var c = 0; c < 2; c++) {
+        var d = b.getChannelData(c), lp = 0;
+        for (var i = 0; i < n; i++) {
+          var e = Math.pow(1 - i / n, decay);
+          lp += damp * ((Math.random() * 2 - 1) * e - lp);
+          d[i] = lp;
+        }
+      }
+      _ir[key] = b;
+      return b;
+    }
+    function room(input, wet, dur, decay, damp) {
+      var cv = ctx.createConvolver();
+      cv.buffer = roomIR(dur, decay, damp); cv.normalize = true;
+      var g = ctx.createGain(); g.gain.value = wet;
+      input.connect(cv); cv.connect(g); g.connect(dest);
+    }
+
+    // An ARCH, not a front-loaded decay. Every reference peaks 30-52% of the way
+    // through; mine all peaked at 0% because the contact thump and the envelope
+    // attack both landed at t=0. Random humps ride on top of the arch so it
+    // still surges.
+    function arch(param, t, dur, peak, humps, peakAt) {
+      peakAt = peakAt || 0.45;
+      param.setValueAtTime(0.0001, t);
+      var steps = Math.max(4, humps * 2);
+      for (var i = 1; i <= steps; i++) {
+        var u = i / steps;
+        var a = u < peakAt ? Math.pow(u / peakAt, 0.85)
+                           : Math.pow(1 - (u - peakAt) / (1 - peakAt), 0.75);
+        param.linearRampToValueAtTime(Math.max(peak * 0.04, peak * a * rnd(0.5, 1.0)), t + dur * 0.97 * u);
+      }
+      param.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+
+    function creak6(t, dur, g, o) {
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, rate5,
+        { ampJitter: 0.55, jitter: 0.16, wander: 0.01, release: 0.00012,
+          grit: 0.35, relVar: 1, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+      var env = ctx.createGain();
+      arch(env.gain, t, dur, g * 0.55, 4, 0.45);
+      src.connect(env);
+      body(env, WOOD6, dest);
+      bright(env, 0.5, 1500);
+      // FRICTION BED. Round 1 taught that a free-running noise layer detaches
+      // into a whoosh — but that layer sat at 3.1kHz, in a spectral region of
+      // its own. The references cross zero 1845-3708 times/sec where a pure
+      // impulse train manages 600, and no amount of EQ closes that: there is
+      // continuous broadband contact noise BETWEEN the slips. Kept inside the
+      // body's own mid region so it colours the wood instead of floating over it.
+      if (o.friction) {
+        var ns = ctx.createBufferSource(); ns.buffer = noiseBuf(); ns.loop = true;
+        var nf = ctx.createBiquadFilter(); nf.type = 'bandpass';
+        nf.frequency.value = 1250; nf.Q.value = 0.8;
+        var ne = ctx.createGain();
+        arch(ne.gain, t, dur, g * o.friction, 4, 0.45);
+        ns.connect(nf); nf.connect(ne); ne.connect(dest);
+        if (o.room) room(ne, o.room * 0.8, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+        ns.start(at0(t), Math.random() * 1.5); ns.stop(t + dur + 0.02);
+      }
+      if (o.room) room(env, o.room, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+      src.start(t); src.stop(t + dur + 0.02);
+      // much quieter contact than before, and no settle thump: both were putting
+      // the envelope peak at 0% where the references put it near the middle
+      loadThump(t, 72, g * 0.12);
+    }
+
+    // R6-A "MID-FORWARD, DRY" — the EQ fix alone. 0.7-2kHz brought up from 4-6%
+    // toward the references' 19-38%, bass pulled down from 67-75% toward 27-39%,
+    // envelope arched to peak in the middle. No room, so this isolates whether
+    // the spectrum and the gesture were the problem.
+    L.r6a = function (g, at) {
+      creak6(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.72, {});
+    };
+
+    // R6-B "IN A ROOM" — A plus the 0.3s tail every reference has and no
+    // candidate of mine ever had. If dryness is what has been reading as
+    // synthetic, this is where it stops.
+    L.r6b = function (g, at) {
+      creak6(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.72,
+        { room: 0.5, roomDur: 0.26, roomDecay: 3, roomDamp: 0.35 });
+    };
+
+    // R6-C "ROOM + MOVING TIMBRE" — B, plus the release sharpness of each slip
+    // scaling with how hard that slip is, so harder releases are brighter. The
+    // references' centroid wobbles ±28-34% of its mean; r4a managed 17%, i.e.
+    // its timbre barely moves. Physically this is just: a harder release lets go
+    // faster.
+    L.r6c = function (g, at) {
+      creak6(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.63,
+        { room: 0.5, roomDur: 0.26, roomDecay: 3, roomDamp: 0.35, friction: 0.13 });
+    };
+
     return L;
   }
 
@@ -658,7 +789,14 @@
     { id: 'r5b', round: 5, falls: true, label: 'B — BURSTS AND STALLS', dur: 1.0, pitchable: true,
       blurb: 'Tighter clusters, but a 7% chance per slip of the joint catching and holding for 3-9× the interval. This is the references\' +5 skew made explicit: quick slipping, punctuated by stalls.' },
     { id: 'r5c', round: 5, falls: true, irregular: true, label: 'C — SPARSE AND HARD', dur: 1.0, pitchable: true,
-      blurb: 'Fewer, harder, better-separated releases, aimed at the references\' 16-18dB crest factor against my 12-15. Closer to discrete crackling than to a tone — slips you can almost count.' }
+      blurb: 'Fewer, harder, better-separated releases, aimed at the references\' 16-18dB crest factor against my 12-15. Closer to discrete crackling than to a tone — slips you can almost count.' },
+
+    { id: 'r6a', round: 6, falls: true, label: 'A — MID-FORWARD, DRY', dur: 1.0, pitchable: true,
+      blurb: 'The EQ and gesture fix alone. 0.7-2kHz raised from 4-6% to 38% (references: 19-38%), bass cut from 67-75% to 30% (references: 27-39%), and the envelope arched to peak halfway through instead of at the very start. Still bone dry.' },
+    { id: 'r6b', round: 6, falls: true, label: 'B — IN A ROOM', dur: 1.0, pitchable: true,
+      blurb: 'A plus the 0.3s decay tail every reference has and no candidate of mine ever had. 250-300ms is far too long for wood to ring — it is the room the recording was made in, and being bone dry may be what has read as synthetic all along.' },
+    { id: 'r6c', round: 6, falls: true, label: 'C — ROOM + FRICTION BED', dur: 1.0, pitchable: true,
+      blurb: 'B plus continuous contact noise between the slips, sitting inside the body\'s own mid region. Real creaks cross zero 1845-3708 times/sec; a pure impulse train manages 600 and no EQ closes that gap. This one measures 2890.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
