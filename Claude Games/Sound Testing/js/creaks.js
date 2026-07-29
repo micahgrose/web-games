@@ -108,8 +108,14 @@
             pv = w3;
           }
         } else
+        // The LOAD curve. Linear was an assumption from round 1 that six rounds
+        // never questioned: elastic loading against a stiffening contact is not
+        // necessarily a straight line. >1 = slow build then a rush into the
+        // release; <1 = grabs immediately then eases.
         for (var k = 0; k < per && i < n; k++, i++) {
-          d[i] = amp * (k < load ? (k / load) * 2 - 1 : 1 - ((k - load) / relC) * 2);
+          d[i] = amp * (k < load
+            ? (o.loadCurve ? Math.pow(k / load, o.loadCurve) : k / load) * 2 - 1
+            : 1 - ((k - load) / relC) * 2);
         }
         // GRIT: noise at the moment of release, scaled by how hard that slip
         // was — the contact point shattering as it lets go. Broadband energy
@@ -750,6 +756,66 @@
         { room: 0.5, roomDur: 0.26, roomDecay: 3, roomDamp: 0.35, friction: 0.13 });
     };
 
+    // ================================================================
+    // ROUND 7 — A and B are close; C's friction bed is out. Ten variations on
+    // the A/B base, varying things one at a time INCLUDING several I had frozen
+    // since round 2 and never questioned: the duration, the slip-rate range,
+    // the shape of the load ramp, and what the body is made of.
+    //
+    // v1 and v2 are the unchanged controls, so anything that improves has to
+    // beat them and not just differ from them.
+    // ================================================================
+
+    // creak1.mp3's body instead of creak3.mp3's — a different object entirely,
+    // rebalanced the same way (a resonance table carries frequencies, not levels).
+    var WOOD7B = [[43, 0.12, 1], [129, 0.16, 2], [205, 0.3, 4], [301, 0.34, 2],
+                  [1023, 1.0, 8], [1550, 0.85, 6], [2400, 0.5, 5]];
+
+    function creak7(t, o) {
+      var dur = o.dur || 1.0;
+      var g = (o.g === undefined ? 1 : o.g) * (o.trim || 1);
+      var lo = o.rateLo === undefined ? 44 : o.rateLo;
+      var hi = o.rateHi === undefined ? 156 : o.rateHi;
+      var rate = function (u) {
+        var p = L.pitch;
+        if (u < 0.08) return p * (lo + (hi - lo) * 0.72 * (u / 0.08));
+        return p * (hi - (hi - lo) * Math.pow((u - 0.08) / 0.92, 0.75));
+      };
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, rate,
+        { ampJitter: o.ampJitter || 0.55, jitter: 0.16, wander: 0.01,
+          release: o.release || 0.00012, grit: o.grit === undefined ? 0.35 : o.grit,
+          relVar: 1, loadCurve: o.loadCurve, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+      var env = ctx.createGain();
+      arch(env.gain, t, dur, g * 0.55, o.humps || 4, o.peakAt || 0.45);
+      src.connect(env);
+      var wood = (o.wood || WOOD6).map(function (f) {
+        return o.qMul ? [f[0], f[1], f[2] * o.qMul] : f;
+      });
+      body(env, wood, dest);
+      bright(env, o.bright === undefined ? 0.5 : o.bright, 1500);
+      if (o.room) room(env, o.room, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+      src.start(t); src.stop(t + dur + 0.02);
+      if (o.thump !== 0) loadThump(t, 72, g * (o.thump === undefined ? 0.12 : o.thump));
+    }
+    function v(o, trim) {
+      return function (g, at) {
+        o.g = (g === undefined ? 1 : g); o.trim = trim;
+        creak7(ctx.currentTime + (at || 0), o);
+      };
+    }
+
+    L.v1  = v({ }, 0.768);                                        // control, dry
+    L.v2  = v({ room: 0.5 }, 0.722);                              // control, room
+    L.v3  = v({ room: 0.5, dur: 0.5 }, 0.773);                    // half as long
+    L.v4  = v({ room: 0.5, dur: 1.8, humps: 6 }, 0.673);          // nearly twice as long
+    L.v5  = v({ room: 0.5, rateLo: 22, rateHi: 70 }, 0.752);      // much slower slipping
+    L.v6  = v({ room: 0.5, rateLo: 95, rateHi: 300 }, 0.738);     // much faster slipping
+    L.v7  = v({ room: 0.5, loadCurve: 2.2 }, 0.739);              // elastic load curve
+    L.v8  = v({ room: 0.22, qMul: 4 }, 1.341);                     // the WOOD rings, less room
+    L.v9  = v({ room: 0.5, wood: WOOD7B }, 1.163);                // a different object
+    L.v10 = v({ room: 0.5, peakAt: 0.2, humps: 1, thump: 0 }, 0.714); // one early swell, no contact
+
     return L;
   }
 
@@ -796,7 +862,28 @@
     { id: 'r6b', round: 6, falls: true, label: 'B — IN A ROOM', dur: 1.0, pitchable: true,
       blurb: 'A plus the 0.3s decay tail every reference has and no candidate of mine ever had. 250-300ms is far too long for wood to ring — it is the room the recording was made in, and being bone dry may be what has read as synthetic all along.' },
     { id: 'r6c', round: 6, falls: true, label: 'C — ROOM + FRICTION BED', dur: 1.0, pitchable: true,
-      blurb: 'B plus continuous contact noise between the slips, sitting inside the body\'s own mid region. Real creaks cross zero 1845-3708 times/sec; a pure impulse train manages 600 and no EQ closes that gap. This one measures 2890.' }
+      blurb: 'B plus continuous contact noise between the slips, sitting inside the body\'s own mid region. Real creaks cross zero 1845-3708 times/sec; a pure impulse train manages 600 and no EQ closes that gap. This one measures 2890.' },
+
+    { id: 'v1',  round: 7, falls: true, label: 'v1 — CONTROL, DRY', dur: 1.0, pitchable: true,
+      blurb: 'Round 6 A unchanged. The control: anything below has to beat this, not merely differ from it.' },
+    { id: 'v2',  round: 7, falls: true, label: 'v2 — CONTROL, ROOM', dur: 1.0, pitchable: true,
+      blurb: 'Round 6 B unchanged. The other control.' },
+    { id: 'v3',  round: 7, falls: true, label: 'v3 — HALF AS LONG', dur: 0.5, pitchable: true,
+      blurb: 'Duration has been frozen at 1.0s since round 2 purely because the references averaged 1.04s. 0.5s.' },
+    { id: 'v4',  round: 7, falls: true, label: 'v4 — NEARLY TWICE AS LONG', dur: 1.8, pitchable: true,
+      blurb: 'The other end of the same frozen axis: 1.8s, with more swells to fill it.' },
+    { id: 'v5',  round: 7, falls: true, label: 'v5 — MUCH SLOWER SLIPPING', dur: 1.0, pitchable: true,
+      blurb: '70→22 slips/sec instead of 156→44. Below everything the references measured — worth knowing which side of them is better.' },
+    { id: 'v6',  round: 7, falls: true, label: 'v6 — MUCH FASTER SLIPPING', dur: 1.0, pitchable: true,
+      blurb: '300→95 slips/sec. Above everything the references measured, and close to round 1\'s A, which you said had the wrong material but was otherwise interesting.' },
+    { id: 'v7',  round: 7, falls: true, label: 'v7 — ELASTIC LOAD CURVE', dur: 1.0, pitchable: true,
+      blurb: 'The stick phase builds on a curve instead of a straight line — slow at first, rushing into the release. This is the shape of the excitation itself, assumed linear in round 1 and never questioned since.' },
+    { id: 'v8',  round: 7, falls: true, label: 'v8 — THE WOOD RINGS', dur: 1.0, pitchable: true,
+      blurb: 'Body resonances 4× narrower so the material itself rings, with much less room. Tests whether the tail wants to come from the object rather than the space.' },
+    { id: 'v9',  round: 7, falls: true, label: 'v9 — A DIFFERENT OBJECT', dur: 1.0, pitchable: true,
+      blurb: 'Body modes read off creak1.mp3 instead of creak3.mp3 — a 1023Hz-dominant object rather than a 172Hz-dominant one. Same mechanism, different thing creaking.' },
+    { id: 'v10', round: 7, falls: true, label: 'v10 — ONE EARLY SWELL', dur: 1.0, pitchable: true,
+      blurb: 'One swell peaking a fifth of the way in instead of four peaking halfway, and no contact thump at all. A different gesture: something that gives way at once rather than being worked.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
