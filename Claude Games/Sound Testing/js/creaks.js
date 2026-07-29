@@ -794,6 +794,27 @@
       });
       body(env, wood, dest);
       bright(env, o.bright === undefined ? 0.5 : o.bright, 1500);
+      // THE SQUEAL. One very high-Q resonance driven by the SAME slip source,
+      // gliding down with the gesture. Deliberately not a separate voice layered
+      // over the top: round 1 established that an independent layer detaches and
+      // becomes its own object (a whoosh then, a scream when it was high and
+      // sustained). Excited by the slips, it is a squeaky mode OF the joint.
+      // The small random walk on its frequency is what makes it read as a fault
+      // rather than as a performance — an LFO here would sound like vibrato.
+      if (o.squeal) {
+        var sq = ctx.createBiquadFilter();
+        sq.type = 'bandpass'; sq.Q.value = o.squealQ || 26;
+        var hz = o.squealHz || [2300, 1350], w = 0;
+        for (var st = 0; st <= dur; st += 0.015) {
+          var u = st / dur;
+          w = w * 0.75 + rnd(-1, 1) * 0.045;
+          sq.frequency.setValueAtTime(
+            Math.max(300, hz[0] * Math.pow(hz[1] / hz[0], u) * (1 + w)), at0(t + st));
+        }
+        var sg = ctx.createGain(); sg.gain.value = g * o.squeal;
+        env.connect(sq); sq.connect(sg); sg.connect(dest);
+        if (o.room) room(sg, o.room * 0.9, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
+      }
       if (o.room) room(env, o.room, o.roomDur || 0.26, o.roomDecay || 3, o.roomDamp || 0.35);
       src.start(t); src.stop(t + dur + 0.02);
       if (o.thump !== 0) loadThump(t, 72, g * (o.thump === undefined ? 0.12 : o.thump));
@@ -861,6 +882,41 @@
     L.v16 = combo2({ loadCurve: 3.6 }, 1.079);              // ... load curve much stronger
     L.v17 = combo2({ loadCurve: 1.4 }, 1.150);              // ... load curve much milder
     L.v18 = combo2({ qMul: 4, room: 0.22 }, 1.953);         // ... plus v8's ringing body
+
+    // ---------- ROUND 10 — v17 as the base, + squeal, + v14 ----------
+    // v17 won round 9, so the load curve STAYS at 1.4 — not pushed further
+    // toward straight. "Don't amplify what it did best" is the opposite of what
+    // I did in earlier rounds, where a winning axis got pushed until it broke
+    // (round 2's brightness, round 5's interval spread), and it is the better
+    // instinct: a value that wins a bracket is evidence about that value, not a
+    // direction to keep travelling in.
+    //
+    // Two new ingredients, crossed with each other:
+    //   SQUEAL  a high-Q joint mode driven by the slips, gliding 2300→1350Hz
+    //   v14     its slower rate (110→32) AND its ringing body (Q ×4, less room),
+    //           tried separately as well as together — v14 was two changes at
+    //           once and there is no evidence yet about which of them mattered
+    var V17 = { room: 0.5, loadCurve: 1.4, wood: WOOD7B, peakAt: 0.2, humps: 1, thump: 0 };
+    var SLOW = { rateLo: 32, rateHi: 110 };            // v14's rate
+    var RING = { qMul: 4, room: 0.22 };                // v14's body
+    function mix() {
+      var o = {}, i, a;
+      for (i = 0; i < arguments.length; i++) {
+        a = arguments[i];
+        Object.keys(a).forEach(function (k) { o[k] = a[k]; });
+      }
+      return o;
+    }
+    function base17(over, trim) { return v(mix(V17, over || {}), trim); }
+
+    L.v19 = base17({}, 1.044);                                   // control = v17
+    L.v20 = base17({ squeal: 0.5 }, 1.049);                      // + light squeal
+    L.v21 = base17({ squeal: 1.1 }, 1.053);                      // + stronger squeal
+    L.v22 = base17(SLOW, 1.224);                                 // + v14's rate only
+    L.v23 = base17(mix(SLOW, { squeal: 0.7 }), 1.165);           // + v14's rate + squeal
+    L.v24 = base17(RING, 1.954);                                 // + v14's body only
+    L.v25 = base17(mix(SLOW, RING), 2.545);                      // + all of v14
+    L.v26 = base17(mix(SLOW, RING, { squeal: 0.7 }), 2.482);     // + all of v14 + squeal
 
     return L;
   }
@@ -947,7 +1003,24 @@
     { id: 'v17', round: 9, falls: true, label: 'v17 — milder load curve', dur: 1.0, pitchable: true,
       blurb: 'v15 with the curve nearly straight again — the other side of the same bracket, close to the linear ramp every round before 7 assumed.' },
     { id: 'v18', round: 9, falls: true, label: 'v18 — plus a ringing body', dur: 1.0, pitchable: true,
-      blurb: 'v15 with v8\'s narrow resonances and reduced room added on top, bridging this combination to the round-8 one.' }
+      blurb: 'v15 with v8\'s narrow resonances and reduced room added on top, bridging this combination to the round-8 one.' },
+
+    { id: 'v19', round: 10, falls: true, label: 'v19 — v17 (control)', dur: 1.0, pitchable: true,
+      blurb: 'v17 unchanged. The load curve stays at 1.4 rather than being pushed further toward straight — a value that wins a bracket is evidence about that value, not a direction to keep travelling in.' },
+    { id: 'v20', round: 10, falls: true, poly: true, label: 'v20 — + light squeal', dur: 1.0, pitchable: true,
+      blurb: 'A high-Q joint mode driven by the same slips, gliding 2300→1350Hz with a small random walk. Driven by the slips rather than layered over them, because an independent high layer detaches and becomes its own object.' },
+    { id: 'v21', round: 10, falls: true, poly: true, label: 'v21 — + stronger squeal', dur: 1.0, pitchable: true,
+      blurb: 'The same squeal, roughly twice as present. Round 1 found that this register turns into a scream when it gets loud and sustained, so this is the upper bracket.' },
+    { id: 'v22', round: 10, falls: true, label: 'v22 — + v14\'s rate', dur: 1.0, pitchable: true,
+      blurb: 'v19 slowed to 110→32 slips/sec. v14 changed two things at once; this isolates the rate.' },
+    { id: 'v23', round: 10, falls: true, poly: true, label: 'v23 — + v14\'s rate + squeal', dur: 1.0, pitchable: true,
+      blurb: 'v22 with the squeal. A slower slip rate leaves more room between releases for a resonance to sing through.' },
+    { id: 'v24', round: 10, falls: true, label: 'v24 — + v14\'s body', dur: 1.0, pitchable: true,
+      blurb: 'v19 with v14\'s other half: resonances 4× narrower and much less room, so the tail comes from the object. No squeal, no rate change.' },
+    { id: 'v25', round: 10, falls: true, label: 'v25 — + all of v14', dur: 1.0, pitchable: true,
+      blurb: 'Both halves of v14 together on the v17 base, no squeal.' },
+    { id: 'v26', round: 10, falls: true, poly: true, label: 'v26 — + all of v14 + squeal', dur: 1.0, pitchable: true,
+      blurb: 'Everything: v17\'s gesture and load curve, v14\'s slower rate and ringing body, and the squeal.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
