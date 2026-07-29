@@ -21,7 +21,7 @@ var REFDIR = path.join(__dirname, '..', 'reference');
 var AUDIO = /\.(wav|mp3|flac|ogg|m4a|aac|aiff?|opus)$/i;
 var args = process.argv.slice(2);
 var COMPARE = args.indexOf('--compare') >= 0;
-var ids = args.filter(function (a) { return /^r\d/.test(a); });
+var ids = args.filter(function (a) { return /^[rv]\d/.test(a); });
 
 var N = 1024, HOP = 256;
 var HANN = new Float32Array(N);

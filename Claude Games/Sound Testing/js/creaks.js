@@ -816,6 +816,31 @@
     L.v9  = v({ room: 0.5, wood: WOOD7B }, 1.163);                // a different object
     L.v10 = v({ room: 0.5, peakAt: 0.2, humps: 1, thump: 0 }, 0.714); // one early swell, no contact
 
+    // ---------- ROUND 8 — v6 + v8 + v9 ----------
+    // Fast slipping (300→95/sec), a body that RINGS (Q ×4, little room), and
+    // creak1.mp3's 1023Hz-dominant object instead of creak3's 172Hz one.
+    //
+    // Worth noting what this combination is: it walks back two things the
+    // measurements pushed me toward. The rate is well above anything the three
+    // references measured, and the tail now comes from the object rather than
+    // from the room. Both were "corrections" I made on the strength of an
+    // average over three files — and an average of three is not a target.
+    //
+    // v11 is the combination exactly as asked. v12-v14 sit around it, because a
+    // single sound with nothing beside it is hard to judge, and the balance
+    // between ring and room is exactly the thing this combination makes live.
+    var COMBO = { rateLo: 95, rateHi: 300, wood: WOOD7B, qMul: 4, room: 0.22 };
+    function combo(over, trim) {
+      var o = {};
+      Object.keys(COMBO).forEach(function (k) { o[k] = COMBO[k]; });
+      Object.keys(over || {}).forEach(function (k) { o[k] = over[k]; });
+      return v(o, trim);
+    }
+    L.v11 = combo({}, 1.401);                          // exactly v6 + v8 + v9
+    L.v12 = combo({ room: 0.5 }, 1.379);               // ... with v9's fuller room back
+    L.v13 = combo({ qMul: 8, room: 0.1 }, 1.431);      // ... ringing harder, nearly no room
+    L.v14 = combo({ rateLo: 70, rateHi: 220 }, 1.452); // ... rate between v6 and the base
+
     return L;
   }
 
@@ -883,7 +908,16 @@
     { id: 'v9',  round: 7, falls: true, label: 'v9 — A DIFFERENT OBJECT', dur: 1.0, pitchable: true,
       blurb: 'Body modes read off creak1.mp3 instead of creak3.mp3 — a 1023Hz-dominant object rather than a 172Hz-dominant one. Same mechanism, different thing creaking.' },
     { id: 'v10', round: 7, falls: true, label: 'v10 — ONE EARLY SWELL', dur: 1.0, pitchable: true,
-      blurb: 'One swell peaking a fifth of the way in instead of four peaking halfway, and no contact thump at all. A different gesture: something that gives way at once rather than being worked.' }
+      blurb: 'One swell peaking a fifth of the way in instead of four peaking halfway, and no contact thump at all. A different gesture: something that gives way at once rather than being worked.' },
+
+    { id: 'v11', round: 8, falls: true, label: 'v11 — v6 + v8 + v9', dur: 1.0, pitchable: true,
+      blurb: 'The combination exactly as asked: fast slipping (300→95/sec), a body that rings rather than a room that does, and creak1\'s 1023Hz-dominant object. Note this walks back two things the three-file average had pushed me toward.' },
+    { id: 'v12', round: 8, falls: true, label: 'v12 — combo, fuller room', dur: 1.0, pitchable: true,
+      blurb: 'v11 with v9\'s room level restored. Ring and room together instead of ring instead of room.' },
+    { id: 'v13', round: 8, falls: true, label: 'v13 — combo, ringing harder', dur: 1.0, pitchable: true,
+      blurb: 'v11 pushed further the same direction: resonances twice as narrow again, room almost gone. All tail from the object.' },
+    { id: 'v14', round: 8, falls: true, label: 'v14 — combo, rate pulled back', dur: 1.0, pitchable: true,
+      blurb: 'v11 at 220→70/sec instead of 300→95 — halfway between v6 and the base, in case v6 was right in direction but overshot.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

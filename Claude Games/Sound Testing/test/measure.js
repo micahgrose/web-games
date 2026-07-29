@@ -40,7 +40,7 @@ function render(id) {
 
 
 (async function () {
-  var only = process.argv.filter(function (a) { return /^r\d/.test(a); });
+  var only = process.argv.filter(function (a) { return /^[rv]\d/.test(a); });
   var list = Creaks.CATALOG.filter(function (c) { return !only.length || only.indexOf(c.id) >= 0; });
   var wi = process.argv.indexOf('--wav');
   var wavDir = wi > 0 ? (process.argv[wi + 1] || '.') : null;
