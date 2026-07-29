@@ -1067,6 +1067,18 @@
     L.v56 = base17(mix(V47, { dur: 0.5, roomDur: 0.14 }), 1.038);                   // compressed + room scaled
     L.v57 = base17(mix(V47, { dur: 0.5, roomDur: 0.14, rateLo: 60, rateHi: 200 }), 1.066); // ... and quicker slipping
 
+    // ---------- ROUND 16 — v46 compacted to 0.5s ----------
+    // Same four treatments as round 15, on the grit-free version. Worth its own
+    // set rather than assuming round 15's answer carries over: v46 and v47 sit
+    // at opposite ends of the grit axis, and grit is broadband energy at the
+    // moment of release — the part of the sound most affected by having half as
+    // long to happen in.
+    var V46 = mix(V27FULL, { grit: 0 });
+    L.v58 = base17(mix(V46, { dur: 0.5 }), 1.121);                                  // compressed
+    L.v59 = base17(mix(V46, { dur: 0.5, rateLo: 78 }), 1.053);                      // truncated
+    L.v60 = base17(mix(V46, { dur: 0.5, roomDur: 0.14 }), 1.111);                   // compressed + room scaled
+    L.v61 = base17(mix(V46, { dur: 0.5, roomDur: 0.14, rateLo: 60, rateHi: 200 }), 0.958); // ... and quicker slipping
+
     return L;
   }
 
@@ -1236,7 +1248,16 @@
     { id: 'v56', round: 15, falls: true, poly: true, label: 'v56 — compressed, room scaled', dur: 0.5, pitchable: true,
       blurb: 'v54 with the room shortened to match. A 0.26s tail is a quarter of a 1.0s sound but half of a 0.5s one, so without this the short version is proportionally far wetter.' },
     { id: 'v57', round: 15, falls: true, poly: true, label: 'v57 — compressed, quicker slipping', dur: 0.5, pitchable: true,
-      blurb: 'v56 at 200→60 slips/sec. A shorter creak usually comes from something lighter or smaller, which slips faster as well as for less long.' }
+      blurb: 'v56 at 200→60 slips/sec. A shorter creak usually comes from something lighter or smaller, which slips faster as well as for less long.' },
+
+    { id: 'v58', round: 16, falls: true, poly: true, label: 'v58 — v46 compressed to 0.5s', dur: 0.5, pitchable: true,
+      blurb: 'The grit-free version at half length: the same 156→44 fall happening twice as fast.' },
+    { id: 'v59', round: 16, falls: true, poly: true, label: 'v59 — v46 truncated to 0.5s', dur: 0.5, pitchable: true,
+      blurb: 'The joint falls at its usual rate and the sound stops early, ending near 78 — shorter rather than faster.' },
+    { id: 'v60', round: 16, falls: true, poly: true, label: 'v60 — compressed, room scaled', dur: 0.5, pitchable: true,
+      blurb: 'v58 with the tail shortened to match, so the wet/dry balance stays where v46 had it instead of doubling by accident.' },
+    { id: 'v61', round: 16, falls: true, poly: true, label: 'v61 — compressed, quicker slipping', dur: 0.5, pitchable: true,
+      blurb: 'v60 at 200→60 slips/sec — something lighter, slipping faster as well as for less long.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
