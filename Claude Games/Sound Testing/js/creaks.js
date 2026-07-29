@@ -72,7 +72,23 @@
         if (o.chaos && chaos <= 0 && Math.random() < o.chaos) chaos = Math.round(rnd(5, 18));
         var j2 = chaos > 0 ? Math.max(jit, 0.1) * 6 : jit;
         if (chaos > 0) chaos--;
-        var per = Math.max(relS + 3, Math.round(SR / rate * mult * (1 + rnd(-j2, j2))));
+        // INTERVAL DISTRIBUTION. Uniform ±10% jitter gives interval CV ~0.15 and
+        // lag-1 correlation ~0.85 — a metronome that drifts. Real creaks measure
+        // CV 0.53-0.96, skew +1.6 to +6.4, lag-1 0.06-0.39: many short intervals
+        // with occasional long gaps, each drawn INDEPENDENTLY of the last. The
+        // slip rate is the mean of a random point process, not a frequency.
+        // o.cv = lognormal spread (skewed by construction, independent draws).
+        // o.pause = chance of a long stall, which is what makes the skew big.
+        var jf;
+        if (o.cv) {
+          var sig = Math.sqrt(Math.log(1 + o.cv * o.cv));
+          var u1 = Math.max(1e-9, Math.random()), u2 = Math.random();
+          var gs = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+          jf = Math.exp(sig * gs - sig * sig / 2);
+          if (o.pause && Math.random() < o.pause) jf *= rnd(3, 9);
+          jf = Math.max(0.25, Math.min(12, jf));
+        } else jf = 1 + rnd(-j2, j2);
+        var per = Math.max(relS + 3, Math.round(SR / rate * mult * jf));
         var amp = 1 - Math.random() * ajit;
         var load = per - relS;
         // In a scrape there is no coherent release at all — the contact is
@@ -535,6 +551,74 @@
         { rel: 0.0004, grit: 0.95, bright: 0.7, chaos: 0.045, swells: 8 });
     };
 
+    // ================================================================
+    // ROUND 5 — round 4's A and B were closest but "still not quite creaks",
+    // and the rate needs to work DOWN, not up. Deep analysis (test/deep.js)
+    // found where mine and real actually diverge, and it is not the spectrum:
+    //
+    //                       real            mine (r3/r4)
+    //   interval CV         0.53 - 0.96     0.13 - 0.22
+    //   interval skew       +1.6 - +6.4     +0.7 - +1.9
+    //   lag-1 correlation   0.06 - 0.39     0.30 - 0.87
+    //   crest factor        15.6 - 17.9dB   12.7 - 15.7dB
+    //
+    // A real creak is not a pulse train at frequency f. It is a BURST PROCESS:
+    // clusters of quick slips broken by irregular stalls, each interval drawn
+    // independently of the last. Uniform ±10% jitter around a gliding rate
+    // produces a metronome by comparison — which is why every candidate so far
+    // reads as a buzzing tone with a pitch rather than as discrete crackling.
+    // ================================================================
+
+    // Falls. creak1 runs 143→44Hz across its whole length and creak3 ends at
+    // 44Hz — the joint is losing its grip, not winding up. Everything before
+    // round 5 climbed, on an assumption I never checked against the recordings.
+    function rate5(u) {
+      var p = L.pitch;
+      if (u < 0.08) return p * (112 + 44 * (u / 0.08));      // the initial catch
+      var x = (u - 0.08) / 0.92;
+      return p * (156 - 112 * Math.pow(x, 0.75));            // and then it lets go
+    }
+
+    function creak5(t, dur, g, o) {
+      var src = ctx.createBufferSource();
+      src.buffer = slipBuffer(dur, rate5,
+        { ampJitter: o.ampJitter || 0.6, wander: 0, release: 0.00008,
+          cv: o.cv, pause: o.pause, grit: o.grit, regime: 0.012, regimeSet: [0.72, 1, 1, 1.38] });
+      var env = ctx.createGain();
+      // 1.6-2.3Hz is the dominant surge rate in all three references — one or
+      // two big swells per second, not the 4-8 I had been using.
+      surge(env.gain, t, dur, g * 0.55, o.swells || 2, 0.05, 0.97);
+      src.connect(env);
+      body(env, WOOD4, dest);
+      bright(env, o.bright === undefined ? 0.5 : o.bright);
+      src.start(t); src.stop(t + dur + 0.02);
+      loadThump(t, 72, g * 0.4);
+      loadThump(t + dur * 0.95, 62, g * 0.22);
+    }
+
+    // R5-A "HEAVY-TAILED" — intervals drawn from a lognormal at CV 0.7, each
+    // independent of the last. Same mean rate, same spectrum, but the timing
+    // statistics of a real joint instead of a jittered metronome.
+    L.r5a = function (g, at) {
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.78, { cv: 0.7 });
+    };
+
+    // R5-B "BURSTS AND STALLS" — tighter clusters (CV 0.35) but a 7% chance per
+    // slip of stalling for 3-9× the interval. This is the +5 skew made explicit:
+    // mostly quick slipping, punctuated by the joint catching and holding.
+    L.r5b = function (g, at) {
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.7,
+        { cv: 0.35, pause: 0.07 });
+    };
+
+    // R5-C "SPARSE AND HARD" — fewer, harder, better separated releases, aimed
+    // at the references' 16-18dB crest factor. Closer to discrete crackling
+    // than to a tone: the slips are events you can almost count.
+    L.r5c = function (g, at) {
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.63,
+        { cv: 0.85, pause: 0.05, ampJitter: 0.85, bright: 0.62 });
+    };
+
     return L;
   }
 
@@ -567,7 +651,14 @@
     { id: 'r4b', round: 4, label: 'B — PER-SLIP GRIT', dur: 1.0, pitchable: true,
       blurb: 'Same top end reached differently: every release throws a burst of noise scaled to how hard that slip was — the contact shattering as it lets go. Noise bound to the events, never a free-running layer.' },
     { id: 'r4c', round: 4, label: 'C — EPISODIC', dur: 1.0, pitchable: true,
-      blurb: 'B plus the intermittency the recordings show: stretches where the joint stops slipping cleanly and just chatters. References run 43-86% periodic; every candidate before this ran ~100%.' }
+      blurb: 'B plus the intermittency the recordings show: stretches where the joint stops slipping cleanly and just chatters. References run 43-86% periodic; every candidate before this ran ~100%.' },
+
+    { id: 'r5a', round: 5, falls: true, label: 'A — HEAVY-TAILED', dur: 1.0, pitchable: true,
+      blurb: 'The rate now FALLS (156→44), and intervals are drawn from a lognormal at CV 0.7, each independent of the last. Real creaks measure CV 0.53-0.96; every candidate before this measured 0.13-0.22 — a metronome by comparison.' },
+    { id: 'r5b', round: 5, falls: true, label: 'B — BURSTS AND STALLS', dur: 1.0, pitchable: true,
+      blurb: 'Tighter clusters, but a 7% chance per slip of the joint catching and holding for 3-9× the interval. This is the references\' +5 skew made explicit: quick slipping, punctuated by stalls.' },
+    { id: 'r5c', round: 5, falls: true, irregular: true, label: 'C — SPARSE AND HARD', dur: 1.0, pitchable: true,
+      blurb: 'Fewer, harder, better-separated releases, aimed at the references\' 16-18dB crest factor against my 12-15. Closer to discrete crackling than to a tone — slips you can almost count.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

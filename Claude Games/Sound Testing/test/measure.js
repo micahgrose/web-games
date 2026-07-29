@@ -100,7 +100,18 @@ function render(id) {
     // simultaneous slip generators it locks onto whichever source happens to
     // dominate a window and reports nonsense trajectories, so skip the f0
     // checks there rather than pretend the number means something.
-    if (r.c.poly) return;
+    // A candidate built with interval CV 0.85 has no stable period BY DESIGN —
+    // that is the mechanism under test. Autocorrelation reports something, but
+    // whatever it reports is not a rate, so no direction check can apply.
+    if (r.c.poly || r.c.irregular) return;
+    // Direction is per-candidate, not universal. Round 5 is built to FALL
+    // throughout (creak1.mp3 runs 143→44Hz), so asserting a rise there would be
+    // the test contradicting the design rather than checking it.
+    if (r.c.falls) {
+      if (a.f0Early && a.f0Late && a.f0Late > a.f0Early * 0.95)
+        problems.push(id + ': rate does not fall (' + Math.round(a.f0Early) + ' > ' + Math.round(a.f0Late) + 'Hz)');
+      return;
+    }
     if (a.f0Early && a.f0Late && a.f0Late < a.f0Early * 1.05)
       problems.push(id + ': rate does not rise (' + Math.round(a.f0Early) + ' > ' + Math.round(a.f0Late) + 'Hz)');
     if (a.f0Late && a.f0Tail && a.f0Tail > a.f0Late * 0.92)

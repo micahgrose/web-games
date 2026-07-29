@@ -342,7 +342,12 @@ r4c             26%      15%      41%     18%       3646Hz
 All three now sit in or near the reference envelope where every previous
 candidate was off by a factor of ten.
 
-**Verdict: pending user listen.**
+**Verdict: A and B best, A slightly better, C "not it at all". All three still
+"don't sound quite like creaks."** Also: the rate needs to work DOWN, not up.
+
+So the spectrum was necessary but nowhere near sufficient — round 4 matched the
+references on duration, slip rate, band energy and centroid and still wasn't a
+creak. Whatever was missing had to be structure nobody had measured yet.
 
 ### Two things the lab caught building it
 
@@ -355,3 +360,80 @@ candidate was off by a factor of ten.
   load-and-release for those stretches. Even after fixing that it measures 96%,
   which is likely the 120ms contour window being too coarse to see 40-150ms
   episodes rather than the synthesis failing.
+
+---
+
+## THE SECOND BIG ONE — a creak is a BURST PROCESS, not a pulse train
+
+Round 4 matched every gross statistic and still wasn't a creak, so `test/deep.js`
+was built to measure the things the first pass never looked at: the shape of a
+single averaged slip cycle, crest factor, modulation depth, the spectrum of the
+envelope, interval statistics, and periodicity strength over time.
+
+The answer was in the interval statistics, and it is not subtle:
+
+```
+                       real creaks      mine (r3/r4)
+  interval CV          0.53 – 0.96      0.13 – 0.22
+  interval skew        +1.6 – +6.4      +0.7 – +1.9
+  lag-1 correlation    0.06 – 0.39      0.30 – 0.87
+  crest factor         15.6 – 17.9 dB   12.7 – 15.7 dB
+```
+
+**A real creak is not a pulse train at frequency f.** It is a burst process:
+clusters of quick slips broken by irregular stalls, with each interval drawn
+essentially independently of the last (lag-1 ≈ 0.1). The high positive skew says
+the distribution is heavy-tailed — mostly short intervals with occasional long
+gaps, which is the joint catching and holding.
+
+Uniform ±10% jitter around a smoothly gliding rate produces the opposite: lag-1
+0.87, CV 0.15. A metronome that drifts. That is why every candidate through
+round 4 read as a buzzing tone with a pitch rather than as discrete crackling —
+and no amount of spectral work was ever going to fix it, because the problem was
+in the time domain.
+
+**The general lesson: match the STATISTICS of the excitation, not just its
+spectrum.** Two sounds can have identical spectra, identical durations and
+identical envelopes and still be different objects, because what the ear
+identifies is the pattern of events.
+
+### Other findings from the deep pass
+
+- **Surge rate.** All three references peak at **1.6–2.3Hz** — one or two big
+  swells per second, plus faster shudder at 7–15Hz. I had been using 4–8 humps
+  per second, set purely by taste.
+- **Modulation depth is 100% in every reference AND in every candidate of
+  mine.** A rare case of already being right; the envelope does fall to near
+  silence between slips in both.
+- **Direction.** creak1 falls 143→44Hz across its entire length; creak3 ends at
+  44Hz. Only creak2 rises. Every candidate through round 4 climbed, on an
+  assumption I never checked against the recordings — and the user's correction
+  ("it needs to work down") matches the data.
+- **Pitch-synchronous pulse averaging** was built and works, but is too noisy on
+  these recordings to read a definitive release shape off. Recorded here as a
+  tool that exists rather than a finding.
+
+---
+
+## Round 5 — falling rate, and the timing statistics of a real joint
+
+Every candidate keeps r4a's sharp release (the user's preferred brightness
+route) and a falling 156→44Hz contour. They differ in how the intervals are
+generated.
+
+| id | name | mechanism |
+|----|------|-----------|
+| r5a | HEAVY-TAILED | intervals from a lognormal at CV 0.7, each independent of the last |
+| r5b | BURSTS AND STALLS | tighter clusters (CV 0.35) plus a 7% chance per slip of stalling 3–9× — the +5 skew made explicit |
+| r5c | SPARSE AND HARD | fewer, harder, better separated releases, aimed at the references' 16–18dB crest factor |
+
+```
+        CV     skew    lag-1    crest      direction
+target  0.53-0.96  +1.6-+6.4  0.06-0.39  15.6-17.9dB   falls
+r5a     0.46       +1.45      0.28       14.7dB        falls
+r5b     0.75       +5.05      0.13       14.8dB        falls
+r5c     0.62       +1.87      -0.03      17.0dB        falls
+```
+
+r5b reproduces creak1/creak3's timing profile almost exactly; r5c hits the crest
+factor target. **Verdict: pending user listen.**
