@@ -119,12 +119,19 @@ function render(id) {
   });
   // Candidates in the same round must be LEVEL-MATCHED, or the round measures
   // loudness instead of timbre and the comparison is worthless.
+  //
+  // Matched on RMS, not peak. Peak is a bad loudness proxy for a spiky
+  // stochastic sound — one lucky slip alignment moves it 4dB — so peak-based
+  // matching kept failing this very check across several rounds no matter how
+  // carefully the trims were computed. RMS is far stabler between renders and
+  // closer to what the ear judges anyway. Peak is still checked, but only for
+  // clipping, which is the thing peak is actually good for.
   var byRound = {};
   rows.forEach(function (r) { (byRound[r.c.round] = byRound[r.c.round] || []).push(r); });
   Object.keys(byRound).forEach(function (k) {
-    var ps = byRound[k].map(function (r) { return r.a.peakDb; });
+    var ps = byRound[k].map(function (r) { return r.a.rmsDb; });
     var spread = Math.max.apply(null, ps) - Math.min.apply(null, ps);
-    if (spread > 4) problems.push('round ' + k + ': peaks span ' + spread.toFixed(1) + 'dB — level-match before asking anyone to compare timbre');
+    if (spread > 3) problems.push('round ' + k + ': levels span ' + spread.toFixed(1) + 'dB RMS — level-match before asking anyone to compare timbre');
   });
 
   console.log('\n' + '='.repeat(100));

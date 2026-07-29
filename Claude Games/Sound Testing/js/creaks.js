@@ -610,14 +610,14 @@
     // independent of the last. Same mean rate, same spectrum, but the timing
     // statistics of a real joint instead of a jittered metronome.
     L.r5a = function (g, at) {
-      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.78, { cv: 0.7 });
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.384, { cv: 0.7 });
     };
 
     // R5-B "BURSTS AND STALLS" — tighter clusters (CV 0.35) but a 7% chance per
     // slip of stalling for 3-9× the interval. This is the +5 skew made explicit:
     // mostly quick slipping, punctuated by the joint catching and holding.
     L.r5b = function (g, at) {
-      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.7,
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.451,
         { cv: 0.35, pause: 0.07 });
     };
 
@@ -625,7 +625,7 @@
     // at the references' 16-18dB crest factor. Closer to discrete crackling
     // than to a tone: the slips are events you can almost count.
     L.r5c = function (g, at) {
-      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.63,
+      creak5(ctx.currentTime + (at || 0), 1.0, (g === undefined ? 1 : g) * 0.527,
         { cv: 0.85, pause: 0.05, ampJitter: 0.85, bright: 0.62 });
     };
 
@@ -805,41 +805,40 @@
       };
     }
 
-    L.v1  = v({ }, 0.768);                                        // control, dry
-    L.v2  = v({ room: 0.5 }, 0.722);                              // control, room
-    L.v3  = v({ room: 0.5, dur: 0.5 }, 0.773);                    // half as long
-    L.v4  = v({ room: 0.5, dur: 1.8, humps: 6 }, 0.673);          // nearly twice as long
-    L.v5  = v({ room: 0.5, rateLo: 22, rateHi: 70 }, 0.752);      // much slower slipping
-    L.v6  = v({ room: 0.5, rateLo: 95, rateHi: 300 }, 0.738);     // much faster slipping
-    L.v7  = v({ room: 0.5, loadCurve: 2.2 }, 0.739);              // elastic load curve
-    L.v8  = v({ room: 0.22, qMul: 4 }, 1.341);                     // the WOOD rings, less room
-    L.v9  = v({ room: 0.5, wood: WOOD7B }, 1.163);                // a different object
-    L.v10 = v({ room: 0.5, peakAt: 0.2, humps: 1, thump: 0 }, 0.714); // one early swell, no contact
+    L.v1  = v({ }, 0.953);                                        // control, dry
+    L.v2  = v({ room: 0.5 }, 0.993);                              // control, room
+    L.v3  = v({ room: 0.5, dur: 0.5 }, 0.974);                    // half as long
+    L.v4  = v({ room: 0.5, dur: 1.8, humps: 6 }, 0.945);          // nearly twice as long
+    L.v5  = v({ room: 0.5, rateLo: 22, rateHi: 70 }, 1.268);      // much slower slipping
+    L.v6  = v({ room: 0.5, rateLo: 95, rateHi: 300 }, 0.755);     // much faster slipping
+    L.v7  = v({ room: 0.5, loadCurve: 2.2 }, 0.934);              // elastic load curve
+    L.v8  = v({ room: 0.22, qMul: 4 }, 1.855);                     // the WOOD rings, less room
+    L.v9  = v({ room: 0.5, wood: WOOD7B }, 1.089);                // a different object
+    L.v10 = v({ room: 0.5, peakAt: 0.2, humps: 1, thump: 0 }, 0.966); // one early swell, no contact
 
-    // ---------- ROUND 8 — v6 + v8 + v9 ----------
-    // Fast slipping (300→95/sec), a body that RINGS (Q ×4, little room), and
-    // creak1.mp3's 1023Hz-dominant object instead of creak3's 172Hz one.
+    // ---------- ROUND 8 — v8 + v9 ----------
+    // A body that RINGS (Q ×4, little room) built from creak1.mp3's
+    // 1023Hz-dominant object instead of creak3's 172Hz one. v6's fast slipping
+    // is OUT: the rate is back to the base 156→44/sec, which is where the
+    // references actually sit.
     //
-    // Worth noting what this combination is: it walks back two things the
-    // measurements pushed me toward. The rate is well above anything the three
-    // references measured, and the tail now comes from the object rather than
-    // from the room. Both were "corrections" I made on the strength of an
-    // average over three files — and an average of three is not a target.
+    // So the one thing this still walks back from the measurements is where the
+    // tail comes from — the object rather than the room. That is the live
+    // question in this round, and v12/v13 bracket it.
     //
-    // v11 is the combination exactly as asked. v12-v14 sit around it, because a
-    // single sound with nothing beside it is hard to judge, and the balance
-    // between ring and room is exactly the thing this combination makes live.
-    var COMBO = { rateLo: 95, rateHi: 300, wood: WOOD7B, qMul: 4, room: 0.22 };
+    // v11 is the combination as asked. v12-v14 sit around it, because a single
+    // sound with nothing beside it is hard to judge.
+    var COMBO = { wood: WOOD7B, qMul: 4, room: 0.22 };
     function combo(over, trim) {
       var o = {};
       Object.keys(COMBO).forEach(function (k) { o[k] = COMBO[k]; });
       Object.keys(over || {}).forEach(function (k) { o[k] = over[k]; });
       return v(o, trim);
     }
-    L.v11 = combo({}, 1.401);                          // exactly v6 + v8 + v9
-    L.v12 = combo({ room: 0.5 }, 1.379);               // ... with v9's fuller room back
-    L.v13 = combo({ qMul: 8, room: 0.1 }, 1.431);      // ... ringing harder, nearly no room
-    L.v14 = combo({ rateLo: 70, rateHi: 220 }, 1.452); // ... rate between v6 and the base
+    L.v11 = combo({}, 1.813);                            // exactly v8 + v9
+    L.v12 = combo({ room: 0.5 }, 1.630);                 // ... with v9's fuller room back
+    L.v13 = combo({ qMul: 8, room: 0.1 }, 2.199);        // ... ringing harder, nearly no room
+    L.v14 = combo({ rateLo: 32, rateHi: 110 }, 2.060);   // ... slower than base, since fast is out
 
     return L;
   }
@@ -917,7 +916,7 @@
     { id: 'v13', round: 8, falls: true, label: 'v13 — combo, ringing harder', dur: 1.0, pitchable: true,
       blurb: 'v11 pushed further the same direction: resonances twice as narrow again, room almost gone. All tail from the object.' },
     { id: 'v14', round: 8, falls: true, label: 'v14 — combo, rate pulled back', dur: 1.0, pitchable: true,
-      blurb: 'v11 at 220→70/sec instead of 300→95 — halfway between v6 and the base, in case v6 was right in direction but overshot.' }
+      blurb: 'v11 at 110→32/sec — SLOWER than the base rather than faster, now that fast is out. Worth knowing whether the rate wants to move the other way.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

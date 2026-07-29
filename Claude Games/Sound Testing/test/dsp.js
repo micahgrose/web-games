@@ -266,10 +266,18 @@ function analyze(mono, sr) {
   if (btot > 0) for (i = 0; i < 4; i++) bands[i] /= btot;
 
   var sFrom = first * sr, span = (last - first) * sr;
+  // RMS over the ACTIVE region only. Measured across the whole render buffer it
+  // is really a duration measurement in disguise: a 0.5s candidate sitting in a
+  // 3s buffer reads several dB quieter than a 1.8s one at identical loudness,
+  // which made the level-match check fail on candidates that were in fact
+  // correctly matched.
+  var aFrom = Math.max(0, Math.floor(sFrom)), aTo = Math.min(mono.length, Math.ceil(last * sr));
+  var aSum = 0;
+  for (i = aFrom; i < aTo; i++) aSum += mono[i] * mono[i];
   return {
     bands: bands,
     peakDb: 20 * Math.log10(peak + 1e-9),
-    rmsDb: 20 * Math.log10(Math.sqrt(sumSq / mono.length) + 1e-9),
+    rmsDb: 20 * Math.log10(Math.sqrt(aSum / Math.max(1, aTo - aFrom)) + 1e-9),
     dur: last - first,
     centroid: mean(active, 'centroid'),
     centroidStart: mean(active.slice(0, third), 'centroid'),
