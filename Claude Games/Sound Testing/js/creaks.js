@@ -840,6 +840,28 @@
     L.v13 = combo({ qMul: 8, room: 0.1 }, 2.199);        // ... ringing harder, nearly no room
     L.v14 = combo({ rateLo: 32, rateHi: 110 }, 2.060);   // ... slower than base, since fast is out
 
+    // ---------- ROUND 9 — v7 + v9 + v10 ----------
+    // The elastic load curve (the stick phase builds on a curve, rushing into
+    // the release), creak1's 1023Hz-dominant object, and the single early swell
+    // with no contact thump — something giving way at once rather than being
+    // worked. Room stays at v7/v9/v10's level; the body does not ring.
+    //
+    // v16/v17 bracket the load curve, since it is the newest axis and the one
+    // with the least evidence behind it — it was added last round and has only
+    // ever been heard at a single value. v18 bridges to the round-8 combination
+    // by adding v8's ringing body on top.
+    var COMBO2 = { room: 0.5, loadCurve: 2.2, wood: WOOD7B, peakAt: 0.2, humps: 1, thump: 0 };
+    function combo2(over, trim) {
+      var o = {};
+      Object.keys(COMBO2).forEach(function (k) { o[k] = COMBO2[k]; });
+      Object.keys(over || {}).forEach(function (k) { o[k] = over[k]; });
+      return v(o, trim);
+    }
+    L.v15 = combo2({}, 1.076);                              // exactly v7 + v9 + v10
+    L.v16 = combo2({ loadCurve: 3.6 }, 1.079);              // ... load curve much stronger
+    L.v17 = combo2({ loadCurve: 1.4 }, 1.150);              // ... load curve much milder
+    L.v18 = combo2({ qMul: 4, room: 0.22 }, 1.953);         // ... plus v8's ringing body
+
     return L;
   }
 
@@ -916,7 +938,16 @@
     { id: 'v13', round: 8, falls: true, label: 'v13 — combo, ringing harder', dur: 1.0, pitchable: true,
       blurb: 'v11 pushed further the same direction: resonances twice as narrow again, room almost gone. All tail from the object.' },
     { id: 'v14', round: 8, falls: true, label: 'v14 — combo, rate pulled back', dur: 1.0, pitchable: true,
-      blurb: 'v11 at 110→32/sec — SLOWER than the base rather than faster, now that fast is out. Worth knowing whether the rate wants to move the other way.' }
+      blurb: 'v11 at 110→32/sec — SLOWER than the base rather than faster, now that fast is out. Worth knowing whether the rate wants to move the other way.' },
+
+    { id: 'v15', round: 9, falls: true, label: 'v15 — v7 + v9 + v10', dur: 1.0, pitchable: true,
+      blurb: 'The elastic load curve, creak1\'s 1023Hz object, and the single early swell with no contact thump — something giving way at once rather than being worked. Room as in all three; the body does not ring.' },
+    { id: 'v16', round: 9, falls: true, label: 'v16 — stronger load curve', dur: 1.0, pitchable: true,
+      blurb: 'v15 with the stick phase building much more steeply into the release. The load curve is the newest axis and has only ever been heard at one value.' },
+    { id: 'v17', round: 9, falls: true, label: 'v17 — milder load curve', dur: 1.0, pitchable: true,
+      blurb: 'v15 with the curve nearly straight again — the other side of the same bracket, close to the linear ramp every round before 7 assumed.' },
+    { id: 'v18', round: 9, falls: true, label: 'v18 — plus a ringing body', dur: 1.0, pitchable: true,
+      blurb: 'v15 with v8\'s narrow resonances and reduced room added on top, bridging this combination to the round-8 one.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };
