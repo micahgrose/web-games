@@ -2163,7 +2163,7 @@ function techVisible(S, id){
   if (RS.done[id] || RS.cur === id) return true;
   for (const pk in tk.cost) if (!F.recipeUnlocked(S, pk)) return false;
   return (tk.req || []).every(r =>
-    RS.done[r] || (F.TECHS[r].req || []).every(rr => RS.done[rr]));
+    RS.done[r] || !F.TECHS[r] || (F.TECHS[r].req || []).every(rr => RS.done[rr]));
 }
 
 function treeTechNode(S, n){
@@ -2229,7 +2229,7 @@ function showTreeTip(ev, key){
     if (RS.done[key]) html += `<div class="tt-stat">researched ✓</div>`;
     else if (RS.cur === key) html += `<div class="tt-stat">labs are on it — click to pause</div>`;
     else if (!(tk.req || []).every(r => RS.done[r]))
-      html += `<div class="tt-lock">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
+      html += `<div class="tt-lock">requires: ${tk.req.map(r => (F.TECHS[r] ? F.TECHS[r].name : r)).join(', ')}</div>`;
     else if (rankNeed)
       html += `<div class="tt-lock">requires: ${rankNeed} (max the upgrade first)</div>`;
     else html += `<div class="tt-stat">click to set as the lab project</div>`;
@@ -2284,6 +2284,7 @@ function renderTreeTab(body){
     let sv = `<svg class="treeSvg" width="${L.W}" height="${L.H}" viewBox="0 0 ${L.W} ${L.H}">`;
     for (const [a, b] of L.edges){
       const s = L.nodes[a], d = L.nodes[b];
+      if (!s || !d) continue;   // an edge to a skipped/undefined node — never crash the tree
       const srcOn = s.root ? true : s.tech ? !!RS.done[s.tech] : (S.upgrades[s.up] || 0) > s.rank;
       const dstOn = d.tech ? !!RS.done[d.tech] : (S.upgrades[d.up] || 0) > d.rank;
       const fogged = d.tech && !techVisible(S, d.tech);
