@@ -1150,6 +1150,8 @@ function buildSelPanel(e){
     const t = S.oreType[i];
     const ore = t ? F.ORES[t] : null;
     html += row('Deposit', ore ? `${ore.name} · endless vein` : '—');
+    if (ore && (ore.minTier || 1) > (def.tier || 1))
+      html += `<div class="ghostNote" style="color:var(--bad)">This drill is too weak to bite ${ore.name.toLowerCase()} — needs a ${minMachineName('miner', ore.minTier)} or better.</div>`;
     html += row('Rate', dv.rate, 'rate');
     if (def.power) html += row('Power draw', def.power + ' P');
     html += moduleSection(S, e, def);
@@ -1275,6 +1277,7 @@ function buildSelPanel(e){
     html += `<div data-bufs>${bufsFor(e)}</div>`;
   }
   if (e.kind === 'pump'){
+    html += row('Draw rate', `${(def.rate * F.pumpMul(S)).toFixed(2)} crude/s`);
     html += row('Tank', dv.tank, 'tank');
     html += row('Power draw', def.power + ' P');
   }
@@ -1400,7 +1403,9 @@ function buildSelPanel(e){
     });
   });
   p.querySelectorAll('[data-ratio]').forEach(inp => {
-    inp.addEventListener('change', () => {
+    let dragStart = null;
+
+    const applyRatio = () => {
       const exit = inp.dataset.ratio;
       if (!e.exRatio) e.exRatio = { left: 1, front: 1, right: 1 };
       let val = parseInt(inp.value) || 1;
@@ -1409,7 +1414,28 @@ function buildSelPanel(e){
       inp.value = val;
       A.sfx.click();
       refreshSelPanel(true);
+    };
+
+    inp.addEventListener('pointerdown', (ev) => {
+      dragStart = { y: ev.clientY, val: parseInt(inp.value) || 1 };
+      inp.setPointerCapture(ev.pointerId);
     });
+
+    inp.addEventListener('pointermove', (ev) => {
+      if (!dragStart) return;
+      const delta = dragStart.y - ev.clientY;
+      let newVal = dragStart.val + Math.round(delta / 2);
+      newVal = Math.max(0, Math.min(100, newVal)) || 1;
+      inp.value = newVal;
+    });
+
+    inp.addEventListener('pointerup', () => {
+      if (!dragStart) return;
+      dragStart = null;
+      applyRatio();
+    });
+
+    inp.addEventListener('change', applyRatio);
   });
   /* belt line select + one-click line replacement */
   const lineBtn = p.querySelector('[data-line]');
@@ -1617,11 +1643,23 @@ function bufList(o){
   return h || '<div class="ghostNote">empty</div>';
 }
 
+// name the weakest machine of a family that can run a recipe (for tier hints)
+function minMachineName(fam, tier){
+  for (const k in F.BUILDINGS){ const b = F.BUILDINGS[k]; if (b.fam === fam && b.tier === tier) return b.name; }
+  return 'a stronger machine';
+}
 function recipeSection(S, e, def){
   if (F.AUTO_RECIPES[def.fam]){
-    const opts = F.AUTO_RECIPES[def.fam].filter(k => F.recipeUnlocked(S, k));
-    return `<div class="selSection">${def.fam === 'crusher' ? 'Crushes automatically' : 'Smelts automatically'}</div>
-      <div class="compChain">${opts.map(k => `<span>${iconImg(F.RECIPES[k].out, 15)}</span>`).join('')}</div>`;
+    const unlocked = F.AUTO_RECIPES[def.fam].filter(k => F.recipeUnlocked(S, k));
+    const opts  = unlocked.filter(k => F.recipeFits(def, k));
+    const gated = unlocked.filter(k => !F.recipeFits(def, k));
+    let h = `<div class="selSection">${def.fam === 'crusher' ? 'Crushes automatically' : 'Smelts automatically'}</div>
+      <div class="compChain">${opts.map(k => `<span>${iconImg(F.RECIPES[k].out, 15)}</span>`).join('') || '<span class="ghostTxt">nothing yet</span>'}</div>`;
+    if (gated.length){
+      const min = Math.min(...gated.map(k => F.RECIPES[k].minTier || 1));
+      h += `<div class="ghostNote" style="color:var(--bad)">Too weak for ${gated.map(k => iconImg(F.RECIPES[k].out, 13)).join(' ')} — needs a ${minMachineName(def.fam, min)}.</div>`;
+    }
+    return h;
   }
   const opts = Object.keys(F.RECIPES).filter(k => {
     const r = F.RECIPES[k];
@@ -1629,7 +1667,9 @@ function recipeSection(S, e, def){
   });
   let h = `<div class="selSection">Recipe</div><div class="recipeGrid">`;
   for (const k of opts){
-    h += `<button class="recipeBtn${e.recipe === k ? ' on' : ''}" data-recipe="${k}" title="${F.ITEMS[F.RECIPES[k].out].name}">${iconImg(F.RECIPES[k].out, 24)}</button>`;
+    const fits = F.recipeFits(def, k);
+    const need = fits ? '' : ` — needs a ${minMachineName(def.fam, F.RECIPES[k].minTier || 1)}`;
+    h += `<button class="recipeBtn${e.recipe === k ? ' on' : ''}${fits ? '' : ' locked'}" data-recipe="${k}"${fits ? '' : ' disabled'} title="${F.ITEMS[F.RECIPES[k].out].name}${need}">${iconImg(F.RECIPES[k].out, 24)}</button>`;
   }
   h += '</div>';
   if (e.recipe){
@@ -2044,12 +2084,12 @@ const TREE_LANES = [
     [1, 'tunnels', null, 'deepTunnels'],
     [1, 'depots', 'massStorage'],
     [1, 'platforms'],
-    [2, 'pumpjacks', 'reservoirs']],
+    [2, 'pumpjacks', 'reservoirs'],
+    [2, 'up:pumping']],
   ['Production',
     [1, 'up:metallurgy'],
     [1, 'up:fabrication'],
     [1, 'up:durability'],
-    [5, 'invincibility'],
     [3, 'arcFurnaces', 'plasmaForges'],
     [3, 'poweredAssembly', 'nanoForges'],
     [2, 'modules', 'speedModuleTech', 'effModuleTech', 'durModuleTech'],
@@ -2084,8 +2124,10 @@ function treeLayout(){
             col++;
           }
         } else {
+          const tk = F.TECHS[spec];
+          if (!tk) { col++; continue; } // skip undefined techs
           nodes[spec] = { key: spec, tech: spec, x: TREE_PAD + col * TREE_COLW, y };
-          const req = F.TECHS[spec].req, rr = F.TECHS[spec].reqRank;
+          const req = tk.req, rr = tk.reqRank;
           let any = false;
           if (req && req.length){ for (const r of req) edges.push([r, spec]); any = true; }
           if (rr) for (const tr in rr){ edges.push(['up:' + tr + ':' + (rr[tr] - 1), spec]); any = true; }
@@ -2121,7 +2163,7 @@ function techVisible(S, id){
   if (RS.done[id] || RS.cur === id) return true;
   for (const pk in tk.cost) if (!F.recipeUnlocked(S, pk)) return false;
   return (tk.req || []).every(r =>
-    RS.done[r] || (F.TECHS[r].req || []).every(rr => RS.done[rr]));
+    RS.done[r] || !F.TECHS[r] || (F.TECHS[r].req || []).every(rr => RS.done[rr]));
 }
 
 function treeTechNode(S, n){
@@ -2187,7 +2229,7 @@ function showTreeTip(ev, key){
     if (RS.done[key]) html += `<div class="tt-stat">researched ✓</div>`;
     else if (RS.cur === key) html += `<div class="tt-stat">labs are on it — click to pause</div>`;
     else if (!(tk.req || []).every(r => RS.done[r]))
-      html += `<div class="tt-lock">requires: ${tk.req.map(r => F.TECHS[r].name).join(', ')}</div>`;
+      html += `<div class="tt-lock">requires: ${tk.req.map(r => (F.TECHS[r] ? F.TECHS[r].name : r)).join(', ')}</div>`;
     else if (rankNeed)
       html += `<div class="tt-lock">requires: ${rankNeed} (max the upgrade first)</div>`;
     else html += `<div class="tt-stat">click to set as the lab project</div>`;
@@ -2242,6 +2284,7 @@ function renderTreeTab(body){
     let sv = `<svg class="treeSvg" width="${L.W}" height="${L.H}" viewBox="0 0 ${L.W} ${L.H}">`;
     for (const [a, b] of L.edges){
       const s = L.nodes[a], d = L.nodes[b];
+      if (!s || !d) continue;   // an edge to a skipped/undefined node — never crash the tree
       const srcOn = s.root ? true : s.tech ? !!RS.done[s.tech] : (S.upgrades[s.up] || 0) > s.rank;
       const dstOn = d.tech ? !!RS.done[d.tech] : (S.upgrades[d.up] || 0) > d.rank;
       const fogged = d.tech && !techVisible(S, d.tech);
