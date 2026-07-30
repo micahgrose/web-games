@@ -1079,6 +1079,43 @@
     L.v60 = base17(mix(V46, { dur: 0.5, roomDur: 0.14 }), 1.111);                   // compressed + room scaled
     L.v61 = base17(mix(V46, { dur: 0.5, roomDur: 0.14, rateLo: 60, rateHi: 200 }), 0.958); // ... and quicker slipping
 
+    // ---------- ROUND 17 — a two-part gesture ----------
+    // v60 slowed down, with a shorter, higher, squealier creak in front of it.
+    // First time anything here has been more than a single event: the same joint
+    // catching once high and quick, then again low and slow. Duration is free
+    // this round, so the parts are placed by what the gesture wants.
+    //
+    // The variable that actually matters is the GAP. Above roughly 150ms the ear
+    // hears two separate events; below about 50ms they fuse into one gesture
+    // with a squeal at its front. That boundary is perceptual, not physical, and
+    // it is the thing these variations bracket.
+    function seq(parts, trim) {
+      return function (g, at) {
+        var t = ctx.currentTime + (at || 0);
+        parts.forEach(function (p) {
+          var o = mix(p.o, {});
+          o.g = (g === undefined ? 1 : g) * (p.gain === undefined ? 1 : p.gain);
+          o.trim = trim;
+          creak7(at0(t + p.at), o);
+        });
+      };
+    }
+    var SLOWMAIN = mix(V46, { dur: 0.5, roomDur: 0.14, rateLo: 30, rateHi: 100 });
+    var PRE      = mix(V46, { dur: 0.3, roomDur: 0.14, rateLo: 150, rateHi: 320,
+                              squealHz: [3600], squeal: 0.7, peakAt: 0.3 });
+    var PREHIGH  = mix(PRE, { rateLo: 200, rateHi: 420, squealHz: [4800], squeal: 0.9 });
+
+    // All five share ONE trim instead of being normalised individually. The
+    // variable this round is the LEAD-IN — its gap, its pitch, its level — so
+    // the main creak has to be identical across them. Normalising each variant
+    // to the same total would have raised v66's main part by ~3dB to make up for
+    // its quieter lead-in, which is exactly the comparison being run.
+    L.v62 = seq([{ at: 0, o: PRE }, { at: 0.36, o: SLOWMAIN }], 1.088);              // small gap
+    L.v63 = seq([{ at: 0, o: PRE }, { at: 0.50, o: SLOWMAIN }], 1.088);              // clearly two events
+    L.v64 = seq([{ at: 0, o: PRE }, { at: 0.25, o: SLOWMAIN }], 1.088);              // overlapping, one gesture
+    L.v65 = seq([{ at: 0, o: PREHIGH }, { at: 0.36, o: SLOWMAIN }], 1.088);          // pre much higher
+    L.v66 = seq([{ at: 0, o: PRE, gain: 0.55 }, { at: 0.36, o: SLOWMAIN }], 1.088);  // pre only a hint
+
     return L;
   }
 
@@ -1257,7 +1294,18 @@
     { id: 'v60', round: 16, falls: true, poly: true, label: 'v60 — compressed, room scaled', dur: 0.5, pitchable: true,
       blurb: 'v58 with the tail shortened to match, so the wet/dry balance stays where v46 had it instead of doubling by accident.' },
     { id: 'v61', round: 16, falls: true, poly: true, label: 'v61 — compressed, quicker slipping', dur: 0.5, pitchable: true,
-      blurb: 'v60 at 200→60 slips/sec — something lighter, slipping faster as well as for less long.' }
+      blurb: 'v60 at 200→60 slips/sec — something lighter, slipping faster as well as for less long.' },
+
+    { id: 'v62', round: 17, falls: true, poly: true, fixedMix: true, label: 'v62 — squeal-creak, then the slow one', dur: 0.95,
+      blurb: 'v60 slowed to 100→30, with a shorter higher squealier creak (320→150, squeal at 3600Hz) in front of it. The same joint catching once high and quick, then again low and slow.' },
+    { id: 'v63', round: 17, falls: true, poly: true, fixedMix: true, label: 'v63 — a longer gap', dur: 1.1,
+      blurb: 'The same two parts further apart. Past roughly 150ms the ear stops hearing one gesture and starts hearing two events — this is the far side of that line.' },
+    { id: 'v64', round: 17, falls: true, poly: true, fixedMix: true, label: 'v64 — overlapping', dur: 0.8,
+      blurb: 'The second creak begins before the first has finished, so they fuse into a single gesture that starts squealing and settles into a groan.' },
+    { id: 'v65', round: 17, falls: true, poly: true, fixedMix: true, label: 'v65 — much higher first part', dur: 0.95,
+      blurb: 'The lead-in pitched far higher (420→200, squeal at 4800Hz), so it reads as a different, smaller part of the same object rather than as the same joint twice.' },
+    { id: 'v66', round: 17, falls: true, poly: true, fixedMix: true, label: 'v66 — first part only a hint', dur: 0.95,
+      blurb: 'The lead-in at just over half the level: something that catches briefly before the real movement, rather than an event in its own right.' }
   ];
 
   return { Lab: Lab, CATALOG: CATALOG };

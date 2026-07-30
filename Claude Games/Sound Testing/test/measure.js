@@ -129,6 +129,11 @@ function render(id) {
   var byRound = {};
   rows.forEach(function (r) { (byRound[r.c.round] = byRound[r.c.round] || []).push(r); });
   Object.keys(byRound).forEach(function (k) {
+    // Some rounds vary the balance BETWEEN parts of a sound (how loud a lead-in
+    // is against the main event). Normalising those to a common total would
+    // silently move the part that is meant to be held constant, so they are
+    // matched on their shared component instead and opt out of this check.
+    if (byRound[k].some(function (r) { return r.c.fixedMix; })) return;
     var ps = byRound[k].map(function (r) { return r.a.rmsDb; });
     var spread = Math.max.apply(null, ps) - Math.min.apply(null, ps);
     if (spread > 3) problems.push('round ' + k + ': levels span ' + spread.toFixed(1) + 'dB RMS — level-match before asking anyone to compare timbre');
