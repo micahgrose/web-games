@@ -171,13 +171,14 @@
   function noteBlackjackBet(night, bet, trueCount) {
     if (!night._bjBets) night._bjBets = [];
     night._bjBets.push(bet);
-    if (night._bjBets.length > 20) night._bjBets.shift();
-    const sorted = night._bjBets.slice().sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)] || bet;
-    if (trueCount >= 2 && bet >= median * 5 && night._bjBets.length >= 6) {
-      night.heat += bet / Math.max(1, median) * 0.6;
+    if (night._bjBets.length > 30) night._bjBets.shift();
+    // Cole reads the spread off your small bet, the way pit bosses actually do
+    const minBet = Math.min.apply(null, night._bjBets);
+    if (trueCount >= 2 && bet >= minBet * 6 && night._bjBets.length >= 6) {
+      night.heat += (bet / Math.max(1, minBet)) * 0.45;
     } else {
-      night.heat = Math.max(0, night.heat - 0.5);
+      // attention fades slowly; Cole remembers a big spread for a while
+      night.heat = Math.max(0, night.heat - 0.08);
     }
     if (night.heat >= 14 && !night.freeplay) {
       night.heat = 0;

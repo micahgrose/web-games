@@ -1,12 +1,12 @@
 # GILT — design doc
 
 ## HANDOFF
-- Phase: 4 — build (phases 1–3 compressed into one autonomous session per user's direct build order)
-- Core: SETTLED — one night at a fading casino, debt due at dawn; every honest edge in the house is real math you can find
-- Next chat does: user playtest fixes. Read this file end to end first; the Red-team log and Open list at the bottom are live.
-- SETTLED (don't reopen): the night frame, 12-game roster, real-odds honesty rule (no fake luck, no myths-made-true), single-canvas presentation, 1974 voice, notebook-as-metaprogression
-- OPEN (next chat decides): balance numbers after human play (debt size, bias strength, marker juice), whether free play needs its own goals, more Cole back-off nuance
-- Read first: feedback_character_art_and_layout, feedback_juice_and_feel, feedback_dont_tune_game_to_the_bot, feedback_verify_input_plumbing, feedback_user_provides_visuals
+- Phase: 4 — build. BUILT AND VERIFIED end to end. 411 harness asserts green across four suites: math 137 (paytables exact, count/bias/tout edges real), night sims 10 (edge player 14.8% wins vs grinder 0%, Cole backoffs 0.19/night), DOM smoke 75 (real pointer-event dispatch through every scene), audio lab 189 (per-cue loudness bands, FFT centroids, locked mix hierarchy — money is the loudest thing in the building; the audio pass ran under Opus 5 at the user's request).
+- Core: SETTLED — one night at a fading casino, $500 against $12,000 by 6 AM; every honest edge in the house is real math you can find
+- Next chat does: user playtest fixes (visuals by screenshot into Claude Eyes/, feel, balance). Punch list is in the session's final report.
+- SETTLED (don't reopen): the night frame, 12-game roster, real-odds honesty rule (no fake luck, no myths-made-true), single-canvas presentation (1280×800 letterboxed, all UI in-canvas), 1974 voice, notebook-as-metaprogression, ties-lose rule at hi-lo (a push there hands the player +5%), audio mix hierarchy (incidentals never rival being paid; jackpot loudest; density-budgeted repeats)
+- OPEN (next chat decides): balance after human play (debt 12k, bias 1.13, tout 0.8 honest, marker juice 30%); cue timbre by the user's ears (the lab proves balance, not beauty); whether free play needs its own goals; more Cole nuance
+- Read first: feedback_user_provides_visuals, feedback_dont_tune_game_to_the_bot, feedback_character_art_and_layout, feedback_audio_can_be_measured
 
 ## 0 — Divergence map (frames considered)
 User's order fixed the genre (casino, ≥10 ways to gamble, superb art, human text). Divergence happened one level up — the FRAME around the gambling:

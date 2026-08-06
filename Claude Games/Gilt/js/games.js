@@ -24,7 +24,7 @@
     hilo: { pace: 1, min: 5, max: 200 },
     keno: { pace: 2, min: 1, max: 20 },
     bigsix: { pace: 1, min: 5, max: 100 },
-    horses: { pace: 8, min: 10, max: 1000 },
+    horses: { pace: 8, min: 10, max: 1500 },
     scratch: { pace: 1, price: 5 }
   };
 
@@ -211,7 +211,7 @@
   const REDS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
   const Roulette = {
     WHEEL_ORDER, REDS,
-    BIAS_POCKET: '26', BIAS_WEIGHT: 1.10,
+    BIAS_POCKET: '26', BIAS_WEIGHT: 1.13,
     spin(rng, biased) {
       const weights = WHEEL_ORDER.map(p => (biased && p === Roulette.BIAS_POCKET) ? Roulette.BIAS_WEIGHT : 1);
       return WHEEL_ORDER[rng.weighted(weights)];
@@ -794,7 +794,7 @@
   const ODDS_LADDER = [0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.5, 1.8, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7, 8, 10, 12, 15, 20, 30, 50];
   const Horses = {
     ODDS_LADDER,
-    TAKEOUT: 1.18, TOUT_FEE: 200, TOUT_HONEST: 0.75,
+    TAKEOUT: 1.18, TOUT_FEE: 200, TOUT_HONEST: 0.8,
     gauss(rng) {
       let u = 0, v = 0;
       while (u === 0) u = rng(); while (v === 0) v = rng();
