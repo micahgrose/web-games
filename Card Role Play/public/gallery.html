@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Role Play — Gallery</title>
+    <link rel="stylesheet" href="css/theme.css">
+    <style>
+        .app { max-width: 1400px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+            gap: 14px;
+        }
+        .cell { text-align: center; }
+        .cell .card-holder { width: 100%; }
+        .cell .lbl {
+            font-size: 0.68rem;
+            color: var(--parch-faint);
+            margin-top: 5px;
+            font-variant-numeric: tabular-nums;
+        }
+        .band-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 14px;
+        }
+        section { margin-bottom: 26px; }
+        .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+        .swatch {
+            display: flex; align-items: center; gap: 7px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid rgba(61,42,43,0.8);
+            background: rgba(0,0,0,0.3);
+            font-size: 0.82rem;
+        }
+        .note { color: var(--parch-faint); font-style: italic; font-size: 0.88rem; text-align: center; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+    <div id="room"></div>
+    <header class="masthead">
+        <h1>Gallery</h1>
+        <div class="rule"><i></i></div>
+        <div class="sub">Every card, every outcome band, every piece of chrome — on one page.</div>
+    </header>
+
+    <div class="app">
+        <section class="panel">
+            <h2>Outcome Bands</h2>
+            <p class="note">The glow around a drawn card states the verdict. This is the rulebook, shown rather than written.</p>
+            <div class="band-row" id="bands"></div>
+        </section>
+
+        <section class="panel">
+            <h2>The Reverse &amp; The Joker</h2>
+            <div class="grid" id="special"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Spades</h2>
+            <div class="grid" data-suit="Spades"></div>
+        </section>
+        <section class="panel">
+            <h2>Hearts</h2>
+            <div class="grid" data-suit="Hearts"></div>
+        </section>
+        <section class="panel">
+            <h2>Diamonds</h2>
+            <div class="grid" data-suit="Diamonds"></div>
+        </section>
+        <section class="panel">
+            <h2>Clubs</h2>
+            <div class="grid" data-suit="Clubs"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Character Sheets</h2>
+            <div class="dramatis" id="sheets"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Seat Colours</h2>
+            <div class="swatches" id="seats"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Chrome</h2>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px">
+                <button class="btn">Declare</button>
+                <button class="btn ghost">Take a Seat</button>
+                <button class="btn danger">Leave</button>
+                <button class="btn" disabled>Disabled</button>
+                <span class="badge open">Open</span>
+                <span class="badge inplay">In Play</span>
+                <span class="badge full">Full</span>
+            </div>
+            <input type="text" placeholder="What do you do?" style="margin-bottom:14px">
+            <div class="chronicle" style="height:auto">
+                <div class="entry player" style="--voice:#d9483c">
+                    <span class="speaker">Kira</span>
+                    <span class="said">I hurl the chain at Bram and drag him toward the edge.</span>
+                </div>
+                <div class="entry gm">
+                    <span class="speaker">Game Master</span>
+                    <span class="said">The chain takes Bram across the chest and the deck tips beneath both of them. Bram catches the rail with one hand and holds, stone fingers biting into the wood, and does not go over.</span>
+                </div>
+                <div class="entry knell"><span class="said">Vex is out</span></div>
+                <div class="entry system"><span class="said">The deck runs out. It is gathered and shuffled again.</span></div>
+            </div>
+        </section>
+    </div>
+
+    <script type="module">
+        import { cardFaceSVG, cardBackSVG, RANKS, BANDS } from './js/cards.js';
+
+        const SEATS = ['#d9483c','#34a891','#5b8dd9','#8fae4a','#e0a83c',
+                       '#a87bd6','#d472ab','#ded06a','#2f8fb0','#9aa8bc'];
+        const NAMES = ['garnet','jade','sapphire','moss','amber',
+                       'amethyst','orchid','topaz','cyan','pewter'];
+
+        const cell = (svg, label) =>
+            `<div class="cell"><div class="card-holder">${svg}</div><div class="lbl">${label}</div></div>`;
+
+        for (const host of document.querySelectorAll('.grid[data-suit]')) {
+            const suit = host.dataset.suit;
+            host.innerHTML = RANKS
+                .map(rank => cell(cardFaceSVG({ rank, suit }), rank))
+                .join('');
+        }
+
+        document.getElementById('special').innerHTML =
+            cell(cardBackSVG(), 'reverse') +
+            cell(cardFaceSVG({ joker: true, rank: 'JOKER', suit: 'Fate' }), 'joker') +
+            cell(cardFaceSVG(null), 'empty slot');
+
+        document.getElementById('bands').innerHTML = BANDS.map(b => `
+            <div class="cell">
+                <div class="card-holder aura aura-${b.key}">
+                    ${cardFaceSVG(b.key === 'fate'
+                        ? { joker: true, rank: 'JOKER', suit: 'Fate' }
+                        : { rank: { ruin:'3', falter:'6', mixed:'9', success:'Q', triumph:'A' }[b.key], suit: 'Spades' })}
+                </div>
+                <div class="verdict show" style="color:${b.ink}">
+                    <span class="band">${b.label}</span>
+                    <span class="hint">${b.hint}</span>
+                </div>
+            </div>`).join('');
+
+        const CAST = [
+            { name: 'Kira', color: SEATS[0], character: 'a sky-pirate with a rope-gun and a bad temper',
+              boons: ['rope-gun'], wounds: ['gashed left arm'], status: ['winded'], active: true },
+            { name: 'Bram', color: SEATS[1], character: 'a stone golem, slow but immovable',
+              boons: ['stone hide', 'great strength'], wounds: [], status: [] },
+            { name: 'Vex', color: SEATS[2], character: 'a wraith that drinks warmth from the air',
+              boons: ['cold touch'], wounds: ['scattered'], status: [], dead: true },
+            { name: 'Oro', color: SEATS[4], character: 'a purple dragon who built a wall named Bob and gave it life',
+              boons: ['Bob the wall', 'tungsten breath'], wounds: [], status: ['airborne'] },
+        ];
+        document.getElementById('sheets').innerHTML = CAST.map(p => `
+            <div class="sheet ${p.dead ? 'dead' : ''} ${p.active ? 'active' : ''}" style="--voice:${p.color}">
+                <div class="name">
+                    <span class="dot" style="background:${p.color};color:${p.color}"></span>${p.name}
+                    ${p.active ? '<span class="you">(you)</span>' : ''}
+                </div>
+                <div class="role">${p.character}</div>
+                <div class="marks">
+                    ${p.boons.map(b => `<span class="mark boon">${b}</span>`).join('')}
+                    ${p.wounds.map(w => `<span class="mark wound">${w}</span>`).join('')}
+                    ${p.status.map(s => `<span class="mark state">${s}</span>`).join('')}
+                </div>
+                ${p.dead ? '<span class="skull">OUT</span>' : ''}
+            </div>`).join('');
+
+        document.getElementById('seats').innerHTML = SEATS.map((c, i) =>
+            `<span class="swatch"><span class="dot" style="background:${c};color:${c}"></span>${NAMES[i]}</span>`
+        ).join('');
+    </script>
+</body>
+</html>

@@ -1,828 +1,924 @@
+'use strict';
+
 require('dotenv').config();
-const express = require('express');
+
+const path = require('path');
 const http = require('http');
+const express = require('express');
 const { Server } = require('socket.io');
+
+const { Deck, cardValue } = require('./lib/deck');
+const R = require('./lib/resolve');
+const ai = require('./lib/ai');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 1e5 });
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+// ── Constants ──────────────────────────────────────────
+const SEAT_COLOURS = [
+    '#d9483c', // garnet
+    '#34a891', // jade
+    '#5b8dd9', // sapphire
+    '#8fae4a', // moss
+    '#e0a83c', // amber
+    '#a87bd6', // amethyst
+    '#d472ab', // orchid
+    '#ded06a', // topaz
+    '#2f8fb0', // deep cyan
+    '#9aa8bc', // pewter
+];
 
-const suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
-const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const playerColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+const MAX_TEXT = 400;
+const TURN_MS = 120000;
+const COUNTER_MS = 80000;
+const ACT_COOLDOWN = 400;
+const PLAYER_VOTE_MS = 30000;
+const SPECTATOR_VOTE_MS = 15000;
+const VOTE_DELAY_MS = 6000;
 
 const rooms = new Map();
 
-function generateRoomId() {
+// ── Small helpers ──────────────────────────────────────
+const clip = (s, n = MAX_TEXT) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+function roomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let id = '';
-    for (let i = 0; i < 5; i++) id += chars[Math.floor(Math.random() * chars.length)];
+    let id;
+    do {
+        id = '';
+        for (let i = 0; i < 5; i++) id += chars[Math.floor(Math.random() * chars.length)];
+    } while (rooms.has(id));
     return id;
 }
 
-function createDeck() {
-    return suits.flatMap(suit => ranks.map(rank => ({ rank, suit })));
-}
+const alive = (room) => room.players.filter(p => !p.eliminated);
+const byId = (room, id) => room.players.find(p => p.id === id);
+const current = (room) => byId(room, room.currentId);
 
-function shuffleDeck(deck) {
-    for (let i = deck.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [deck[i], deck[j]] = [deck[j], deck[i]];
+/** Seat order, skipping the fallen. */
+function nextAlive(room, afterId) {
+    const living = alive(room);
+    if (!living.length) return null;
+    const idx = room.players.findIndex(p => p.id === afterId);
+    for (let step = 1; step <= room.players.length; step++) {
+        const p = room.players[(idx + step + room.players.length) % room.players.length];
+        if (p && !p.eliminated) return p.id;
     }
-    return deck;
+    return living[0].id;
 }
 
-function getCardValue(card) {
-    if (!card) return 0;
-    switch (card.rank) {
-        case 'A': return 14; case 'J': return 11; case 'Q': return 12; case 'K': return 13;
-        default: return Number(card.rank) || 0;
-    }
+function publicPlayers(room) {
+    return room.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        eliminated: p.eliminated,
+        character: p.sheet.character || '',
+        wounds: p.sheet.wounds || [],
+        boons: p.sheet.boons || [],
+        status: p.sheet.status || [],
+    }));
 }
 
-function nextAliveIndex(players, currentIndex) {
-    let next = (currentIndex + 1) % players.length;
-    for (let i = 0; i < players.length; i++) {
-        if (!players[next].eliminated) return next;
-        next = (next + 1) % players.length;
-    }
-    return currentIndex;
-}
-
-function countAlive(players) {
-    return players.filter(p => !p.eliminated).length;
-}
-
-function getPublicRoomsData() {
-    const result = [];
+function lobbyList() {
+    const out = [];
     for (const [id, room] of rooms) {
         if (!room.isPublic) continue;
-        result.push({
+        out.push({
             id,
             playerCount: room.players.length,
             maxPlayers: room.maxPlayers,
             spectatorCount: room.spectators.length,
-            alivePlayers: room.players.filter(p => !p.eliminated).length,
-            status: room.started ? 'in-play' : 'open'
+            alivePlayers: alive(room).length,
+            status: room.started ? 'in-play' : 'open',
         });
     }
+    return out;
+}
+
+const pushLobby = () => io.emit('rooms', lobbyList());
+
+function sendPlayers(room) {
+    io.to(room.id).emit('players', {
+        players: publicPlayers(room),
+        hostId: room.hostId,
+        currentId: room.currentId,
+        spectatorCount: room.spectators.length,
+    });
+}
+
+function sendSheets(room) {
+    const sheets = {};
+    for (const p of room.players) {
+        sheets[p.id] = {
+            character: p.sheet.character || '',
+            wounds: p.sheet.wounds || [],
+            boons: p.sheet.boons || [],
+            status: p.sheet.status || [],
+            eliminated: p.eliminated,
+        };
+    }
+    io.to(room.id).emit('sheets', { sheets });
+}
+
+// ── Turn clock ─────────────────────────────────────────
+// Somebody always wanders off. Without this the table waits forever.
+
+function clearClock(room) {
+    if (room.clock) { clearTimeout(room.clock); room.clock = null; }
+    room.deadline = 0;
+}
+
+function setClock(room, ms, onExpire) {
+    clearClock(room);
+    room.deadline = Date.now() + ms;
+    room.clock = setTimeout(() => {
+        room.clock = null;
+        if (!rooms.has(room.id)) return;
+        try { onExpire(); } catch (err) { console.error('[clock]', err); }
+    }, ms);
+}
+
+const clockLeft = (room) => (room.deadline ? Math.max(0, room.deadline - Date.now()) : 0);
+
+function beginTurn(room, { setup = false, announce = true } = {}) {
+    const p = current(room);
+    if (!p) return;
+    room.setupTurn = setup;
+    setClock(room, TURN_MS, () => onTurnExpired(room, p.id));
+
+    io.to(room.id).emit('turn', {
+        currentId: p.id,
+        setup,
+        players: publicPlayers(room),
+        deadlineIn: clockLeft(room),
+    });
+
+    if (setup && announce) {
+        io.to(room.id).emit('ask', {
+            text: `${p.name}, who are you? Describe the character ${p.name} steps into. No actions yet — this turn is only for becoming someone.`,
+        });
+    }
+}
+
+function onTurnExpired(room, playerId) {
+    if (!room.started || room.over) return;
+    if (room.currentId !== playerId || room.busy || room.pending) return;
+    const p = byId(room, playerId);
+    if (!p) return;
+    io.to(room.id).emit('note', { text: `${p.name} lets the moment pass.` });
+    room.currentId = nextAlive(room, playerId);
+    beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+}
+
+// ── Narration plumbing ─────────────────────────────────
+
+/** Push a narration to the table, streaming it as it is written. */
+async function tell(room, directive, { historyLabel } = {}) {
+    io.to(room.id).emit('gmStart', {});
+    let result;
+    try {
+        result = await ai.narrate({
+            players: room.players.map(p => ({ ...p, sheet: p.sheet })),
+            history: room.history,
+            directive,
+            onChunk: (chunk) => io.to(room.id).emit('gm', { chunk }),
+        });
+    } finally {
+        io.to(room.id).emit('gmEnd', {});
+    }
+
+    // Rolling window of prose, so the narrator keeps its voice
+    // without us resending the whole game every turn.
+    room.history.push({ role: 'user', content: historyLabel || directive });
+    room.history.push({ role: 'assistant', content: result.prose });
+    while (room.history.length > ai.WINDOW) room.history.shift();
+
+    applySheets(room, result.sheets);
     return result;
 }
 
-function broadcastPublicRooms() {
-    io.emit('public-rooms-updated', getPublicRoomsData());
+function applySheets(room, sheets) {
+    if (!sheets) return;
+    for (const p of room.players) {
+        const s = sheets[p.name];
+        if (!s) continue;
+        if (s.character) p.sheet.character = s.character;
+        if (s.wounds) p.sheet.wounds = s.wounds;
+        if (s.boons) p.sheet.boons = s.boons;
+        if (s.status) p.sheet.status = s.status;
+        // Only ever upgrades unset → set, so a sloppy turn cannot
+        // erase how a player asked to be referred to.
+        if (s.calls) p.sheet.calls = s.calls;
+    }
 }
 
-function scheduleNewGameVote(room) {
-    if (room.newGameVoteTimer) clearTimeout(room.newGameVoteTimer);
-    room.newGameVoteTimer = setTimeout(() => {
-        if (!rooms.has(room.id) || room.newGamePhase) return;
-        room.newGameVoteTimer = null;
-        startPlayerVote(room);
-    }, 5000);
+/** Last-ditch death detection for a narrator that skipped the block. */
+function deathsInProse(room, prose) {
+    const found = [];
+    for (const p of alive(room)) {
+        const n = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${n}\\b[^.!?]{0,60}?\\b(is dead|is killed|is slain|dies|lies dead)\\b`, 'i');
+        if (re.test(prose)) found.push(p.name);
+    }
+    return found;
 }
 
-function startPlayerVote(room) {
-    room.newGamePhase = 'players';
-    room.newGameVotes = {};
-    room.newGameOrder = [];
-    room.players.forEach(p => { room.newGameVotes[p.id] = null; });
-    room.newGameVoteTimer = setTimeout(() => resolvePlayerVote(room), 30000);
-    io.to(room.id).emit('new-game-vote', { phase: 'players', timeoutMs: 30000 });
+function eliminate(room, names) {
+    const hit = [];
+    for (const name of names || []) {
+        const p = room.players.find(x => x.name === name && !x.eliminated);
+        if (!p) continue;
+        p.eliminated = true;
+        hit.push(p.name);
+    }
+    if (hit.length) {
+        io.to(room.id).emit('out', { names: hit, players: publicPlayers(room) });
+    }
+    return hit;
 }
 
-function startSpectatorVote(room, acceptedPlayerIds, slotsRemaining) {
-    room.newGamePhase = 'spectators';
-    room.spectatorVoteSlots = slotsRemaining;
-    room.spectatorVoteAccepted = [];
-    room.pendingAcceptedPlayerIds = acceptedPlayerIds;
-    room.newGameVotes = {};
-    room.spectators.forEach(s => { room.newGameVotes[s.id] = null; });
-    room.newGameVoteTimer = setTimeout(() => resolveSpectatorVote(room), 15000);
-    io.to(room.id).emit('new-game-vote', { phase: 'spectators', slotsAvailable: slotsRemaining, timeoutMs: 15000 });
-}
+/** After any resolution: are we done, or whose turn is it? */
+async function afterResolution(room, actorId) {
+    sendSheets(room);
 
-function resolvePlayerVote(room) {
-    if (room.newGamePhase !== 'players') return;
-    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
-
-    const acceptedPlayerIds = (room.newGameOrder || []).slice();
-    const slotsRemaining = room.maxPlayers - acceptedPlayerIds.length;
-
-    room.newGameVotes = null;
-    room.newGameOrder = null;
-
-    if (slotsRemaining > 0 && room.spectators.length > 0) {
-        startSpectatorVote(room, acceptedPlayerIds, slotsRemaining);
+    if (alive(room).length <= 1) {
+        await endGame(room);
         return;
     }
-
-    room.newGamePhase = null;
-
-    if (acceptedPlayerIds.length < 2) {
-        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
-        return;
-    }
-
-    room.hostId = acceptedPlayerIds[0];
-    startNewGame(room, acceptedPlayerIds);
+    room.currentId = nextAlive(room, actorId);
+    beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
 }
 
-function resolveSpectatorVote(room) {
-    if (room.newGamePhase !== 'spectators') return;
-    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
+async function endGame(room) {
+    room.over = true;
+    clearClock(room);
+    const winner = alive(room)[0];
 
-    const acceptedPlayerIds = room.pendingAcceptedPlayerIds || [];
-    const acceptedSpectatorIds = room.spectatorVoteAccepted || [];
-    const allAccepted = [...acceptedPlayerIds, ...acceptedSpectatorIds];
-
-    room.newGamePhase = null;
-    room.spectatorVoteSlots = null;
-    room.spectatorVoteAccepted = null;
-    room.pendingAcceptedPlayerIds = null;
-    room.newGameVotes = null;
-
-    if (allAccepted.length < 2) {
-        io.to(room.id).emit('new-game-cancelled', { reason: 'Not enough players accepted for a new game.' });
-        return;
-    }
-
-    room.hostId = allAccepted[0];
-    startNewGame(room, allAccepted);
-}
-
-function startNewGame(room, acceptedIds) {
-    if (room.newGameVoteTimer) { clearTimeout(room.newGameVoteTimer); room.newGameVoteTimer = null; }
-
-    const allPeople = [...room.players, ...room.spectators];
-    const orderedNew = acceptedIds.map(id => allPeople.find(p => p.id === id)).filter(Boolean);
-
-    const promotedIds = orderedNew
-        .filter(p => room.spectators.some(s => s.id === p.id))
-        .map(p => p.id);
-
-    room.spectators = room.spectators.filter(s => !promotedIds.includes(s.id));
-
-    room.players = orderedNew.map((p, i) => ({
-        id: p.id, name: p.name, color: playerColors[i], eliminated: false
-    }));
-
-    // Update socket state for promoted spectators
-    for (const pid of promotedIds) {
-        const s = io.sockets.sockets.get(pid);
-        if (s) s.data.isSpectator = false;
-    }
-
-    room.deck = shuffleDeck(shuffleDeck(shuffleDeck(createDeck())));
-    room.currentPlayerIndex = 0;
-    room.lastDrawnCard = null;
-    room.started = true;
-    room.newGameVotes = null;
-    room.newGamePhase = null;
-    room.playerSetupDone = new Set();
-    room.pendingAction = null;
-    room.conversationHistory = [
-        {
-            role: 'system',
-            content: "You are the Game Master of a multiplayer elimination role-playing game. Each player controls a unique character with abilities, equipment, wounds, and status that evolve throughout the game.\n\nCARD VALUE RULES:\n- 2-4: Complete failure, may backfire.\n- 5-7: Mostly fails, minor partial effect.\n- 8-10: Mixed outcome.\n- 11-12: Clear success.\n- 13-14: Outstanding success.\n- For counter actions: if a defender's card value exceeds the attacker's, that defender's counter succeeds for them only. Resolve each defender independently.\n- Context matters: wounded/debuffed characters need higher values; characters with powerful gear or abilities can succeed with lower values.\n\nCONTEXT TRACKING: Remember each character's wounds, fatigue, equipment, special abilities, and buffs/debuffs from all previous turns. Factor these into every outcome.\n\nRETRY: Use [RETRY] ONLY in two cases: (1) the message is pure keyboard mashing or completely unintelligible English — any understandable action, no matter how weird or fantastical, must be played out; (2) the action is word-for-word identical to a very recent previous attempt. When using [RETRY], begin your ENTIRE response with the exact token [RETRY] followed by a brief explanation. Do not narrate any outcome.\n\nDEATH: State '[Name] is dead.' at the end of your response if a character dies.\n\nLANGUAGE: Always state the acting player's name first when addressing them, then you may use 'you' to refer to them within that same passage. Never use 'they', 'them', or 'their' — always use exact player names instead.\n\nCHARACTERS: Each player must have a unique character. If two players describe the same character type during setup, tell the second player to choose something different.\n\nNARRATION: Write only what is happening in the story. Never mention card values, dice, probability, game mechanics, context modifiers, wounds as numbers, or any behind-the-scenes reasoning. Just narrate the action and its outcome as a story.\n\nCONTENT: No gore, sexuality, or graphic violence. Keep combat intense but clean. Keep responses concise."
-        },
-        {
-            role: 'system',
-            content: `The players in this game are: ${room.players.map(p => p.name).join(', ')}. Remember all of these names throughout the entire game.`
-        }
-    ];
-
-    io.to(room.id).emit('new-game-started', {
-        players: room.players,
-        hostId: room.hostId,
-        acceptedIds: room.players.map(p => p.id),
-        promotedIds,
-        currentPlayerIndex: 0,
-        deckSize: room.deck.length,
-        spectatorCount: room.spectators.length
+    io.to(room.id).emit('over', {
+        winnerName: winner?.name || null,
+        players: publicPlayers(room),
+        spectatorCount: room.spectators.length,
     });
+    pushLobby();
 
-    const firstPlayer = room.players[0];
-    io.to(room.id).emit('setup-prompt', { playerName: firstPlayer.name, playerId: firstPlayer.id });
-
-    broadcastPublicRooms();
-}
-
-
-async function detectEliminationsAI(players, gmResponse) {
-    const aliveNames = players.filter(p => !p.eliminated).map(p => p.name);
-    if (aliveNames.length === 0) return [];
-    try {
-        const response = await fetch(GROQ_API_URL, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                    { role: 'system', content: 'You are a game moderator assistant. Given a game narrative, determine which players were killed, died, or eliminated. Respond ONLY with a valid JSON array of their exact names, e.g. ["Alice","Bob"], or [] if none. No other text.' },
-                    { role: 'user', content: `Active players: ${aliveNames.join(', ')}\n\nNarrative:\n"${gmResponse}"\n\nWhich players (if any) were killed, died, or eliminated? Reply with only a JSON array of their exact names.` }
-                ],
-                max_tokens: 100,
-            }),
-        });
-        if (!response.ok) return [];
-        const data = await response.json();
-        const names = JSON.parse(data.choices[0].message.content.trim());
-        if (!Array.isArray(names)) return [];
-        return players.filter(p => !p.eliminated && names.some(n => n.toLowerCase() === p.name.toLowerCase()));
-    } catch { return []; }
-}
-
-async function classifyAction(convHistory, actingPlayer, message, alivePlayers) {
-    const aliveNames = alivePlayers
-        .filter(p => !p.eliminated && p.id !== actingPlayer.id)
-        .map(p => p.name);
-    try {
-        const res = await fetch(GROQ_API_URL, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                    { role: 'system', content: `You classify RPG player actions. Return ONLY valid JSON, no other text:
-{"valid":bool,"invalidReason":"","targets":[],"isRepeat":bool}
-- valid: false ONLY if the message is pure keyboard mashing, random characters, or completely unintelligible to an English speaker (e.g. "a;owkjb;lasdj" or "Boiefkk"). Any understandable English — no matter how weird or fantastical (purple dragons, sentient walls, telekinesis, etc.) — is valid.
-- targets: names from [${aliveNames.join(', ')}] directly targeted or affected by this action (empty if self-action or environmental)
-- isRepeat: true ONLY if the action is word-for-word or essentially identical to a very recent previous attempt with zero meaningful difference` },
-                    ...convHistory.slice(-20).filter(m => m.role !== 'system'),
-                    { role: 'user', content: `${actingPlayer.name}: "${message}"` }
-                ],
-                max_tokens: 120,
-            }),
-        });
-        if (!res.ok) return { valid: true, targets: [], isRepeat: false, invalidReason: '' };
-        const data = await res.json();
-        const parsed = JSON.parse(data.choices[0].message.content.trim());
-        if (!Array.isArray(parsed.targets)) parsed.targets = [];
-        return parsed;
-    } catch { return { valid: true, targets: [], isRepeat: false, invalidReason: '' }; }
-}
-
-async function resolveCounterPhase(room) {
-    const p = room.pendingAction;
-    room.pendingAction = null;
-
-    const counterCards = p.targetIds.map(id => {
-        const counter = p.counters[id];
-        const player = room.players.find(pl => pl.id === id);
-        return { playerName: player.name, playerColor: player.color, card: counter.card, cardValue: counter.cardValue, message: counter.message };
-    });
-
-    const allCards = [
-        { playerName: p.attackerName, playerColor: p.attackerColor, card: p.attackerCard, cardValue: p.attackerCardValue },
-        ...counterCards
-    ];
-
-    io.to(room.id).emit('multi-card-draw', { cards: allCards, deckSize: room.deck.length });
-
-    const counterLines = counterCards.map(c => `${c.playerName} (value: ${c.cardValue}): "${c.message}"`).join('\n');
-    const prompt = `${p.attackerName} (value: ${p.attackerCardValue}): "${p.attackerMessage}"\nCounters:\n${counterLines}`;
-
-    try {
-        const response = await callGroqAPI(room.conversationHistory, prompt);
-        const newlyEliminated = await detectEliminationsAI(room.players, response);
-        for (const pl of newlyEliminated) {
-            pl.eliminated = true;
-            room.conversationHistory.push({ role: 'system', content: `${pl.name} has been eliminated and is out of the game.` });
-        }
-        const alive = countAlive(room.players);
-        room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
-
-        if (alive <= 1) {
-            const winner = room.players.find(pl => !pl.eliminated);
-            io.to(room.id).emit('gm-response', { response, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: p.attackerId, eliminatedIds: newlyEliminated.map(pl => pl.id), players: room.players });
-            io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
-            scheduleNewGameVote(room);
-            broadcastPublicRooms();
-        } else {
-            io.to(room.id).emit('gm-response', {
-                response, currentPlayerIndex: room.currentPlayerIndex,
-                currentPlayerId: room.players[room.currentPlayerIndex].id,
-                eliminatedIds: newlyEliminated.map(pl => pl.id), players: room.players
+    if (winner) {
+        try {
+            await ai.epilogue({
+                players: room.players,
+                winner: winner.name,
+                history: room.history,
+                onChunk: (chunk) => io.to(room.id).emit('epilogue', { chunk }),
             });
+        } catch (err) {
+            console.warn('[ai] epilogue failed:', err.message);
         }
-    } catch (err) {
-        io.to(room.id).emit('gm-error', { message: err.message });
     }
+    scheduleVote(room);
 }
 
-async function callGroqAPI(conversationHistory, userMessage) {
-    conversationHistory.push({ role: 'user', content: userMessage });
-    const response = await fetch(GROQ_API_URL, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: conversationHistory, max_tokens: 1024 }),
-    });
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Groq API error: ${response.status} - ${JSON.stringify(errorData)}`);
-    }
-    const data = await response.json();
-    const assistantMessage = data.choices[0].message.content;
-    conversationHistory.push({ role: 'assistant', content: assistantMessage });
-    return assistantMessage;
-}
+// ── Acting ─────────────────────────────────────────────
 
-io.on('connection', (socket) => {
-    socket.data.isSpectator = false;
+async function handleSetup(room, player, text) {
+    const others = room.players.filter(p => p.id !== player.id);
+    const taken = others.map(p => p.sheet.character).filter(Boolean);
 
-    // Send current public rooms immediately on connect
-    socket.emit('public-rooms-updated', getPublicRoomsData());
-
-    socket.on('get-public-rooms', () => {
-        socket.emit('public-rooms-updated', getPublicRoomsData());
+    const verdict = await ai.triage({
+        text, actor: player.name, others: others.map(p => p.name),
+        previous: [], setup: true, existingCharacters: taken,
     });
 
-    socket.on('create-room', ({ playerName, isPublic, maxPlayers }) => {
-        let roomId;
-        do { roomId = generateRoomId(); } while (rooms.has(roomId));
-
-        const parsedMax = Math.min(10, Math.max(2, parseInt(maxPlayers) || 10));
-        const player = { id: socket.id, name: playerName, color: playerColors[0], eliminated: false };
-        const room = {
-            id: roomId,
-            hostId: socket.id,
-            players: [player],
-            spectators: [],
-            deck: shuffleDeck(shuffleDeck(shuffleDeck(createDeck()))),
-            currentPlayerIndex: 0,
-            lastDrawnCard: null,
-            started: false,
-            isPublic: !!isPublic,
-            maxPlayers: parsedMax,
-            playerSetupDone: new Set(),
-            pendingAction: null,
-            conversationHistory: [
-                {
-                    role: 'system',
-                    content: "You are the Game Master of a multiplayer elimination role-playing game. Each player controls a unique character with abilities, equipment, wounds, and status that evolve throughout the game.\n\nCARD VALUE RULES:\n- 2-4: Complete failure, may backfire.\n- 5-7: Mostly fails, minor partial effect.\n- 8-10: Mixed outcome.\n- 11-12: Clear success.\n- 13-14: Outstanding success.\n- For counter actions: if a defender's card value exceeds the attacker's, that defender's counter succeeds for them only. Resolve each defender independently.\n- Context matters: wounded/debuffed characters need higher values; characters with powerful gear or abilities can succeed with lower values.\n\nCONTEXT TRACKING: Remember each character's wounds, fatigue, equipment, special abilities, and buffs/debuffs from all previous turns. Factor these into every outcome. No character starts a new turn with a clean slate.\n\nDEATH: State '[Name] is dead.' at the end of your response if a character dies.\n\nLANGUAGE: Never use 'you', 'your', 'they', 'them', or 'their'. Always use exact player names in third person only.\n\nCHARACTERS: Each player must have a unique character. If two players describe the same character type during setup, tell the second player to choose something different.\n\nNARRATION: Write only what is happening in the story. Never mention card values, dice, probability, game mechanics, context modifiers, wounds as numbers, or any behind-the-scenes reasoning. Just narrate the action and its outcome as a story.\n\nCONTENT: No gore, sexuality, or graphic violence. Keep combat intense but clean. Keep responses concise."
-                }
-            ]
-        };
-
-        rooms.set(roomId, room);
-        socket.join(roomId);
-        socket.data.roomId = roomId;
-
-        socket.emit('room-created', {
-            roomId, playerId: socket.id, players: room.players,
-            isPublic: room.isPublic, maxPlayers: room.maxPlayers
+    if (!verdict.ok || verdict.duplicate) {
+        io.to(room.id).emit('said', { name: player.name, color: player.color, text });
+        io.to(player.id).emit('nope', {
+            reason: verdict.reason || (verdict.duplicate
+                ? 'Someone at this table is already that. Be something else.'
+                : 'That did not read as a character. Try again in plain words.'),
+            deadlineIn: TURN_MS,
         });
+        setClock(room, TURN_MS, () => onTurnExpired(room, player.id));
+        return;
+    }
 
-        if (room.isPublic) broadcastPublicRooms();
+    player.sheet.character = clip(text, 110);
+    room.setupDone.add(player.id);
+    io.to(room.id).emit('said', { name: player.name, color: player.color, text });
+
+    // No card on a setup turn: nothing is being attempted, so there
+    // is nothing for the deck to rule on.
+    await tell(room,
+        `SETUP — a new character enters. This is not an action and nothing is at stake.\n` +
+        `ACTOR: ${player.name}\nBECOMES: "${text}"\n\n` +
+        `Introduce ${player.name} arriving, in two sentences. Do not invent a location the tale has not established.`,
+        { historyLabel: `${player.name} enters as: ${text}` });
+
+    sendSheets(room);
+    room.currentId = nextAlive(room, player.id);
+    beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+}
+
+async function handleAction(room, player, text) {
+    const others = alive(room).filter(p => p.id !== player.id);
+
+    const verdict = await ai.triage({
+        text,
+        actor: player.name,
+        others: others.map(p => p.name),
+        previous: player.previous,
+        setup: false,
     });
 
-    socket.on('join-room', ({ roomId, playerName }) => {
-        const room = rooms.get(roomId.toUpperCase());
-        if (!room) { socket.emit('join-error', { message: 'Room not found.' }); return; }
+    io.to(room.id).emit('said', { name: player.name, color: player.color, text });
 
-        if (room.players.some(p => !p.eliminated && p.name.toLowerCase() === playerName.trim().toLowerCase())) {
-            socket.emit('join-error', { message: 'A player with that name already exists in this room.' });
+    if (!verdict.ok) {
+        io.to(player.id).emit('nope', {
+            reason: verdict.reason || 'That did not come through. Try saying it another way.',
+            deadlineIn: TURN_MS,
+        });
+        setClock(room, TURN_MS, () => onTurnExpired(room, player.id));
+        return;
+    }
+
+    player.previous.push(text);
+    if (player.previous.length > 12) player.previous.shift();
+
+    const targets = others.filter(p => verdict.targets.includes(p.name));
+
+    if (targets.length) {
+        openCounter(room, player, text, targets);
+        return;
+    }
+
+    // Nobody else is in the way: one card settles it.
+    const card = room.deck.draw();
+    const shuffled = room.deck.reshuffled;
+    const res = R.resolveSolo(card, player.sheet);
+
+    io.to(room.id).emit('draw', {
+        card, deckCount: room.deck.count, shuffled, band: res.band,
+    });
+
+    const out = await tell(room, R.soloDirective(player.name, text, res),
+        { historyLabel: `${player.name}: ${text}` });
+
+    const dead = out.sheets ? out.dead : [...new Set([...out.dead, ...deathsInProse(room, out.prose)])];
+    eliminate(room, dead);
+    await afterResolution(room, player.id);
+}
+
+// ── The counter phase ──────────────────────────────────
+// Instructions.md: everyone struck gets to say how they meet it,
+// then every card is dealt in the same breath.
+
+function openCounter(room, attacker, text, targets) {
+    room.pending = {
+        attackerId: attacker.id,
+        attackerName: attacker.name,
+        attackerText: text,
+        targetIds: targets.map(t => t.id),
+        answers: new Map(),
+    };
+
+    setClock(room, COUNTER_MS, () => {
+        const p = room.pending;
+        if (!p) return;
+        for (const id of p.targetIds) {
+            if (!p.answers.has(id)) {
+                p.answers.set(id, 'stands frozen, caught unprepared');
+            }
+        }
+        resolveCounter(room).catch(err => failRoom(room, err));
+    });
+
+    io.to(room.id).emit('counter', {
+        attackerName: attacker.name,
+        attackerColor: attacker.color,
+        attackerText: text,
+        targetIds: room.pending.targetIds,
+        targetNames: targets.map(t => t.name),
+        deadlineIn: clockLeft(room),
+    });
+}
+
+async function resolveCounter(room) {
+    const p = room.pending;
+    if (!p || room.busy) return;
+    room.busy = true;
+    room.pending = null;
+    clearClock(room);
+
+    try {
+        const attacker = byId(room, p.attackerId);
+        const defenders = p.targetIds
+            .map(id => byId(room, id))
+            .filter(d => d && !d.eliminated);
+
+        if (!attacker || attacker.eliminated || !defenders.length) {
+            io.to(room.id).emit('counterOff', { reason: 'The moment passes.' });
+            room.busy = false;
+            if (!room.over) {
+                room.currentId = nextAlive(room, p.attackerId);
+                beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+            }
             return;
         }
 
+        // Every card at once, so nobody's fate is read before another's.
+        const cards = room.deck.drawMany(defenders.length + 1);
+        const shuffled = room.deck.reshuffled;
+
+        const res = R.resolveCounter(
+            { card: cards[0], sheet: attacker.sheet },
+            defenders.map((d, i) => ({
+                id: d.id, name: d.name, sheet: d.sheet, card: cards[i + 1],
+                text: p.answers.get(d.id) || 'does nothing',
+            })),
+        );
+
+        io.to(room.id).emit('clash', {
+            deckCount: room.deck.count,
+            shuffled,
+            cards: [
+                {
+                    playerName: attacker.name, playerColor: attacker.color,
+                    card: cards[0], value: res.attacker.eff, beaten: null,
+                },
+                ...res.defenders.map(d => {
+                    const who = byId(room, d.id);
+                    return {
+                        playerName: d.name, playerColor: who?.color,
+                        card: d.card, value: d.eff, beaten: d.beaten,
+                    };
+                }),
+            ],
+        });
+
+        const out = await tell(room,
+            R.counterDirective(attacker.name, p.attackerText, res),
+            { historyLabel: `${attacker.name} moves against ${defenders.map(d => d.name).join(' and ')}` });
+
+        const dead = out.sheets ? out.dead : [...new Set([...out.dead, ...deathsInProse(room, out.prose)])];
+        eliminate(room, dead);
+        room.busy = false;
+        await afterResolution(room, attacker.id);
+    } catch (err) {
+        room.busy = false;
+        failRoom(room, err);
+    }
+}
+
+function failRoom(room, err) {
+    console.error('[room]', room.id, err);
+    io.to(room.id).emit('error:gm', {
+        message: 'The Game Master lost the thread. Try that again.',
+        deadlineIn: TURN_MS,
+    });
+    const p = current(room);
+    if (p && room.started && !room.over) {
+        setClock(room, TURN_MS, () => onTurnExpired(room, p.id));
+    }
+}
+
+// ── Rematch voting ─────────────────────────────────────
+
+function clearVote(room) {
+    if (room.voteTimer) { clearTimeout(room.voteTimer); room.voteTimer = null; }
+}
+
+function scheduleVote(room) {
+    clearVote(room);
+    room.voteTimer = setTimeout(() => {
+        if (!rooms.has(room.id) || room.votePhase) return;
+        startPlayerVote(room);
+    }, VOTE_DELAY_MS);
+}
+
+function startPlayerVote(room) {
+    clearVote(room);
+    room.votePhase = 'players';
+    room.votes = new Map(room.players.map(p => [p.id, null]));
+    room.accepted = [];
+    room.voteTimer = setTimeout(() => finishPlayerVote(room), PLAYER_VOTE_MS);
+    io.to(room.id).emit('vote', { phase: 'players', timeoutMs: PLAYER_VOTE_MS });
+}
+
+function finishPlayerVote(room) {
+    if (room.votePhase !== 'players') return;
+    clearVote(room);
+    const accepted = room.accepted.slice();
+    const slots = room.maxPlayers - accepted.length;
+
+    if (slots > 0 && room.spectators.length) {
+        room.votePhase = 'spectators';
+        room.carried = accepted;
+        room.slots = slots;
+        room.accepted = [];
+        room.votes = new Map(room.spectators.map(s => [s.id, null]));
+        room.voteTimer = setTimeout(() => finishSpectatorVote(room), SPECTATOR_VOTE_MS);
+        io.to(room.id).emit('vote', { phase: 'spectators', slots, timeoutMs: SPECTATOR_VOTE_MS });
+        return;
+    }
+
+    room.votePhase = null;
+    launchRematch(room, accepted);
+}
+
+function finishSpectatorVote(room) {
+    if (room.votePhase !== 'spectators') return;
+    clearVote(room);
+    const all = [...(room.carried || []), ...room.accepted];
+    room.votePhase = null;
+    room.carried = null;
+    launchRematch(room, all);
+}
+
+function launchRematch(room, ids) {
+    // Never seat more than the table holds — latest arrivals lose out.
+    const seated = ids.slice(0, room.maxPlayers);
+
+    if (seated.length < 2) {
+        io.to(room.id).emit('voteOff', { reason: 'Not enough players for another round.' });
+        return;
+    }
+
+    const pool = [...room.players, ...room.spectators];
+    const ordered = seated.map(id => pool.find(p => p.id === id)).filter(Boolean);
+    const promotedIds = ordered
+        .filter(p => room.spectators.some(s => s.id === p.id))
+        .map(p => p.id);
+
+    // Anyone who sat out goes back to the lobby properly, rather than
+    // lingering in the room quietly receiving a game they left.
+    const staying = new Set([...seated, ...room.spectators.map(s => s.id)]);
+    for (const p of room.players) {
+        if (staying.has(p.id)) continue;
+        const sock = io.sockets.sockets.get(p.id);
+        if (!sock) continue;
+        sock.leave(room.id);
+        sock.data.roomId = null;
+        sock.data.spectator = false;
+        sock.emit('left', {});
+    }
+
+    room.spectators = room.spectators.filter(s => !promotedIds.includes(s.id));
+    for (const id of promotedIds) {
+        const sock = io.sockets.sockets.get(id);
+        if (sock) sock.data.spectator = false;
+    }
+
+    room.players = ordered.map((p, i) => ({
+        id: p.id,
+        name: p.name,
+        color: SEAT_COLOURS[i % SEAT_COLOURS.length],
+        eliminated: false,
+        sheet: { character: '', wounds: [], boons: [], status: [], calls: '' },
+        previous: [],
+    }));
+
+    room.hostId = room.players[0].id;
+    room.deck = new Deck();
+    room.started = true;
+    room.over = false;
+    room.busy = false;
+    room.pending = null;
+    room.setupDone = new Set();
+    room.history = [];
+    room.currentId = room.players[0].id;
+    room.votes = null;
+    room.accepted = [];
+    room.carried = null;
+
+    io.to(room.id).emit('newGame', {
+        players: publicPlayers(room),
+        hostId: room.hostId,
+        acceptedIds: room.players.map(p => p.id),
+        promotedIds,
+        currentId: room.currentId,
+        deckCount: room.deck.count,
+        spectatorCount: room.spectators.length,
+    });
+
+    beginTurn(room, { setup: true });
+    pushLobby();
+}
+
+// ── Leaving ────────────────────────────────────────────
+
+function dropFromRoom(room, socket, { voluntary }) {
+    const wasCurrent = room.currentId === socket.id;
+
+    if (socket.data.spectator) {
+        room.spectators = room.spectators.filter(s => s.id !== socket.id);
+        sendPlayers(room);
+        pushLobby();
+        return;
+    }
+
+    const player = byId(room, socket.id);
+    if (!player) return;
+
+    if (room.started && !room.over) {
+        io.to(room.id).emit('note', {
+            text: `${player.name} ${voluntary ? 'leaves the table' : 'vanishes from the table'}.`,
+        });
+    }
+
+    room.players = room.players.filter(p => p.id !== socket.id);
+    room.votes?.delete(socket.id);
+    room.accepted = (room.accepted || []).filter(id => id !== socket.id);
+
+    if (!room.players.length) {
+        clearClock(room);
+        clearVote(room);
+        rooms.delete(room.id);
+        pushLobby();
+        return;
+    }
+
+    if (room.hostId === socket.id) room.hostId = room.players[0].id;
+
+    // If they were mid-counter, keep the exchange coherent.
+    if (room.pending) {
+        const p = room.pending;
+        if (p.attackerId === socket.id) {
+            room.pending = null;
+            clearClock(room);
+            io.to(room.id).emit('counterOff', { reason: 'The one who moved is gone. The moment passes.' });
+            if (room.started && !room.over) {
+                room.currentId = nextAlive(room, socket.id);
+                beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+            }
+        } else if (p.targetIds.includes(socket.id)) {
+            p.targetIds = p.targetIds.filter(id => id !== socket.id);
+            p.answers.delete(socket.id);
+            if (!p.targetIds.length) {
+                room.pending = null;
+                clearClock(room);
+                io.to(room.id).emit('counterOff', { reason: 'Everyone struck at is gone. The moment passes.' });
+                if (room.started && !room.over) {
+                    room.currentId = nextAlive(room, socket.id);
+                    beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+                }
+            } else if (p.targetIds.every(id => p.answers.has(id))) {
+                resolveCounter(room).catch(err => failRoom(room, err));
+            }
+        }
+    }
+
+    sendPlayers(room);
+
+    if (room.started && !room.over) {
+        if (alive(room).length <= 1) {
+            endGame(room).catch(err => console.error(err));
+        } else if (wasCurrent && !room.pending && !room.busy) {
+            room.currentId = nextAlive(room, socket.id);
+            beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
+        }
+    }
+    pushLobby();
+}
+
+// ── Sockets ────────────────────────────────────────────
+
+io.on('connection', (socket) => {
+    socket.data.spectator = false;
+    socket.data.lastAct = 0;
+    socket.emit('rooms', lobbyList());
+
+    const myRoom = () => rooms.get(socket.data.roomId);
+
+    socket.on('rooms:get', () => socket.emit('rooms', lobbyList()));
+
+    socket.on('room:create', ({ name, isPublic, maxPlayers } = {}) => {
+        if (socket.data.roomId) return;
+        const playerName = clip(name, 24);
+        if (!playerName) return socket.emit('joinError', { message: 'Pick a name first.' });
+
+        const id = roomCode();
+        const room = {
+            id,
+            hostId: socket.id,
+            isPublic: !!isPublic,
+            maxPlayers: Math.min(10, Math.max(2, parseInt(maxPlayers, 10) || 10)),
+            players: [{
+                id: socket.id, name: playerName, color: SEAT_COLOURS[0], eliminated: false,
+                sheet: { character: '', wounds: [], boons: [], status: [], calls: '' }, previous: [],
+            }],
+            spectators: [],
+            deck: new Deck(),
+            started: false,
+            over: false,
+            busy: false,
+            currentId: null,
+            setupTurn: false,
+            setupDone: new Set(),
+            pending: null,
+            history: [],
+            clock: null,
+            deadline: 0,
+            voteTimer: null,
+            votePhase: null,
+        };
+
+        rooms.set(id, room);
+        socket.join(id);
+        socket.data.roomId = id;
+
+        socket.emit('joined', {
+            roomId: id, playerId: socket.id, players: publicPlayers(room),
+            hostId: room.hostId, isPublic: room.isPublic, maxPlayers: room.maxPlayers,
+            started: false, spectator: false,
+        });
+        pushLobby();
+    });
+
+    socket.on('room:join', ({ code, name } = {}) => {
+        if (socket.data.roomId) return;
+        const playerName = clip(name, 24);
+        const room = rooms.get(String(code || '').toUpperCase());
+        if (!room) return socket.emit('joinError', { message: 'No table with that code.' });
+        if (!playerName) return socket.emit('joinError', { message: 'Pick a name first.' });
+
+        const clash = [...room.players, ...room.spectators]
+            .some(p => p.name.toLowerCase() === playerName.toLowerCase());
+        if (clash) return socket.emit('joinError', { message: 'Somebody at that table already goes by that name.' });
+
         if (room.started) {
-            if (!room.isPublic) { socket.emit('join-error', { message: 'Game already in progress.' }); return; }
-            // Join as spectator
-            const spectator = { id: socket.id, name: playerName };
-            room.spectators.push(spectator);
+            if (!room.isPublic) return socket.emit('joinError', { message: 'That game is already under way.' });
+            room.spectators.push({ id: socket.id, name: playerName });
             socket.join(room.id);
             socket.data.roomId = room.id;
-            socket.data.isSpectator = true;
+            socket.data.spectator = true;
 
-            socket.emit('joined-as-spectator', {
-                roomId: room.id,
-                playerId: socket.id,
-                players: room.players,
-                spectators: room.spectators,
-                currentPlayerIndex: room.currentPlayerIndex,
-                deckSize: room.deck.length,
-                lastDrawnCard: room.lastDrawnCard
+            socket.emit('joined', {
+                roomId: room.id, playerId: socket.id, players: publicPlayers(room),
+                hostId: room.hostId, isPublic: room.isPublic, maxPlayers: room.maxPlayers,
+                started: true, spectator: true,
+                deckCount: room.deck.count, drawnCard: null,
+                currentId: room.currentId, deadlineIn: clockLeft(room),
+                spectatorCount: room.spectators.length,
             });
-            socket.to(room.id).emit('spectator-count-changed', { spectators: room.spectators });
-            broadcastPublicRooms();
+            sendPlayers(room);
+            sendSheets(room);
+            pushLobby();
             return;
         }
 
         if (room.players.length >= room.maxPlayers) {
-            socket.emit('join-error', { message: `Room is full (max ${room.maxPlayers}).` }); return;
+            return socket.emit('joinError', { message: `That table is full (${room.maxPlayers} seats).` });
         }
 
-        const color = playerColors[room.players.length];
-        const player = { id: socket.id, name: playerName, color, eliminated: false };
-        room.players.push(player);
+        room.players.push({
+            id: socket.id, name: playerName,
+            color: SEAT_COLOURS[room.players.length % SEAT_COLOURS.length],
+            eliminated: false,
+            sheet: { character: '', wounds: [], boons: [], status: [], calls: '' },
+            previous: [],
+        });
         socket.join(room.id);
         socket.data.roomId = room.id;
 
-        socket.emit('room-joined', {
-            roomId: room.id, playerId: socket.id, players: room.players,
-            isPublic: room.isPublic, maxPlayers: room.maxPlayers
+        socket.emit('joined', {
+            roomId: room.id, playerId: socket.id, players: publicPlayers(room),
+            hostId: room.hostId, isPublic: room.isPublic, maxPlayers: room.maxPlayers,
+            started: false, spectator: false,
         });
-        socket.to(room.id).emit('player-joined', { players: room.players });
-
-        if (room.isPublic) broadcastPublicRooms();
+        sendPlayers(room);
+        pushLobby();
     });
 
-    socket.on('start-game', () => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room || room.hostId !== socket.id) return;
-        if (room.players.length < 2) { socket.emit('join-error', { message: 'Need at least 2 players to start.' }); return; }
-
+    socket.on('game:start', () => {
+        const room = myRoom();
+        if (!room || room.hostId !== socket.id || room.started) return;
+        if (room.players.length < 2) {
+            return socket.emit('joinError', { message: 'Two players at least.' });
+        }
         room.started = true;
-        room.conversationHistory.push({
-            role: 'system',
-            content: `The players in this game are: ${room.players.map(p => p.name).join(', ')}. Remember all of these names throughout the entire game.`
+        room.currentId = room.players[0].id;
+
+        io.to(room.id).emit('started', {
+            players: publicPlayers(room),
+            currentId: room.currentId,
+            deckCount: room.deck.count,
         });
-
-        io.to(room.id).emit('game-started', {
-            players: room.players, currentPlayerIndex: 0,
-            deckSize: room.deck.length, lastDrawnCard: null
-        });
-
-        const firstPlayer = room.players[0];
-        io.to(room.id).emit('setup-prompt', { playerName: firstPlayer.name, playerId: firstPlayer.id });
-
-        broadcastPublicRooms();
+        beginTurn(room, { setup: true });
+        pushLobby();
     });
 
-    socket.on('submit-action', async ({ message }) => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room || !room.started || socket.data.isSpectator) return;
-        if (room.pendingAction) return;
+    socket.on('act', async ({ text } = {}) => {
+        const room = myRoom();
+        if (!room || !room.started || room.over || socket.data.spectator) return;
+        if (room.busy || room.pending) return;
+        if (room.currentId !== socket.id) return;
 
-        const currentPlayer = room.players[room.currentPlayerIndex];
-        if (currentPlayer.id !== socket.id) return;
-
-        // ── Setup phase ────────────────────────────────────
-        if (!room.playerSetupDone.has(socket.id)) {
-            room.playerSetupDone.add(socket.id);
-            room.conversationHistory.push({ role: 'system', content: `${currentPlayer.name} is playing as: ${message}` });
-
-            if (room.lastDrawnCard) room.deck.push(room.lastDrawnCard);
-            room.lastDrawnCard = room.deck.shift();
-
-            io.to(room.id).emit('action-submitted', {
-                playerName: currentPlayer.name, playerColor: currentPlayer.color,
-                message, drawnCard: room.lastDrawnCard, deckSize: room.deck.length
+        // Anti-spam, but never a silent drop: a swallowed action
+        // would leave the player staring at an empty box.
+        const now = Date.now();
+        if (now - socket.data.lastAct < ACT_COOLDOWN) {
+            return socket.emit('nope', {
+                reason: 'One thing at a time.',
+                deadlineIn: clockLeft(room) || TURN_MS,
             });
-
-            try {
-                const rawResponse = await callGroqAPI(room.conversationHistory,
-                    `${currentPlayer.name} IS this character — not a minion or summoned creature, but ${currentPlayer.name} themselves: "${message}". Narrate ${currentPlayer.name}'s dramatic arrival in 2 sentences. Do not reference an arena.`);
-                const isRetry = rawResponse.trimStart().startsWith('[RETRY]');
-                const response = rawResponse.replace(/^\s*\[RETRY\]\s*/i, '');
-
-                if (isRetry) {
-                    room.playerSetupDone.delete(socket.id);
-                    io.to(room.id).emit('gm-response', {
-                        response, currentPlayerIndex: room.currentPlayerIndex,
-                        currentPlayerId: currentPlayer.id, eliminatedIds: [], players: room.players
-                    });
-                    io.to(room.id).emit('setup-prompt', { playerName: currentPlayer.name, playerId: currentPlayer.id });
-                    return;
-                }
-
-                room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
-                io.to(room.id).emit('gm-response', {
-                    response, currentPlayerIndex: room.currentPlayerIndex,
-                    currentPlayerId: room.players[room.currentPlayerIndex].id,
-                    eliminatedIds: [], players: room.players
-                });
-
-                const nextPlayer = room.players[room.currentPlayerIndex];
-                if (!room.playerSetupDone.has(nextPlayer.id)) {
-                    io.to(room.id).emit('setup-prompt', { playerName: nextPlayer.name, playerId: nextPlayer.id });
-                }
-            } catch (err) {
-                room.playerSetupDone.delete(socket.id);
-                io.to(room.id).emit('gm-error', { message: err.message });
-            }
-            return;
         }
+        socket.data.lastAct = now;
 
-        // ── Classify action ────────────────────────────────
-        const alivePlayers = room.players.filter(p => !p.eliminated);
-        let classification;
+        const player = byId(room, socket.id);
+        if (!player || player.eliminated) return;
+
+        const body = clip(text);
+        if (!body) return;
+
+        room.busy = true;
+        clearClock(room);
         try {
-            classification = await classifyAction(room.conversationHistory, currentPlayer, message, alivePlayers);
-        } catch {
-            classification = { valid: true, targets: [], isRepeat: false };
-        }
-
-        if (!classification.valid) {
-            io.to(room.id).emit('player-chat', { playerName: currentPlayer.name, playerColor: currentPlayer.color, message });
-            socket.emit('action-invalid', { reason: classification.invalidReason || 'That action doesn\'t make sense. Please try something else.' });
-            return;
-        }
-
-        if (classification.isRepeat) {
-            io.to(room.id).emit('player-chat', { playerName: currentPlayer.name, playerColor: currentPlayer.color, message });
-            socket.emit('action-repeat', { reason: 'You\'ve already attempted that. Try a different approach.' });
-            return;
-        }
-
-        const targetPlayers = alivePlayers.filter(p =>
-            p.id !== socket.id &&
-            classification.targets.some(name => name.toLowerCase() === p.name.toLowerCase())
-        );
-
-        if (room.lastDrawnCard) room.deck.push(room.lastDrawnCard);
-        room.lastDrawnCard = room.deck.shift();
-        const attackerCardValue = getCardValue(room.lastDrawnCard);
-
-        if (targetPlayers.length > 0) {
-            // ── Counter phase ──────────────────────────────
-            room.pendingAction = {
-                attackerId: socket.id,
-                attackerName: currentPlayer.name,
-                attackerColor: currentPlayer.color,
-                attackerMessage: message,
-                attackerCard: room.lastDrawnCard,
-                attackerCardValue,
-                targetIds: targetPlayers.map(p => p.id),
-                counters: {}
-            };
-
-            io.to(room.id).emit('counter-phase', {
-                attackerName: currentPlayer.name, attackerColor: currentPlayer.color,
-                attackerMessage: message,
-                targetIds: targetPlayers.map(p => p.id),
-                targetNames: targetPlayers.map(p => p.name)
-            });
-        } else {
-            // ── Normal action ──────────────────────────────
-            io.to(room.id).emit('action-submitted', {
-                playerName: currentPlayer.name, playerColor: currentPlayer.color,
-                message, drawnCard: room.lastDrawnCard, deckSize: room.deck.length
-            });
-
-            try {
-                const rawResponse = await callGroqAPI(room.conversationHistory, `${currentPlayer.name}: ${message}. Value: ${attackerCardValue}.`);
-                const isRetry = rawResponse.trimStart().startsWith('[RETRY]');
-                const response = rawResponse.replace(/^\s*\[RETRY\]\s*/i, '');
-
-                if (isRetry) {
-                    // Return the card and keep the same player's turn
-                    room.deck.unshift(room.lastDrawnCard);
-                    room.lastDrawnCard = null;
-                    io.to(room.id).emit('gm-response', {
-                        response, currentPlayerIndex: room.currentPlayerIndex,
-                        currentPlayerId: currentPlayer.id,
-                        eliminatedIds: [], players: room.players
-                    });
-                    return;
-                }
-
-                const newlyEliminated = await detectEliminationsAI(room.players, response);
-                for (const p of newlyEliminated) {
-                    p.eliminated = true;
-                    room.conversationHistory.push({ role: 'system', content: `${p.name} has been eliminated and is out of the game.` });
-                }
-                const alive = countAlive(room.players);
-                room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
-
-                if (alive <= 1) {
-                    const winner = room.players.find(p => !p.eliminated);
-                    io.to(room.id).emit('gm-response', { response, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: currentPlayer.id, eliminatedIds: newlyEliminated.map(p => p.id), players: room.players });
-                    io.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
-                    scheduleNewGameVote(room);
-                    broadcastPublicRooms();
-                } else {
-                    io.to(room.id).emit('gm-response', {
-                        response, currentPlayerIndex: room.currentPlayerIndex,
-                        currentPlayerId: room.players[room.currentPlayerIndex].id,
-                        eliminatedIds: newlyEliminated.map(p => p.id), players: room.players
-                    });
-                }
-            } catch (err) {
-                io.to(room.id).emit('gm-error', { message: err.message });
-            }
+            if (!room.setupDone.has(socket.id)) await handleSetup(room, player, body);
+            else await handleAction(room, player, body);
+        } catch (err) {
+            failRoom(room, err);
+        } finally {
+            room.busy = false;
         }
     });
 
-    socket.on('submit-counter', async ({ message }) => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room?.pendingAction) return;
-        if (!room.pendingAction.targetIds.includes(socket.id)) return;
-        if (room.pendingAction.counters[socket.id]) return;
+    socket.on('counter', ({ text } = {}) => {
+        const room = myRoom();
+        if (!room?.pending) return;
+        const p = room.pending;
+        if (!p.targetIds.includes(socket.id) || p.answers.has(socket.id)) return;
 
-        const player = room.players.find(p => p.id === socket.id);
+        const player = byId(room, socket.id);
         if (!player) return;
+        const body = clip(text);
+        if (!body) return;
 
-        const card = room.deck.shift();
-        const cardValue = getCardValue(card);
-        room.pendingAction.counters[socket.id] = { message, card, cardValue };
+        p.answers.set(socket.id, body);
+        const remaining = p.targetIds.filter(id => !p.answers.has(id)).length;
 
-        const remaining = room.pendingAction.targetIds.filter(id => !room.pendingAction.counters[id]).length;
-        io.to(room.id).emit('counter-received', { playerName: player.name, playerColor: player.color, message, remaining });
+        io.to(room.id).emit('counterIn', {
+            name: player.name, color: player.color, text: body, remaining,
+        });
 
-        if (remaining === 0) await resolveCounterPhase(room);
+        if (!remaining) resolveCounter(room).catch(err => failRoom(room, err));
     });
 
-    socket.on('player-leave', () => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room) return;
-
-        if (socket.data.isSpectator) {
-            room.spectators = room.spectators.filter(s => s.id !== socket.id);
-            socket.emit('you-left');
-            socket.to(room.id).emit('spectator-count-changed', { spectators: room.spectators });
-            socket.leave(room.id);
-            socket.data.roomId = null;
-            socket.data.isSpectator = false;
-            if (room.isPublic) broadcastPublicRooms();
-            return;
-        }
-
-        const player = room.players.find(p => p.id === socket.id);
+    socket.on('typing', ({ on } = {}) => {
+        const room = myRoom();
+        if (!room || socket.data.spectator) return;
+        const player = byId(room, socket.id);
         if (!player) return;
-        const playerName = player.name;
-
-        socket.emit('you-left');
-
-        if (room.started && !player.eliminated) {
-            player.eliminated = true;
-            room.conversationHistory.push({ role: 'system', content: `${playerName} has left the game and is eliminated.` });
-
-            const wasCurrent = room.players[room.currentPlayerIndex]?.id === socket.id;
-            const alive = countAlive(room.players);
-
-            if (alive <= 1) {
-                const winner = room.players.find(p => !p.eliminated);
-                socket.to(room.id).emit('player-left-voluntarily', { playerName, players: room.players, currentPlayerIndex: room.currentPlayerIndex });
-                if (alive === 0) {
-                    rooms.delete(room.id);
-                } else {
-                    socket.to(room.id).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
-                    scheduleNewGameVote(room);
-                }
-                broadcastPublicRooms();
-            } else {
-                if (wasCurrent) room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
-                socket.to(room.id).emit('player-left-voluntarily', {
-                    playerName, players: room.players,
-                    currentPlayerIndex: room.currentPlayerIndex,
-                    currentPlayerId: room.players[room.currentPlayerIndex]?.id
-                });
-            }
-        } else {
-            room.players = room.players.filter(p => p.id !== socket.id);
-            if (room.players.length === 0) {
-                rooms.delete(room.id);
-                broadcastPublicRooms();
-                socket.leave(room.id);
-                socket.data.roomId = null;
-                return;
-            }
-            if (room.hostId === socket.id) room.hostId = room.players[0].id;
-            io.to(room.id).emit('player-joined', { players: room.players });
-            if (room.isPublic) broadcastPublicRooms();
-        }
-
-        socket.leave(room.id);
-        socket.data.roomId = null;
+        socket.to(room.id).emit('typing', { name: player.name, color: player.color, on: !!on });
     });
 
-    socket.on('new-game-request', () => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room || !room.started || room.newGamePhase) return;
-
-        if (room.newGameVoteTimer) {
-            clearTimeout(room.newGameVoteTimer);
-            room.newGameVoteTimer = null;
-        }
-
+    socket.on('newgame:request', () => {
+        const room = myRoom();
+        if (!room || !room.started || room.votePhase) return;
+        if (room.hostId !== socket.id) return;
         startPlayerVote(room);
     });
 
-    socket.on('new-game-response', ({ accept }) => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room || !room.newGameVotes) return;
-        if (!(socket.id in room.newGameVotes)) return;
+    socket.on('newgame:vote', ({ accept } = {}) => {
+        const room = myRoom();
+        if (!room?.votes || !room.votes.has(socket.id)) return;
+        room.votes.set(socket.id, !!accept);
 
-        room.newGameVotes[socket.id] = accept;
+        if (accept && !room.accepted.includes(socket.id)) {
+            const cap = room.votePhase === 'spectators' ? room.slots : room.maxPlayers;
+            if (room.accepted.length < cap) room.accepted.push(socket.id);
+        }
 
-        if (room.newGamePhase === 'players') {
-            if (accept && !room.newGameOrder.includes(socket.id)) {
-                room.newGameOrder.push(socket.id);
-            }
-            const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
-            if (allVoted) {
-                clearTimeout(room.newGameVoteTimer);
-                room.newGameVoteTimer = null;
-                resolvePlayerVote(room);
-            }
-        } else if (room.newGamePhase === 'spectators') {
-            if (accept && room.spectatorVoteAccepted.length < room.spectatorVoteSlots &&
-                !room.spectatorVoteAccepted.includes(socket.id)) {
-                room.spectatorVoteAccepted.push(socket.id);
-                if (room.spectatorVoteAccepted.length >= room.spectatorVoteSlots) {
-                    clearTimeout(room.newGameVoteTimer);
-                    room.newGameVoteTimer = null;
-                    resolveSpectatorVote(room);
-                    return;
-                }
-            }
-            const allVoted = Object.values(room.newGameVotes).every(v => v !== null);
-            if (allVoted) {
-                clearTimeout(room.newGameVoteTimer);
-                room.newGameVoteTimer = null;
-                resolveSpectatorVote(room);
-            }
+        const everyone = [...room.votes.values()].every(v => v !== null);
+        const full = room.votePhase === 'spectators' && room.accepted.length >= room.slots;
+
+        if (everyone || full) {
+            if (room.votePhase === 'players') finishPlayerVote(room);
+            else finishSpectatorVote(room);
         }
     });
 
-    socket.on('typing-start', () => {
-        const room = rooms.get(socket.data.roomId);
-        if (!room || socket.data.isSpectator) return;
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player) return;
-        socket.to(room.id).emit('player-typing', { playerName: player.name, playerColor: player.color, isTyping: true });
-    });
-
-    socket.on('typing-stop', () => {
-        const roomId = socket.data.roomId;
-        if (!roomId) return;
-        socket.to(roomId).emit('player-typing', { isTyping: false });
+    socket.on('leave', () => {
+        const room = myRoom();
+        socket.emit('left', {});
+        if (room) dropFromRoom(room, socket, { voluntary: true });
+        socket.leave(socket.data.roomId);
+        socket.data.roomId = null;
+        socket.data.spectator = false;
     });
 
     socket.on('disconnect', () => {
-        const roomId = socket.data.roomId;
-        if (!roomId) return;
-        const room = rooms.get(roomId);
-        if (!room) return;
-
-        if (room.pendingAction) {
-            if (room.pendingAction.attackerId === socket.id || room.pendingAction.targetIds.includes(socket.id)) {
-                room.pendingAction = null;
-                io.to(roomId).emit('counter-phase-cancelled', { reason: 'A player disconnected during the counter phase.' });
-            }
-        }
-
-        if (socket.data.isSpectator) {
-            room.spectators = room.spectators.filter(s => s.id !== socket.id);
-            io.to(roomId).emit('spectator-count-changed', { spectators: room.spectators });
-            if (room.isPublic) broadcastPublicRooms();
-            return;
-        }
-
-        const player = room.players.find(p => p.id === socket.id);
-
-        // Log disconnect to conversation history before removing
-        if (room.started && player && !player.eliminated) {
-            room.conversationHistory.push({ role: 'system', content: `${player.name} has disconnected and is eliminated.` });
-        }
-
-        // Remove from players array so their name/slot is freed and voting works correctly
-        room.players = room.players.filter(p => p.id !== socket.id);
-
-        if (room.players.length === 0) {
-            rooms.delete(roomId);
-            broadcastPublicRooms();
-            return;
-        }
-
-        if (room.hostId === socket.id) room.hostId = room.players[0].id;
-
-        if (room.started) {
-            const alive = countAlive(room.players);
-            if (alive <= 1) {
-                const winner = room.players.find(p => !p.eliminated);
-                io.to(roomId).emit('player-left', { players: room.players, currentPlayerIndex: room.currentPlayerIndex, currentPlayerId: room.players[room.currentPlayerIndex]?.id });
-                io.to(roomId).emit('game-over', { winnerName: winner?.name, players: room.players, spectatorCount: room.spectators.length });
-                scheduleNewGameVote(room);
-                broadcastPublicRooms();
-                return;
-            }
-
-            // Fix out-of-bounds index after removal, then skip eliminated players
-            if (room.currentPlayerIndex >= room.players.length) room.currentPlayerIndex = 0;
-            if (room.players[room.currentPlayerIndex]?.eliminated) {
-                room.currentPlayerIndex = nextAliveIndex(room.players, room.currentPlayerIndex);
-            }
-        }
-
-        io.to(roomId).emit('player-left', {
-            players: room.players,
-            currentPlayerIndex: room.currentPlayerIndex,
-            currentPlayerId: room.players[room.currentPlayerIndex]?.id
-        });
-
-        if (room.isPublic) broadcastPublicRooms();
+        const room = myRoom();
+        if (room) dropFromRoom(room, socket, { voluntary: false });
+        socket.data.roomId = null;
     });
 });
 
-const path = require('path');
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// ── Serve ──────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
+if (require.main === module) {
+    server.listen(PORT, () => console.log(`Card Role Play — http://localhost:${PORT}`));
+}
+
+module.exports = { app, server, io, rooms };
