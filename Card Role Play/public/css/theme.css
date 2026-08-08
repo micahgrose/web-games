@@ -721,7 +721,11 @@ input[type="checkbox"]:checked::after {
 .aura-falter  { box-shadow: 0 0  9px rgba(168,118,63,0.70),  0 0 26px rgba(168,118,63,0.40),  0 0 52px rgba(168,118,63,0.18); }
 .aura-mixed   { box-shadow: 0 0 11px rgba(201,162,39,0.82),  0 0 33px rgba(201,162,39,0.48),  0 0 64px rgba(201,162,39,0.22); }
 .aura-success { box-shadow: 0 0 13px rgba(216,180,58,0.94),  0 0 41px rgba(216,180,58,0.60),  0 0 78px rgba(216,180,58,0.28); }
-.aura-triumph { box-shadow: 0 0 15px rgba(243,220,134,1),    0 0 50px rgba(243,220,134,0.74), 0 0 98px rgba(243,220,134,0.40); }
+/* TRIUMPH ramps outward instead of being gold all the way through:
+   the inner third is the card's own paper blurred off its edge, the
+   middle third white-hot, the outer third gold. Bright light really
+   does desaturate at its core and carry its colour in the falloff. */
+.aura-triumph { box-shadow: 0 0 15px rgba(252,249,240,0.95), 0 0 50px rgba(255,255,255,0.72), 0 0 98px rgba(243,220,134,0.62); }
 .aura-fate    { box-shadow: 0 0 15px rgba(181,140,240,1),    0 0 48px rgba(181,140,240,0.72), 0 0 94px rgba(181,140,240,0.42);
                 animation: fatepulse 2.4s ease-in-out infinite; }
 @keyframes fatepulse {

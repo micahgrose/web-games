@@ -65,7 +65,10 @@ export const BANDS = [
     { max: 7,  key: 'falter',  label: 'FALTER',  hint: 'mostly fails; a sliver lands',     ink: '#a8763f', glow: 'rgba(168,118,63,0.55)' },
     { max: 10, key: 'mixed',   label: 'MIXED',   hint: 'it half-works, and it costs',      ink: '#c9a227', glow: 'rgba(201,162,39,0.55)' },
     { max: 12, key: 'success', label: 'SUCCESS', hint: 'it works, cleanly',                ink: '#d8b43a', glow: 'rgba(216,180,58,0.72)' },
-    { max: 14, key: 'triumph', label: 'TRIUMPH', hint: 'it works beyond hope',             ink: '#f3dc86', glow: 'rgba(243,220,134,0.9)' },
+    // TRIUMPH is the one band that ramps: paper, then white, then gold,
+    // innermost outward. core/mid are optional and default to glow.
+    { max: 14, key: 'triumph', label: 'TRIUMPH', hint: 'it works beyond hope',             ink: '#f3dc86', glow: 'rgba(243,220,134,0.72)',
+      core: 'rgba(252,249,240,0.95)', mid: 'rgba(255,255,255,0.78)' },
     { max: 99, key: 'fate',    label: 'FATE',    hint: 'the deck writes this one itself',  ink: '#b58cf0', glow: 'rgba(181,140,240,0.85)' },
 ];
 

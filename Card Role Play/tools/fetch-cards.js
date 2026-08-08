@@ -26,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Resvg } = require('@resvg/resvg-js');
+const { age, ENABLED: AGEING, STRENGTH } = require('./age');
 
 const SRC = 'https://commons.wikimedia.org/wiki/Special:FilePath/'
     + 'English%20pattern%20playing%20cards%20deck%20with%20extra%20cards.svg';
@@ -175,8 +176,12 @@ async function main() {
         if (!name || seen.has(name)) continue;
         seen.add(name);
 
+        // Ageing runs after slim(), which strips ids — the patina's
+        // gradients and filters depend on keeping theirs. Off unless
+        // AGE_STRENGTH is set, in which case this is a no-op.
         const x = col * CELL_W, y = row * CELL_H;
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${CELL_W} ${CELL_H}">${g}</svg>`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${CELL_W} ${CELL_H}">`
+            + age(g, name, x, y, CELL_W, CELL_H) + `</svg>`;
         const file = path.join(OUT, name + '.svg');
         fs.writeFileSync(file, svg);
         written++;
@@ -189,7 +194,15 @@ async function main() {
         + 'Licence: CC0 1.0 Universal — public domain dedication, no rights reserved.\n'
         + 'Source: https://commons.wikimedia.org/wiki/File:English_pattern_playing_cards_deck_with_extra_cards.svg\n'
         + '\nSplit into individual cards by tools/fetch-cards.js. Geometry is unmodified;\n'
-        + 'editor metadata was stripped and path coordinates rounded to 0.01 units.\n');
+        + 'editor metadata was stripped and path coordinates rounded to 0.01 units.\n'
+        + (AGEING
+            ? '\nMODIFIED: the colours are not the original ones. Every card has been aged by\n'
+              + `tools/age.js at strength ${STRENGTH} — the palette remapped to cream paper and\n`
+              + 'faded inks, and an uneven patina laid over it (cast, edge wear, paper mottle),\n'
+              + 'seeded per card. CC0 permits this freely and asks nothing in return, but the\n'
+              + 'change is recorded here so nobody mistakes it for how Dmitry Fomin drew it.\n'
+            : '\nThe colours are the original ones. tools/age.js can age the deck, but it is\n'
+              + 'off; see artwork/aged-deck/ for a copy built with it.\n'));
 
     console.log(`wrote ${written} cards, ${(bytes / 1024).toFixed(0)} KB total`);
     const missing = [];

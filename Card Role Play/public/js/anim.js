@@ -12,6 +12,13 @@ const bandOf = (card, key, value) =>
     (key && BANDS.find(b => b.key === key))
     || bandFor(value ?? cardValue(card));
 
+/** The three glow layers for a band, innermost out. Most bands are one
+ *  colour throughout; TRIUMPH ramps paper → white → gold. */
+const glowLayers = (band, near, mid, far) =>
+    `0 0 ${near}px ${band.core || band.glow},`
+    + ` 0 0 ${mid}px ${band.mid || band.glow},`
+    + ` 0 0 ${far}px ${band.glow}`;
+
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const twoFrames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -116,8 +123,7 @@ export async function dealOne(card, deckEl, slotEl, bandKey) {
     // Three spread-zero layers of the band's colour: the light starts
     // on the card's edge and still carries to the table.
     el.querySelector('.face.front').style.boxShadow =
-        `0 0 13px ${band.glow}, 0 0 42px ${band.glow}, 0 0 84px ${band.glow},`
-        + ` 0 16px 30px rgba(0,0,0,0.7)`;
+        `${glowLayers(band, 13, 42, 84)}, 0 16px 30px rgba(0,0,0,0.7)`;
 
     await wait(620);
     el.style.left = to.left + 'px';
@@ -188,8 +194,7 @@ export async function dealClash(cards, deckEl) {
     items.forEach(({ el, card, value }) => {
         const band = bandOf(card, null, value);
         el.querySelector('.face.front').style.boxShadow =
-            `0 0 11px ${band.glow}, 0 0 34px ${band.glow}, 0 0 66px ${band.glow},`
-            + ` 0 14px 26px rgba(0,0,0,0.65)`;
+            `${glowLayers(band, 11, 34, 66)}, 0 14px 26px rgba(0,0,0,0.65)`;
     });
     sfx.play('verdict', bandOf(items[0].card, null, items[0].value).key);
 

@@ -4,3 +4,6 @@ Source: https://commons.wikimedia.org/wiki/File:English_pattern_playing_cards_de
 
 Split into individual cards by tools/fetch-cards.js. Geometry is unmodified;
 editor metadata was stripped and path coordinates rounded to 0.01 units.
+
+The colours are the original ones. tools/age.js can age the deck, but it is
+off; see artwork/aged-deck/ for a copy built with it.
