@@ -59,6 +59,18 @@
 
     --rail-w:      clamp(190px, 21vw, 246px);
     --ease:        cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ── Card geometry ──────────────────────────────────
+       The artwork is 360 × 540 with a corner radius of 29.94.
+       Every box that holds a card must be exactly this shape: an
+       <img> keeps its own aspect ratio, so a box of any other ratio
+       letterboxes the picture inside it — and then every glow, shadow
+       and border drawn on the BOX sits off the edge of the CARD.
+       Corner radius as a pair of percentages (horizontal / vertical)
+       so it stays circular, and matches the artwork, at any size:
+       29.94/360 = 8.32% of width; 8.32% of width = 5.54% of height. */
+    --card-ratio:  2 / 3;
+    --card-r:      8.32% / 5.54%;
 }
 
 * { box-sizing: border-box; }
@@ -631,12 +643,17 @@ input[type="checkbox"]:checked::after {
 .card-holder {
     position: relative;
     width: 100%;
-    aspect-ratio: 250 / 350;
-    border-radius: 9px;
+    aspect-ratio: var(--card-ratio);
+    border-radius: var(--card-r);
 }
 /* Faces are <img> onto the artwork files; the reverse and the empty
-   slot are inline SVG. Both have to fill the holder identically. */
-.card-holder .card-art { width: 100%; height: 100%; display: block; border-radius: 9px; }
+   slot are inline SVG. Both have to fill the holder identically — see
+   the note on --card-ratio. */
+.card-holder .card-art {
+    width: 100%; height: 100%;
+    display: block;
+    border-radius: var(--card-r);
+}
 
 /* The deck: a stack, not one card */
 #deckHolder { filter: drop-shadow(0 8px 16px rgba(0,0,0,0.6)); }
@@ -644,7 +661,7 @@ input[type="checkbox"]:checked::after {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 9px;
+    border-radius: var(--card-r);
     background: #2c100f;
     border: 1px solid rgba(201,162,39,0.2);
     z-index: -1;
@@ -687,17 +704,22 @@ input[type="checkbox"]:checked::after {
     line-height: 1.35;
 }
 
-/* Glow tiers — the card's aura states the outcome band */
-.aura { transition: filter 0.5s, box-shadow 0.5s; border-radius: 9px; }
-.aura-ruin    { box-shadow: 0 0 26px 2px rgba(125,142,163,0.34); }
-.aura-falter  { box-shadow: 0 0 26px 2px rgba(168,118,63,0.36); }
-.aura-mixed   { box-shadow: 0 0 30px 3px rgba(201,162,39,0.38); }
-.aura-success { box-shadow: 0 0 38px 4px rgba(216,180,58,0.55); }
-.aura-triumph { box-shadow: 0 0 54px 7px rgba(243,220,134,0.72); }
-.aura-fate    { box-shadow: 0 0 52px 7px rgba(181,140,240,0.7); animation: fatepulse 2.4s ease-in-out infinite; }
+/* Glow tiers — the card's aura states the outcome band.
+   No spread on any of these. Spread grows the lit shape before it is
+   blurred, which reads as a second, larger card sitting behind the
+   real one; with spread 0 the light starts exactly at the card's edge
+   and falls away, which reads as the card giving off light. The band
+   ladder is carried by blur and opacity instead. */
+.aura { transition: box-shadow 0.5s; border-radius: var(--card-r); }
+.aura-ruin    { box-shadow: 0 0 17px rgba(125,142,163,0.40); }
+.aura-falter  { box-shadow: 0 0 19px rgba(168,118,63,0.44); }
+.aura-mixed   { box-shadow: 0 0 23px rgba(201,162,39,0.50); }
+.aura-success { box-shadow: 0 0 29px rgba(216,180,58,0.64); }
+.aura-triumph { box-shadow: 0 0 38px rgba(243,220,134,0.82); }
+.aura-fate    { box-shadow: 0 0 36px rgba(181,140,240,0.78); animation: fatepulse 2.4s ease-in-out infinite; }
 @keyframes fatepulse {
-    0%, 100% { box-shadow: 0 0 46px 5px rgba(181,140,240,0.6); }
-    50%      { box-shadow: 0 0 68px 10px rgba(181,140,240,0.85); }
+    0%, 100% { box-shadow: 0 0 30px rgba(181,140,240,0.66); }
+    50%      { box-shadow: 0 0 46px rgba(181,140,240,0.92); }
 }
 
 /* ── Composer ───────────────────────────────────────── */
@@ -952,21 +974,6 @@ input[type="checkbox"]:checked::after {
     .dock { left: 10px; right: 10px; bottom: 10px; width: auto; }
 }
 
-/* ── Court preview (temporary, for art tuning) ──────── */
-.court-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-    gap: 14px;
-}
-.court-cell { text-align: center; }
-.court-cell .card-holder { width: 100%; }
-.court-lbl {
-    font-size: 0.68rem;
-    color: var(--parch-faint);
-    margin-top: 5px;
-    letter-spacing: 0.05em;
-}
-
 /* ── Deal animation layer ───────────────────────────── */
 #animLayer { display: none; position: fixed; inset: 0; z-index: 1500; pointer-events: none; }
 #animLayer.on { display: block; }
@@ -991,7 +998,7 @@ input[type="checkbox"]:checked::after {
     inset: 0;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    border-radius: 9px;
+    border-radius: var(--card-r);
     overflow: hidden;
     box-shadow: 0 16px 30px rgba(0,0,0,0.72);
     transition: box-shadow 0.45s var(--ease);
@@ -1028,10 +1035,12 @@ input[type="checkbox"]:checked::after {
 }
 .fly-tag.on { opacity: 1; transform: none; }
 
-/* Filter the artwork itself, never the element holding the 3D context. */
-.fly.loser .face svg { filter: grayscale(0.9) brightness(0.52); }
+/* Filter the artwork itself, never the element holding the 3D context.
+   .card-art, not svg: a face is an <img> now, only the reverse is
+   inline SVG, and matching on the tag greyed out neither. */
+.fly.loser .face .card-art { filter: grayscale(0.9) brightness(0.52); }
 .fly.loser .face { box-shadow: 0 10px 20px rgba(0,0,0,0.7); }
-.fly.winner .face { box-shadow: 0 0 30px 4px rgba(243,220,134,0.7), 0 14px 26px rgba(0,0,0,0.6); }
+.fly.winner .face { box-shadow: 0 0 28px rgba(243,220,134,0.75), 0 14px 26px rgba(0,0,0,0.6); }
 
 /* Clash spark where two cards meet */
 .spark {

@@ -15,6 +15,18 @@
 export const SUITS = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
 export const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
+// ── One card, one shape ────────────────────────────────
+// The artwork files are 360 × 540 with a corner radius of 29.94, and
+// an <img> keeps its source's aspect ratio no matter what box you give
+// it. So anything we draw ourselves — the reverse, the empty slot —
+// has to be this exact ratio too, and so does the CSS box that holds
+// them (--card-ratio / --card-r in theme.css). Get it wrong and the
+// picture letterboxes inside its box, and every glow drawn on the box
+// floats off the edge of the card. Kept here so one number governs.
+export const CARD_W = 240;
+export const CARD_H = 360;                       // 2 : 3, as the artwork is
+export const CARD_R = CARD_W * (29.944 / 360);   // ≈ 20, the artwork's corner
+
 const SUIT_GLYPH = { Hearts: '♥', Diamonds: '♦', Clubs: '♣', Spades: '♠' };
 
 export const isRed = (suit) => suit === 'Hearts' || suit === 'Diamonds';
@@ -66,11 +78,13 @@ export function bandFor(value) {
 /** A card face: an <img> onto its artwork file. */
 export function cardFaceHTML(card) {
     if (!card) {
-        return `<svg class="card-art" viewBox="0 0 250 350" xmlns="http://www.w3.org/2000/svg"
+        return `<svg class="card-art" viewBox="0 0 ${CARD_W} ${CARD_H}" xmlns="http://www.w3.org/2000/svg"
                      role="img" aria-label="no card">
-            <rect x="3" y="3" width="244" height="344" rx="16" fill="rgba(255,255,255,0.02)"
+            <rect x="3" y="3" width="${CARD_W - 6}" height="${CARD_H - 6}" rx="${(CARD_R - 3).toFixed(1)}"
+                  fill="rgba(255,255,255,0.02)"
                   stroke="rgba(201,162,39,0.18)" stroke-width="1.5" stroke-dasharray="7 7"/>
-            <text x="125" y="184" text-anchor="middle" font-family="Cinzel, serif" font-size="15"
+            <text x="${CARD_W / 2}" y="${CARD_H / 2 + 5}" text-anchor="middle"
+                  font-family="Cinzel, serif" font-size="15"
                   fill="rgba(236,224,200,0.22)" letter-spacing="3">NO CARD</text>
         </svg>`;
     }
@@ -80,10 +94,10 @@ export function cardFaceHTML(card) {
 /** The reverse. Ours, so it belongs to this table rather than to a
  *  standard deck: oxblood, a gold lattice, four suits on a medallion. */
 export function cardBackSVG() {
-    const W = 250, H = 350;
+    const W = CARD_W, H = CARD_H, CX = W / 2, CY = H / 2;
     const medallion = SUITS.map((s, i) => {
         const a = (i / 4) * Math.PI * 2 - Math.PI / 2;
-        const cx = 125 + Math.cos(a) * 40, cy = 175 + Math.sin(a) * 40;
+        const cx = CX + Math.cos(a) * 40, cy = CY + Math.sin(a) * 40;
         return `<text x="${cx.toFixed(1)}" y="${(cy + 7.5).toFixed(1)}" text-anchor="middle"
                   font-size="22" fill="#c9a227">${SUIT_GLYPH[s]}</text>`;
     }).join('');
@@ -100,18 +114,18 @@ export function cardBackSVG() {
                 <stop offset="1" stop-color="#2c100f"/>
             </radialGradient>
         </defs>
-        <rect x="0" y="0" width="${W}" height="${H}" rx="17" fill="#f4ead4"/>
-        <rect x="7" y="7" width="${W - 14}" height="${H - 14}" rx="12" fill="url(#backField)"/>
-        <rect x="7" y="7" width="${W - 14}" height="${H - 14}" rx="12" fill="url(#lattice)"/>
-        <rect x="15" y="15" width="${W - 30}" height="${H - 30}" rx="8" fill="none"
+        <rect x="0" y="0" width="${W}" height="${H}" rx="${CARD_R.toFixed(1)}" fill="#f4ead4"/>
+        <rect x="7" y="7" width="${W - 14}" height="${H - 14}" rx="${(CARD_R - 7).toFixed(1)}" fill="url(#backField)"/>
+        <rect x="7" y="7" width="${W - 14}" height="${H - 14}" rx="${(CARD_R - 7).toFixed(1)}" fill="url(#lattice)"/>
+        <rect x="15" y="15" width="${W - 30}" height="${H - 30}" rx="${(CARD_R - 12).toFixed(1)}" fill="none"
               stroke="rgba(201,162,39,0.55)" stroke-width="1.6"/>
-        <rect x="21" y="21" width="${W - 42}" height="${H - 42}" rx="6" fill="none"
+        <rect x="21" y="21" width="${W - 42}" height="${H - 42}" rx="${(CARD_R - 15).toFixed(1)}" fill="none"
               stroke="rgba(201,162,39,0.28)" stroke-width="0.8"/>
-        <circle cx="125" cy="175" r="62" fill="rgba(20,8,8,0.5)" stroke="rgba(201,162,39,0.5)" stroke-width="1.4"/>
-        <circle cx="125" cy="175" r="54" fill="none" stroke="rgba(201,162,39,0.28)" stroke-width="0.8"/>
+        <circle cx="${CX}" cy="${CY}" r="62" fill="rgba(20,8,8,0.5)" stroke="rgba(201,162,39,0.5)" stroke-width="1.4"/>
+        <circle cx="${CX}" cy="${CY}" r="54" fill="none" stroke="rgba(201,162,39,0.28)" stroke-width="0.8"/>
         ${medallion}
-        <circle cx="125" cy="175" r="13" fill="rgba(201,162,39,0.9)"/>
-        <circle cx="125" cy="175" r="8" fill="#2c100f"/>
-        <circle cx="125" cy="175" r="3.4" fill="rgba(201,162,39,0.9)"/>
+        <circle cx="${CX}" cy="${CY}" r="13" fill="rgba(201,162,39,0.9)"/>
+        <circle cx="${CX}" cy="${CY}" r="8" fill="#2c100f"/>
+        <circle cx="${CX}" cy="${CY}" r="3.4" fill="rgba(201,162,39,0.9)"/>
     </svg>`;
 }

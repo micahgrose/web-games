@@ -79,8 +79,6 @@ export const el = {
     voteCountdown: $('voteCountdown'),
 };
 
-const CARD_ASPECT = 350 / 250;
-
 // ── The room's light follows whoever holds the turn ────
 export function setSeatLight(colour) {
     document.documentElement.style.setProperty('--seat', colour || '#c9a227');

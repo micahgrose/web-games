@@ -113,8 +113,10 @@ export async function dealOne(card, deckEl, slotEl, bandKey) {
     const band = bandOf(card, bandKey);
     sfx.play('verdict', band.key);
     // On the face, not the .inner — see the note in theme.css.
+    // No spread, so the light starts at the card's edge rather than
+    // ringing it — same reasoning as the .aura tiers.
     el.querySelector('.face.front').style.boxShadow =
-        `0 0 30px 4px ${band.glow}, 0 16px 30px rgba(0,0,0,0.7)`;
+        `0 0 28px ${band.glow}, 0 16px 30px rgba(0,0,0,0.7)`;
 
     await wait(620);
     el.style.left = to.left + 'px';
@@ -185,7 +187,7 @@ export async function dealClash(cards, deckEl) {
     items.forEach(({ el, card, value }) => {
         const band = bandOf(card, null, value);
         el.querySelector('.face.front').style.boxShadow =
-            `0 0 24px 3px ${band.glow}, 0 14px 26px rgba(0,0,0,0.65)`;
+            `0 0 22px ${band.glow}, 0 14px 26px rgba(0,0,0,0.65)`;
     });
     sfx.play('verdict', bandOf(items[0].card, null, items[0].value).key);
 

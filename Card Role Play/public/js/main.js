@@ -3,25 +3,8 @@ import * as ui from './ui.js';
 import { el, esc } from './ui.js';
 import * as anim from './anim.js';
 import * as sfx from './audio.js';
-import { cardFaceHTML } from './cards.js';
 
 const socket = io();
-
-// Temporary: the twelve court cards on the lobby, so their art can be
-// looked at without dealing a game. Delete the section from the page
-// and this quietly does nothing.
-{
-    const grid = document.getElementById('courtGrid');
-    if (grid) {
-        grid.innerHTML = ['Spades', 'Hearts', 'Diamonds', 'Clubs']
-            .flatMap(suit => ['J', 'Q', 'K'].map(rank =>
-                `<div class="court-cell">
-                    <div class="card-holder">${cardFaceHTML({ rank, suit })}</div>
-                    <div class="court-lbl">${rank} of ${suit}</div>
-                </div>`))
-            .join('');
-    }
-}
 
 // ── State ──────────────────────────────────────────────
 const S = {

@@ -23,6 +23,27 @@ const head = (s) => console.log(`\n── ${s}`);
 
 const CARDS_DIR = path.join(__dirname, '..', 'public', 'cards');
 
+/** The width : height of an SVG's viewBox, or null. */
+function ratioOf(svg) {
+    const m = /viewBox="\s*([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)\s*"/.exec(svg);
+    if (!m) return null;
+    const w = Number(m[3]), h = Number(m[4]);
+    return h ? w / h : null;
+}
+
+/**
+ * Every box-shadow layer, with its length values separated from its
+ * colour — colours contain commas, so they have to be masked before
+ * the layers can be split apart.
+ */
+function shadowLayers(value) {
+    const masked = value.replace(/(rgba?|hsla?|var)\([^()]*\)/g, 'COLOUR');
+    return masked.split(',').map(layer => ({
+        text: layer.trim(),
+        lengths: (layer.match(/-?\d*\.?\d+px|(?<![\w.])0(?![\w.%])/g) || []).length,
+    }));
+}
+
 /** Balanced tags, matched quotes, no placeholder values baked in. */
 function checkSVG(svg, label) {
     ok(svg.trimStart().startsWith('<svg'), `${label}: is an svg element`);
@@ -55,6 +76,8 @@ async function main() {
     const src = fs.readFileSync(path.join(CARDS_DIR, 'SOURCE.txt'), 'utf8');
     ok(/CC0/.test(src) && /Fomin/i.test(src), 'the licence and author are recorded');
 
+    const SHAPE = cards.CARD_W / cards.CARD_H;
+
     let total = 0;
     for (const suit of cards.SUITS) {
         for (const rank of cards.RANKS) {
@@ -65,7 +88,10 @@ async function main() {
             const svg = fs.readFileSync(file, 'utf8');
             total += svg.length;
             checkSVG(svg, label);
-            ok(/viewBox="[-\d. ]+"/.test(svg), `${label}: carries a viewBox`);
+            const r = ratioOf(svg);
+            ok(r !== null, `${label}: carries a viewBox`);
+            ok(r !== null && Math.abs(r - SHAPE) < 0.001,
+                `${label}: is the deck's shape (${r?.toFixed(4)} vs ${SHAPE.toFixed(4)})`);
             ok(svg.length > 600, `${label}: has real artwork in it`);
         }
     }
@@ -87,6 +113,78 @@ async function main() {
         'a face is an img onto its artwork');
     ok(/class="card-art"/.test(cards.cardFaceHTML({ rank: 'K', suit: 'Spades' })),
         'and is tagged so the CSS can size it');
+
+    head('Every card box is the shape of the picture inside it');
+    {
+        // An <img> keeps its source's aspect ratio whatever box you give
+        // it. A box of any other ratio letterboxes the picture — and then
+        // the glow, drawn on the box, floats off the edge of the card.
+        const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'theme.css'), 'utf8');
+
+        ok(Math.abs(ratioOf(cards.cardBackSVG()) - SHAPE) < 0.001,
+            'the reverse is the deck\'s shape');
+        ok(Math.abs(ratioOf(cards.cardFaceHTML(null)) - SHAPE) < 0.001,
+            'the empty slot is the deck\'s shape');
+
+        const declared = /--card-ratio:\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(css);
+        ok(!!declared, '--card-ratio is declared');
+        if (declared) {
+            const r = Number(declared[1]) / Number(declared[2]);
+            ok(Math.abs(r - SHAPE) < 0.001,
+                `the CSS box matches the artwork (${r.toFixed(4)} vs ${SHAPE.toFixed(4)})`);
+        }
+        ok(/\.card-holder\s*\{[^}]*aspect-ratio:\s*var\(--card-ratio\)/.test(css),
+            'the holder takes its shape from that one value');
+
+        // Corner radius: --card-r is horizontal% / vertical%, and the two
+        // must describe the same absolute radius or the corners go oval.
+        const rad = /--card-r:\s*([\d.]+)%\s*\/\s*([\d.]+)%/.exec(css);
+        ok(!!rad, '--card-r is declared as a percentage pair');
+        if (rad) {
+            const horiz = Number(rad[1]) / 100;                  // of the width
+            const vert = (Number(rad[2]) / 100) / SHAPE;         // of the width too
+            ok(Math.abs(horiz - vert) < 0.002, 'the corners are round, not oval');
+            ok(Math.abs(horiz - 29.944 / 360) < 0.002,
+                'and they sit on the artwork\'s own corner');
+        }
+    }
+
+    head('Glows sit on the card edge, not outside it');
+    {
+        // Spread grows the lit shape before it is blurred, so a glow with
+        // spread reads as a second, larger card behind the real one.
+        const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'theme.css'), 'utf8');
+        const animSrc = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'anim.js'), 'utf8');
+
+        const glowRules = [...css.matchAll(/(\.aura-[\w-]+|\.fly\.winner\s+\.face)[^{]*\{([^}]*)\}/g)];
+        ok(glowRules.length >= 7, `every glow tier is checked (${glowRules.length})`);
+        for (const [, sel, body] of glowRules) {
+            for (const m of body.matchAll(/box-shadow:\s*([^;]+);/g)) {
+                for (const layer of shadowLayers(m[1])) {
+                    ok(layer.lengths <= 3, `${sel}: no spread on "${layer.text}"`);
+                }
+            }
+        }
+        for (const [, body] of [...css.matchAll(/@keyframes fatepulse\s*\{([\s\S]*?)\n\}/g)]) {
+            for (const m of body.matchAll(/box-shadow:\s*([^;]+);/g)) {
+                for (const layer of shadowLayers(m[1])) {
+                    ok(layer.lengths <= 3, `fatepulse: no spread on "${layer.text}"`);
+                }
+            }
+        }
+        // The animation writes its glows inline; same rule applies.
+        for (const m of animSrc.matchAll(/boxShadow\s*=\s*[`'"]([^`'"]+)/g)) {
+            const value = m[1].replace(/\$\{[^}]*\}/g, 'COLOUR');
+            for (const layer of shadowLayers(value)) {
+                ok(layer.lengths <= 3, `anim.js: no spread on "${layer.text}"`);
+            }
+        }
+
+        // The losing card in a clash greys out. Faces are <img> now, so a
+        // selector matching on the svg tag would quietly stop working.
+        ok(/\.fly\.loser\s+\.face\s+\.card-art\s*\{[^}]*grayscale/.test(css),
+            'a beaten card still greys out');
+    }
 
     head('Outcome bands cover every value');
     for (let v = 2; v <= 15; v++) {

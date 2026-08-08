@@ -53,6 +53,15 @@ standard deck:
 The deck is 1.6 MB on disk and **361 KB gzipped** (a court card: 107 KB → 27 KB),
 so `compression` is enabled and the faces load per card as they are dealt.
 
+**One card, one shape.** The artwork is 360 × 540 — 2:3 — and the boxes holding
+it were still 250 × 350 from the hand-drawn set. An `<img>` keeps its source's
+aspect ratio whatever box you give it, so every card letterboxed inside its own
+holder: about five pixels of dead gutter down each side, invisible against a
+dark table until a glow was drawn on the *box* and hung off the edge of the
+*card*. `--card-ratio` and `--card-r` now govern every card-shaped box, the
+reverse and the empty slot are drawn to match, and `test/smoke.js` fails if any
+of them drift apart or if the corner radius stops being circular.
+
 ### The glow is the rulebook
 
 Every value maps to a band, and the band has a colour, a name, a one-line
@@ -70,6 +79,12 @@ meaning, and a bell:
 The card's aura, the verdict plate beneath it and the pitch of the chime all
 carry the same band. Players learn the ladder by watching it, without a legend.
 This is teaching inside the game rather than a rules panel next to it.
+
+No glow carries a **spread**. Spread grows the lit shape *before* it is blurred,
+so the light reads as a second, larger card sitting behind the real one; with
+spread zero it starts at the card's edge and falls away, which reads as the card
+giving off light. The ladder is carried by blur and opacity instead, and the
+smoke test refuses a spread value anywhere a card is lit.
 
 ---
 
@@ -226,6 +241,9 @@ model. The client is `cards / audio / anim / ui / main`.
 - *Two different system prompts* existed for the same Game Master, with
   contradictory language rules. One prompt now.
 - *Players who declined a rematch* stayed subscribed to the table invisibly.
+- *A beaten card stopped greying out* in the clash. The rule matched
+  `.fly .face svg`, which was right when faces were inline SVG and wrong the
+  moment they became `<img>`; it now matches `.card-art`, which is both.
 
 ---
 
@@ -258,8 +276,8 @@ model. The client is `cards / audio / anim / ui / main`.
 ## 5. Verification
 
 ```
-npm test          # 160 + 1288 checks, no API key needed
-npm run test:live # 22 checks against the real API, costs a few tokens
+npm test          # 205 + 592 checks, no API key needed
+npm run test:live # 44 checks against the real API, costs a few tokens
 ```
 
 - **`test/headless.js`** — deck invariants; the outcome ladder; wound and
@@ -270,10 +288,12 @@ npm run test:live # 22 checks against the real API, costs a few tokens
   against a real server** — seating, name collisions, setup turns, refusals,
   counters, eliminations, victory, epilogue, and clearing the table.
 - **`test/smoke.js`** — every one of the 54 cards checked for well-formed
-  markup, balanced tags, valid colours and no `undefined` leaking into the art;
-  pip counts checked against a real deck; every asset the page requests served
-  with the right content type; every element id the scripts reach for confirmed
-  present in the HTML.
+  markup, balanced tags and no `undefined` leaking into the art; every card box
+  checked to be the same shape as the picture inside it, with round corners on
+  the artwork's own radius; every glow checked for spread; the flip checked for
+  a 3D context to flip in; every asset the page requests served with the right
+  content type; every element id the scripts reach for confirmed present in the
+  HTML. These are the things I cannot see, so they are the things I measure.
 - **`test/live.js`** — the parts only the real API can prove: JSON-mode triage,
   target identification, streaming, and that the state block parses and never
   reaches the stream.
