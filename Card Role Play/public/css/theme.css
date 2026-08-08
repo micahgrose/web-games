@@ -709,17 +709,24 @@ input[type="checkbox"]:checked::after {
    blurred, which reads as a second, larger card sitting behind the
    real one; with spread 0 the light starts exactly at the card's edge
    and falls away, which reads as the card giving off light. The band
-   ladder is carried by blur and opacity instead. */
+   ladder is carried by blur and opacity instead.
+
+   Intensity comes from stacking three spread-zero layers: a
+   tight bright one that puts light right on the card's edge, a mid one
+   for the body of the glow, and a wide faint one that throws it onto
+   the table. Every band carries all three so the transition between
+   them interpolates rather than snapping. */
 .aura { transition: box-shadow 0.5s; border-radius: var(--card-r); }
-.aura-ruin    { box-shadow: 0 0 17px rgba(125,142,163,0.40); }
-.aura-falter  { box-shadow: 0 0 19px rgba(168,118,63,0.44); }
-.aura-mixed   { box-shadow: 0 0 23px rgba(201,162,39,0.50); }
-.aura-success { box-shadow: 0 0 29px rgba(216,180,58,0.64); }
-.aura-triumph { box-shadow: 0 0 38px rgba(243,220,134,0.82); }
-.aura-fate    { box-shadow: 0 0 36px rgba(181,140,240,0.78); animation: fatepulse 2.4s ease-in-out infinite; }
+.aura-ruin    { box-shadow: 0 0  8px rgba(125,142,163,0.62), 0 0 22px rgba(125,142,163,0.34), 0 0 44px rgba(125,142,163,0.14); }
+.aura-falter  { box-shadow: 0 0  9px rgba(168,118,63,0.70),  0 0 26px rgba(168,118,63,0.40),  0 0 52px rgba(168,118,63,0.18); }
+.aura-mixed   { box-shadow: 0 0 11px rgba(201,162,39,0.82),  0 0 33px rgba(201,162,39,0.48),  0 0 64px rgba(201,162,39,0.22); }
+.aura-success { box-shadow: 0 0 13px rgba(216,180,58,0.94),  0 0 41px rgba(216,180,58,0.60),  0 0 78px rgba(216,180,58,0.28); }
+.aura-triumph { box-shadow: 0 0 15px rgba(243,220,134,1),    0 0 50px rgba(243,220,134,0.74), 0 0 98px rgba(243,220,134,0.40); }
+.aura-fate    { box-shadow: 0 0 15px rgba(181,140,240,1),    0 0 48px rgba(181,140,240,0.72), 0 0 94px rgba(181,140,240,0.42);
+                animation: fatepulse 2.4s ease-in-out infinite; }
 @keyframes fatepulse {
-    0%, 100% { box-shadow: 0 0 30px rgba(181,140,240,0.66); }
-    50%      { box-shadow: 0 0 46px rgba(181,140,240,0.92); }
+    0%, 100% { box-shadow: 0 0 13px rgba(181,140,240,0.85), 0 0 40px rgba(181,140,240,0.58), 0 0  80px rgba(181,140,240,0.30); }
+    50%      { box-shadow: 0 0 18px rgba(181,140,240,1),    0 0 62px rgba(181,140,240,0.88), 0 0 120px rgba(181,140,240,0.54); }
 }
 
 /* ── Composer ───────────────────────────────────────── */
@@ -1040,7 +1047,10 @@ input[type="checkbox"]:checked::after {
    inline SVG, and matching on the tag greyed out neither. */
 .fly.loser .face .card-art { filter: grayscale(0.9) brightness(0.52); }
 .fly.loser .face { box-shadow: 0 10px 20px rgba(0,0,0,0.7); }
-.fly.winner .face { box-shadow: 0 0 28px rgba(243,220,134,0.75), 0 14px 26px rgba(0,0,0,0.6); }
+.fly.winner .face {
+    box-shadow: 0 0 14px rgba(243,220,134,0.95), 0 0 46px rgba(243,220,134,0.70),
+                0 0 92px rgba(243,220,134,0.36), 0 14px 26px rgba(0,0,0,0.6);
+}
 
 /* Clash spark where two cards meet */
 .spark {
