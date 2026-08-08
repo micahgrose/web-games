@@ -3,8 +3,25 @@ import * as ui from './ui.js';
 import { el, esc } from './ui.js';
 import * as anim from './anim.js';
 import * as sfx from './audio.js';
+import { cardFaceSVG } from './cards.js';
 
 const socket = io();
+
+// Temporary: the twelve court cards on the lobby, so their art can be
+// looked at without dealing a game. Delete the section from the page
+// and this quietly does nothing.
+{
+    const grid = document.getElementById('courtGrid');
+    if (grid) {
+        grid.innerHTML = ['Spades', 'Hearts', 'Diamonds', 'Clubs']
+            .flatMap(suit => ['J', 'Q', 'K'].map(rank =>
+                `<div class="court-cell">
+                    <div class="card-holder">${cardFaceSVG({ rank, suit })}</div>
+                    <div class="court-lbl">${rank} of ${suit}</div>
+                </div>`))
+            .join('');
+    }
+}
 
 // ── State ──────────────────────────────────────────────
 const S = {
@@ -218,7 +235,6 @@ el.submit.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (el.game.style.display === 'none' && el.waiting.style.display === 'none') return;
-    if (el.voteOverlay.classList.contains('on')) return;
     el.escapeTitle.textContent = S.spectator ? 'Stop Watching?' : 'Leave the Table?';
     el.escapeSubtitle.textContent = S.spectator
         ? 'You will return to the lobby.'
@@ -250,7 +266,7 @@ function voteClock(sec) {
 }
 function closeVote() {
     clearInterval(voteTick);
-    el.voteOverlay.classList.remove('on');
+    el.voteDock.classList.remove('on');
 }
 document.getElementById('voteAcceptBtn').addEventListener('click', () => {
     closeVote();
@@ -509,7 +525,7 @@ socket.on('vote', (d) => seq(() => {
     el.voteSubtitle.textContent = d.phase === 'spectators'
         ? `${d.slots} seat${d.slots > 1 ? 's' : ''} open — first to accept sits down.`
         : 'Another round, same table?';
-    el.voteOverlay.classList.add('on');
+    el.voteDock.classList.add('on');
     voteClock(Math.round(d.timeoutMs / 1000));
 }));
 

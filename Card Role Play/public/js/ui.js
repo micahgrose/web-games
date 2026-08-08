@@ -73,7 +73,7 @@ export const el = {
     escapeOverlay: $('escapeOverlay'),
     escapeTitle: $('escapeTitle'),
     escapeSubtitle: $('escapeSubtitle'),
-    voteOverlay: $('voteOverlay'),
+    voteDock: $('voteDock'),
     voteTitle: $('voteTitle'),
     voteSubtitle: $('voteSubtitle'),
     voteCountdown: $('voteCountdown'),

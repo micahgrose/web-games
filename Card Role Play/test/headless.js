@@ -279,7 +279,36 @@ head('The cast block that replaces the transcript');
 
 // ═══ 4. A whole game over real sockets ═════════════════
 const { io: ioClient } = require('socket.io-client');
-const { server, rooms } = require('../server');
+const { server, rooms, readingDelay, endingLength } = require('../server');
+
+head('The ending gets time to be read');
+{
+    // The closing passage still has to type itself out at roughly 78
+    // glyphs a second before anybody can even start reading it.
+    const TYPE_CPS = 78;
+    for (const chars of [200, 500, 900]) {
+        const delay = readingDelay(chars);
+        const typing = (chars / TYPE_CPS) * 1000;
+        ok(delay > typing * 1.6,
+            `${chars} characters: ${Math.round(delay / 1000)}s before the offer, ` +
+            `vs ${(typing / 1000).toFixed(1)}s just to appear`);
+    }
+    ok(readingDelay(0) >= 9000, 'even a terse ending gets a pause');
+    ok(readingDelay(100000) <= 50000, 'the wait is capped so nobody is stranded');
+    ok(readingDelay(900) > readingDelay(200), 'more to read buys more time');
+
+    const room = {
+        history: [
+            { role: 'user', content: 'x' },
+            { role: 'assistant', content: 'a'.repeat(300) },
+            { role: 'user', content: 'y' },
+            { role: 'assistant', content: 'b'.repeat(400) },
+        ],
+    };
+    eq(endingLength(room, 'c'.repeat(150)), 850,
+        'the wait counts the last two passages plus the closing');
+    eq(endingLength({ history: [] }, ''), 0, 'an ending with nothing to read is handled');
+}
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 

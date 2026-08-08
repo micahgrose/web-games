@@ -35,7 +35,13 @@ const COUNTER_MS = 80000;
 const ACT_COOLDOWN = 400;
 const PLAYER_VOTE_MS = 30000;
 const SPECTATOR_VOTE_MS = 15000;
-const VOTE_DELAY_MS = 6000;
+
+// How long to leave the ending alone before offering another round.
+// Scaled to how much there is to read: the closing passage still has
+// to type itself out, and then somebody has to actually read it.
+const READ_MS_PER_CHAR = 34;
+const VOTE_DELAY_MIN = 9000;
+const VOTE_DELAY_MAX = 50000;
 
 const rooms = new Map();
 
@@ -249,6 +255,19 @@ async function afterResolution(room, actorId) {
     beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
 }
 
+/** The last two passages plus the closing — everything still unread. */
+function endingLength(room, epilogueText) {
+    const tail = room.history
+        .filter(h => h.role === 'assistant')
+        .slice(-2)
+        .reduce((n, h) => n + h.content.length, 0);
+    return tail + (epilogueText ? epilogueText.length : 0);
+}
+
+function readingDelay(chars) {
+    return Math.min(VOTE_DELAY_MAX, Math.max(VOTE_DELAY_MIN, 4000 + chars * READ_MS_PER_CHAR));
+}
+
 async function endGame(room) {
     room.over = true;
     clearClock(room);
@@ -261,9 +280,10 @@ async function endGame(room) {
     });
     pushLobby();
 
+    let closing = '';
     if (winner) {
         try {
-            await ai.epilogue({
+            closing = await ai.epilogue({
                 players: room.players,
                 winner: winner.name,
                 history: room.history,
@@ -273,7 +293,7 @@ async function endGame(room) {
             console.warn('[ai] epilogue failed:', err.message);
         }
     }
-    scheduleVote(room);
+    scheduleVote(room, readingDelay(endingLength(room, closing)));
 }
 
 // ── Acting ─────────────────────────────────────────────
@@ -493,12 +513,12 @@ function clearVote(room) {
     if (room.voteTimer) { clearTimeout(room.voteTimer); room.voteTimer = null; }
 }
 
-function scheduleVote(room) {
+function scheduleVote(room, delayMs) {
     clearVote(room);
     room.voteTimer = setTimeout(() => {
         if (!rooms.has(room.id) || room.votePhase) return;
         startPlayerVote(room);
-    }, VOTE_DELAY_MS);
+    }, delayMs ?? VOTE_DELAY_MIN);
 }
 
 function startPlayerVote(room) {
@@ -937,4 +957,4 @@ if (require.main === module) {
     server.listen(PORT, () => console.log(`Card Role Play — http://localhost:${PORT}`));
 }
 
-module.exports = { app, server, io, rooms };
+module.exports = { app, server, io, rooms, readingDelay, endingLength };

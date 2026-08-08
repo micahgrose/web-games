@@ -876,6 +876,61 @@ input[type="checkbox"]:checked::after {
     font-variant-numeric: tabular-nums;
 }
 
+/* ── The rematch dock ───────────────────────────────── */
+/* Deliberately not a modal. The ending is the best part of a game and
+   nobody should have to dismiss a dialog to finish reading it. */
+.dock {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 1200;
+    width: min(320px, calc(100vw - 28px));
+    display: none;
+    flex-direction: column;
+    gap: 9px;
+    padding: 15px 17px;
+    background: linear-gradient(180deg, #2f2124, #1c1315);
+    border: 1px solid var(--brass-dim);
+    border-radius: 4px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.7);
+}
+.dock.on { display: flex; animation: dock-in 0.4s var(--ease); }
+@keyframes dock-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+}
+.dock-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dock h3 { font-size: 0.86rem; color: var(--brass-hi); letter-spacing: 0.13em; }
+.dock p { margin: 0; font-size: 0.88rem; font-style: italic; color: var(--parch-dim); line-height: 1.4; }
+.dock-clock {
+    font-family: 'Cinzel', serif;
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--brass);
+    font-variant-numeric: tabular-nums;
+}
+.dock-row { display: flex; gap: 8px; }
+.dock-row .btn { flex: 1; }
+
+@media (max-width: 560px) {
+    .dock { left: 10px; right: 10px; bottom: 10px; width: auto; }
+}
+
+/* ── Court preview (temporary, for art tuning) ──────── */
+.court-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 14px;
+}
+.court-cell { text-align: center; }
+.court-cell .card-holder { width: 100%; }
+.court-lbl {
+    font-size: 0.68rem;
+    color: var(--parch-faint);
+    margin-top: 5px;
+    letter-spacing: 0.05em;
+}
+
 /* ── Deal animation layer ───────────────────────────── */
 #animLayer { display: none; position: fixed; inset: 0; z-index: 1500; pointer-events: none; }
 #animLayer.on { display: block; }

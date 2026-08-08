@@ -71,6 +71,12 @@
                 </div>
                 <div class="error" id="lobbyError"></div>
             </section>
+
+            <!-- Temporary: court art on show while it's being tuned. -->
+            <section class="panel" id="courtPreview">
+                <h2>Court Cards</h2>
+                <div class="court-grid" id="courtGrid"></div>
+            </section>
         </div>
 
         <!-- ══ Waiting room ═════════════════════════════ -->
@@ -159,17 +165,18 @@
         </div>
     </div>
 
-    <div class="overlay" id="voteOverlay">
-        <div class="modal">
+    <!-- Docked, not modal: the ending stays readable behind it. -->
+    <aside class="dock" id="voteDock" role="dialog" aria-label="Another round?">
+        <div class="dock-head">
             <h3 id="voteTitle">Another Round?</h3>
-            <p id="voteSubtitle"></p>
-            <div class="clock" id="voteCountdown">30</div>
-            <div class="row">
-                <button class="btn" id="voteAcceptBtn">Deal Me In</button>
-                <button class="btn ghost" id="voteDeclineBtn">Sit Out</button>
-            </div>
+            <span class="dock-clock" id="voteCountdown">30</span>
         </div>
-    </div>
+        <p id="voteSubtitle"></p>
+        <div class="dock-row">
+            <button class="btn sm" id="voteAcceptBtn">Deal Me In</button>
+            <button class="btn ghost sm" id="voteDeclineBtn">Sit Out</button>
+        </div>
+    </aside>
 
     <div id="animLayer"></div>
 
