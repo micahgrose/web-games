@@ -5,6 +5,7 @@ require('dotenv').config();
 const path = require('path');
 const http = require('http');
 const express = require('express');
+const compression = require('compression');
 const { Server } = require('socket.io');
 
 const { Deck, cardValue } = require('./lib/deck');
@@ -961,6 +962,10 @@ io.on('connection', (socket) => {
 // Fonts are content-addressed enough to cache hard; everything else
 // is revalidated every load, so a fix is one refresh away rather than
 // one hour away.
+// The court cards are ~130 KB of SVG each. As text they compress to a
+// fraction of that, so gzip earns its keep here more than anywhere.
+app.use(compression());
+
 app.use('/fonts', express.static(path.join(__dirname, 'public', 'fonts'), {
     maxAge: '30d', immutable: true,
 }));

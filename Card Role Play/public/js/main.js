@@ -3,7 +3,7 @@ import * as ui from './ui.js';
 import { el, esc } from './ui.js';
 import * as anim from './anim.js';
 import * as sfx from './audio.js';
-import { cardFaceSVG } from './cards.js';
+import { cardFaceHTML } from './cards.js';
 
 const socket = io();
 
@@ -16,7 +16,7 @@ const socket = io();
         grid.innerHTML = ['Spades', 'Hearts', 'Diamonds', 'Clubs']
             .flatMap(suit => ['J', 'Q', 'K'].map(rank =>
                 `<div class="court-cell">
-                    <div class="card-holder">${cardFaceSVG({ rank, suit })}</div>
+                    <div class="card-holder">${cardFaceHTML({ rank, suit })}</div>
                     <div class="court-lbl">${rank} of ${suit}</div>
                 </div>`))
             .join('');

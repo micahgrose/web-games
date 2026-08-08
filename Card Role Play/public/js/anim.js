@@ -2,7 +2,7 @@
 // Cards fly out of the deck, turn over in the middle of the
 // room, and settle. In a counter, they meet each other.
 
-import { cardFaceSVG, cardBackSVG, bandFor, cardValue, BANDS } from './cards.js';
+import { cardFaceHTML, cardBackSVG, bandFor, cardValue, BANDS } from './cards.js';
 import * as sfx from './audio.js';
 
 const layer = () => document.getElementById('animLayer');
@@ -26,7 +26,7 @@ function flyCard(card, rect, rot = 0) {
     el.innerHTML =
         `<div class="inner">
             <div class="face back">${cardBackSVG()}</div>
-            <div class="face front">${cardFaceSVG(card)}</div>
+            <div class="face front">${cardFaceHTML(card)}</div>
         </div>`;
     return el;
 }

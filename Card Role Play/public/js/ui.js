@@ -5,7 +5,7 @@
 //    poked into them, so a hovered button is never destroyed
 //    out from under the cursor
 
-import { cardFaceSVG, cardBackSVG, bandFor, cardValue, BANDS } from './cards.js';
+import { cardFaceHTML, cardBackSVG, bandFor, cardValue, BANDS } from './cards.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -402,7 +402,7 @@ export function paintDeck(count) {
  *  wounds and advantages, so it can differ from the raw card value.
  *  The aura must always show the band the story actually used. */
 export function paintDrawn(card, bandKey) {
-    el.drawnHolder.innerHTML = cardFaceSVG(card);
+    el.drawnHolder.innerHTML = cardFaceHTML(card);
     const band = card
         ? (bandKey ? (BANDS.find(b => b.key === bandKey) || bandFor(cardValue(card)))
                    : bandFor(cardValue(card)))

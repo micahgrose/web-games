@@ -139,7 +139,7 @@
     <div id="animLayer"></div>
 
     <script type="module">
-        import { cardFaceSVG, cardBackSVG, RANKS, SUITS, BANDS, bandFor, cardValue } from './js/cards.js';
+        import { cardFaceHTML, cardBackSVG, RANKS, SUITS, BANDS, bandFor, cardValue } from './js/cards.js';
         import * as anim from './js/anim.js';
         import * as sfx from './js/audio.js';
 
@@ -154,19 +154,19 @@
         for (const host of document.querySelectorAll('.grid[data-suit]')) {
             const suit = host.dataset.suit;
             host.innerHTML = RANKS
-                .map(rank => cell(cardFaceSVG({ rank, suit }), rank))
+                .map(rank => cell(cardFaceHTML({ rank, suit }), rank))
                 .join('');
         }
 
         document.getElementById('special').innerHTML =
             cell(cardBackSVG(), 'reverse') +
-            cell(cardFaceSVG({ joker: true, rank: 'JOKER', suit: 'Fate' }), 'joker') +
-            cell(cardFaceSVG(null), 'empty slot');
+            cell(cardFaceHTML({ joker: true, rank: 'JOKER', suit: 'Fate' }), 'joker') +
+            cell(cardFaceHTML(null), 'empty slot');
 
         document.getElementById('bands').innerHTML = BANDS.map(b => `
             <div class="cell">
                 <div class="card-holder aura aura-${b.key}">
-                    ${cardFaceSVG(b.key === 'fate'
+                    ${cardFaceHTML(b.key === 'fate'
                         ? { joker: true, rank: 'JOKER', suit: 'Fate' }
                         : { rank: { ruin:'3', falter:'6', mixed:'9', success:'Q', triumph:'A' }[b.key], suit: 'Spades' })}
                 </div>
@@ -212,7 +212,7 @@
         const buttons = ['dealBtn', 'jokerBtn', 'clashBtn'].map(id => document.getElementById(id));
 
         deckHolder.innerHTML = cardBackSVG();
-        drawnHolder.innerHTML = cardFaceSVG(null);
+        drawnHolder.innerHTML = cardFaceHTML(null);
         document.getElementById('deckCount').textContent = '54 left';
 
         const pick = () => ({
@@ -238,14 +238,14 @@
         document.getElementById('dealBtn').addEventListener('click', () => bench(async () => {
             const card = pick();
             await anim.dealOne(card, deckHolder, drawnHolder);
-            drawnHolder.innerHTML = cardFaceSVG(card);
+            drawnHolder.innerHTML = cardFaceHTML(card);
             showVerdict(card);
         }));
 
         document.getElementById('jokerBtn').addEventListener('click', () => bench(async () => {
             const card = { joker: true, rank: 'JOKER', suit: 'Fate' };
             await anim.dealOne(card, deckHolder, drawnHolder);
-            drawnHolder.innerHTML = cardFaceSVG(card);
+            drawnHolder.innerHTML = cardFaceHTML(card);
             showVerdict(card);
         }));
 
@@ -259,7 +259,7 @@
                 { playerName: 'Bram', playerColor: SEATS[1], card: lo, value: 5, beaten: false },
                 { playerName: 'Vex',  playerColor: SEATS[2], card: hi, value: 13, beaten: true },
             ], deckHolder);
-            drawnHolder.innerHTML = cardFaceSVG(atk);
+            drawnHolder.innerHTML = cardFaceHTML(atk);
             showVerdict(atk, 9);
         }));
     </script>

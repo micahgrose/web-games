@@ -1,2 +1,4 @@
 node_modules/
 .env
+preview/
+tools/.deck-cache.svg

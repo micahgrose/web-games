@@ -28,19 +28,30 @@ typography), so nothing is fetched from outside.
 active player's colour, the table stays dark and a single coloured glow —
 `--seat` — moves around the room. Their character sheet lights up to match.
 
-### Cards are drawn, not typeset
+### The cards are a real deck, not an imitation of one
 
-`public/js/cards.js` renders every card as SVG:
+The faces are **Dmitry Fomin's English-pattern deck from Wikimedia Commons,
+released CC0** — the artwork Wikipedia uses. `tools/fetch-cards.js` downloads
+the single 13 × 5 sheet, splits each card out of its own top-level group, strips
+the editor's metadata and rounds path coordinates, and writes 54 files into
+`public/cards/`. Provenance sits beside them in `SOURCE.txt`.
 
-- **Pip layouts follow a real deck**, including the convention that pips below
-  the midline are printed upside down.
-- **Courts are illustrated** — Jack with a feathered cap and halberd, Queen with
-  a coronet and a rose, King bearded with a crown and sword — each a bust,
-  stamped twice and rotated, the way a real court card reads from either end.
-  (Previously J/Q/K were a circle with a suit symbol in it.)
-- **Aces** get a filigree medallion.
-- **The reverse** is an oxblood guilloché field with a four-suit medallion.
-- **Jokers** are drawn as a jester and are new to the deck — see §4.
+This replaced a hand-drawn set, and the honest reason is worth recording: I
+spent eight iterations drawing engraved court figures as SVG paths and they
+still read as cartoons — flat, under-detailed, and near-identical across J, Q
+and K, because one hand-built torso was doing duty for all three. A deck traced
+from the real thing was never going to be caught up to that way. Switching cut
+`cards.js` from 598 lines to 120 and produced better artwork in every respect,
+jokers included.
+
+Still drawn in code, because they should belong to this table rather than to a
+standard deck:
+
+- **The reverse** — an oxblood guilloché field with a four-suit medallion.
+- **The empty slot** — a dashed brass outline.
+
+The deck is 1.6 MB on disk and **361 KB gzipped** (a court card: 107 KB → 27 KB),
+so `compression` is enabled and the faces load per card as they are dealt.
 
 ### The glow is the rulebook
 

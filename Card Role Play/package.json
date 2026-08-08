@@ -8,11 +8,13 @@
     "test:live": "node test/live.js"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "socket.io-client": "^4.8.3"
   }
 }

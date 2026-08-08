@@ -1,0 +1,6 @@
+Card artwork: English pattern playing cards, by Dmitry Fomin.
+Licence: CC0 1.0 Universal — public domain dedication, no rights reserved.
+Source: https://commons.wikimedia.org/wiki/File:English_pattern_playing_cards_deck_with_extra_cards.svg
+
+Split into individual cards by tools/fetch-cards.js. Geometry is unmodified;
+editor metadata was stripped and path coordinates rounded to 0.01 units.

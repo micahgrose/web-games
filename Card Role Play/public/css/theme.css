@@ -634,7 +634,9 @@ input[type="checkbox"]:checked::after {
     aspect-ratio: 250 / 350;
     border-radius: 9px;
 }
-.card-holder svg { width: 100%; height: 100%; display: block; border-radius: 9px; }
+/* Faces are <img> onto the artwork files; the reverse and the empty
+   slot are inline SVG. Both have to fill the holder identically. */
+.card-holder .card-art { width: 100%; height: 100%; display: block; border-radius: 9px; }
 
 /* The deck: a stack, not one card */
 #deckHolder { filter: drop-shadow(0 8px 16px rgba(0,0,0,0.6)); }
@@ -994,7 +996,7 @@ input[type="checkbox"]:checked::after {
     box-shadow: 0 16px 30px rgba(0,0,0,0.72);
     transition: box-shadow 0.45s var(--ease);
 }
-.fly .face svg { width: 100%; height: 100%; display: block; }
+.fly .face .card-art { width: 100%; height: 100%; display: block; }
 .fly .face.front { transform: rotateY(180deg); }
 
 .fly-name {
