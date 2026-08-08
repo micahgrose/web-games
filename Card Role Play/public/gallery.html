@@ -48,6 +48,30 @@
 
     <div class="app">
         <section class="panel">
+            <h2>Animations</h2>
+            <p class="note">The real deal and clash, driven straight from anim.js — no server, no tokens.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:18px">
+                <button class="btn" id="dealBtn">Deal a Card</button>
+                <button class="btn ghost" id="jokerBtn">Deal the Joker</button>
+                <button class="btn ghost" id="clashBtn">Run a Clash</button>
+            </div>
+            <div class="rail" style="flex-direction:row;justify-content:center;gap:26px;align-items:flex-start">
+                <div class="rail-slot" style="width:150px">
+                    <div class="cap">The Deck</div>
+                    <div class="card-holder" id="deckHolder"></div>
+                    <div class="deck-count" id="deckCount"></div>
+                </div>
+                <div class="rail-slot" style="width:150px">
+                    <div class="cap">Drawn</div>
+                    <div class="card-holder aura" id="drawnHolder"></div>
+                    <div class="verdict" id="verdict">
+                        <span class="band"></span><span class="hint"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
             <h2>Outcome Bands</h2>
             <p class="note">The glow around a drawn card states the verdict. This is the rulebook, shown rather than written.</p>
             <div class="band-row" id="bands"></div>
@@ -112,8 +136,12 @@
         </section>
     </div>
 
+    <div id="animLayer"></div>
+
     <script type="module">
-        import { cardFaceSVG, cardBackSVG, RANKS, BANDS } from './js/cards.js';
+        import { cardFaceSVG, cardBackSVG, RANKS, SUITS, BANDS, bandFor, cardValue } from './js/cards.js';
+        import * as anim from './js/anim.js';
+        import * as sfx from './js/audio.js';
 
         const SEATS = ['#d9483c','#34a891','#5b8dd9','#8fae4a','#e0a83c',
                        '#a87bd6','#d472ab','#ded06a','#2f8fb0','#9aa8bc'];
@@ -176,6 +204,64 @@
         document.getElementById('seats').innerHTML = SEATS.map((c, i) =>
             `<span class="swatch"><span class="dot" style="background:${c};color:${c}"></span>${NAMES[i]}</span>`
         ).join('');
+
+        // ── Animation bench ────────────────────────────
+        const deckHolder = document.getElementById('deckHolder');
+        const drawnHolder = document.getElementById('drawnHolder');
+        const verdict = document.getElementById('verdict');
+        const buttons = ['dealBtn', 'jokerBtn', 'clashBtn'].map(id => document.getElementById(id));
+
+        deckHolder.innerHTML = cardBackSVG();
+        drawnHolder.innerHTML = cardFaceSVG(null);
+        document.getElementById('deckCount').textContent = '54 left';
+
+        const pick = () => ({
+            rank: RANKS[Math.floor(Math.random() * RANKS.length)],
+            suit: SUITS[Math.floor(Math.random() * SUITS.length)],
+        });
+
+        function showVerdict(card, value) {
+            const b = bandFor(value ?? cardValue(card));
+            drawnHolder.className = 'card-holder aura aura-' + b.key;
+            verdict.style.color = b.ink;
+            verdict.querySelector('.band').textContent = b.label;
+            verdict.querySelector('.hint').textContent = b.hint;
+            verdict.classList.add('show');
+        }
+
+        async function bench(fn) {
+            buttons.forEach(b => { b.disabled = true; });
+            sfx.unlock();
+            try { await fn(); } finally { buttons.forEach(b => { b.disabled = false; }); }
+        }
+
+        document.getElementById('dealBtn').addEventListener('click', () => bench(async () => {
+            const card = pick();
+            await anim.dealOne(card, deckHolder, drawnHolder);
+            drawnHolder.innerHTML = cardFaceSVG(card);
+            showVerdict(card);
+        }));
+
+        document.getElementById('jokerBtn').addEventListener('click', () => bench(async () => {
+            const card = { joker: true, rank: 'JOKER', suit: 'Fate' };
+            await anim.dealOne(card, deckHolder, drawnHolder);
+            drawnHolder.innerHTML = cardFaceSVG(card);
+            showVerdict(card);
+        }));
+
+        document.getElementById('clashBtn').addEventListener('click', () => bench(async () => {
+            // One attacker, two defenders: one turns it aside, one does not.
+            const atk = { rank: '9', suit: 'Spades' };
+            const lo = { rank: '5', suit: 'Hearts' };
+            const hi = { rank: 'K', suit: 'Clubs' };
+            await anim.dealClash([
+                { playerName: 'Kira', playerColor: SEATS[0], card: atk, value: 9, beaten: null },
+                { playerName: 'Bram', playerColor: SEATS[1], card: lo, value: 5, beaten: false },
+                { playerName: 'Vex',  playerColor: SEATS[2], card: hi, value: 13, beaten: true },
+            ], deckHolder);
+            drawnHolder.innerHTML = cardFaceSVG(atk);
+            showVerdict(atk, 9);
+        }));
     </script>
 </body>
 </html>

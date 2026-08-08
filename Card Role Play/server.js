@@ -920,7 +920,16 @@ io.on('connection', (socket) => {
 });
 
 // ── Serve ──────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+// Fonts are content-addressed enough to cache hard; everything else
+// is revalidated every load, so a fix is one refresh away rather than
+// one hour away.
+app.use('/fonts', express.static(path.join(__dirname, 'public', 'fonts'), {
+    maxAge: '30d', immutable: true,
+}));
+app.use(express.static(path.join(__dirname, 'public'), {
+    etag: true,
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const PORT = process.env.PORT || 3000;
