@@ -251,12 +251,41 @@ function namesIn(text, candidates) {
 
 // ── Triage ─────────────────────────────────────────────
 
+// Worked examples beat prose rules on a small model, and getting
+// targeting wrong is the worst failure this game has: a missed target
+// means somebody is struck without ever being allowed to answer.
+const TARGET_EXAMPLES = [
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I shove Bram off the ledge"',
+     '{"ok":true,"reason":"","targets":["Bram"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I climb the mast and look out to sea"',
+     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I bring the whole ceiling down on top of everyone"',
+     '{"ok":true,"reason":"","targets":[],"everyone":true}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I snatch the key out of Vex\'s hand and run"',
+     '{"ok":true,"reason":"","targets":["Vex"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I ask Bram what he saw in the hold"',
+     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Bram has Kira pinned against the rail with one stone hand.\nKira writes: "I twist free and drive my knee up"',
+     '{"ok":true,"reason":"","targets":["Bram"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I swing at whoever is closest to me"',
+     '{"ok":true,"reason":"","targets":[],"everyone":true}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "asdkjh a;lskdjf"',
+     '{"ok":false,"reason":"That came through as noise.","targets":[],"everyone":false}'],
+];
+
 /**
  * Decides three things before any expensive call: is the message
  * intelligible, who does it strike, and has it been tried already.
  * Runs on the small model; obvious answers never leave the process.
  */
-async function triage({ text, actor, others, previous, setup, existingCharacters }) {
+async function triage({ text, actor, others, previous, setup, existingCharacters, recent }) {
     if (looksLikeNoise(text)) {
         return { ok: false, reason: 'That came through as noise. Say it again in plain words.' };
     }
@@ -268,21 +297,42 @@ async function triage({ text, actor, others, previous, setup, existingCharacters
         return { ok: true, targets: setup ? [] : namesIn(text, others) };
     }
 
-    const schema = setup
-        ? `{"ok":boolean,"reason":string,"duplicate":boolean}`
-        : `{"ok":boolean,"reason":string,"targets":string[]}`;
+    const system = setup
+        ? `You screen inputs for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"duplicate":boolean}.
+The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard mashing or is not intelligible English — any character, however strange, is fine. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters?.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
 
-    const rules = setup
-        ? `The player is describing WHO THEY ARE for a role-playing game. Set ok=false only if the text is keyboard mashing or is not intelligible English. Any character, however strange, is fine. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
-        : `The player is declaring an action. Set ok=false ONLY if the text is keyboard mashing or unintelligible English — any understandable action, however fantastical, is valid. targets: the names of OTHER characters this action is aimed at or would directly harm, chosen only from [${others.join(', ')}]; empty if it affects nobody but the actor or the surroundings. reason: one short sentence, only when ok=false.`;
+        : `You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"targets":string[],"everyone":boolean}.
+
+Your one important job is deciding who has to defend themselves. Anyone you leave out gets no chance to react, so when it is close, include them.
+
+targets — every OTHER character who would be struck, grabbed, blocked, chased, stolen from, tricked, endangered or otherwise acted upon against their will. Chosen only from the OTHERS list. Include a character if any reasonable player would want to react.
+everyone — true when the action strikes at other characters WITHOUT naming them: an area effect, a blast, a collapse, a spell over the whole room, or "whoever is nearest". Leave targets empty in that case.
+Neither — an action on the actor alone, on the surroundings, or a friendly or conversational exchange that nobody would need to defend against.
+ok — false ONLY for keyboard mashing or text that is not intelligible English. Anything understandable, however fantastical, is valid.
+reason — one short sentence, only when ok=false.`;
+
+    const messages = [{ role: 'system', content: system }];
+
+    if (!setup) {
+        for (const [q, a] of TARGET_EXAMPLES) {
+            messages.push({ role: 'user', content: q });
+            messages.push({ role: 'assistant', content: a });
+        }
+    }
+
+    // What just happened matters: "I twist free" only has a target if
+    // somebody has hold of the actor.
+    messages.push({
+        role: 'user',
+        content: setup
+            ? `${actor} writes: "${text}"`
+            : `OTHERS: ${others.join(', ') || '(nobody)'}\nJUST HAPPENED: ${clip(recent, 400) || '-'}\n${actor} writes: "${text}"`,
+    });
 
     try {
         const res = await call({
             model: MODEL_TRIAGE,
-            messages: [
-                { role: 'system', content: `You screen inputs for a role-playing game. Reply with JSON only, matching ${schema}. ${rules}` },
-                { role: 'user', content: `${actor} writes: "${text}"` },
-            ],
+            messages,
             temperature: 0,
             max_tokens: 150,
             response_format: { type: 'json_object' },
@@ -290,17 +340,21 @@ async function triage({ text, actor, others, previous, setup, existingCharacters
 
         const data = await res.json();
         const parsed = JSON.parse(data.choices[0].message.content);
-        const valid = new Set(others.map(n => n.toLowerCase()));
+
+        let targets = Array.isArray(parsed.targets)
+            ? [...new Set(parsed.targets
+                .map(n => others.find(o => o.toLowerCase() === String(n).toLowerCase()))
+                .filter(Boolean))]
+            : [];
+
+        if (parsed.everyone === true) targets = others.slice();
 
         return {
             ok: parsed.ok !== false,
             duplicate: !!parsed.duplicate,
             reason: clip(parsed.reason, 160),
-            targets: Array.isArray(parsed.targets)
-                ? parsed.targets
-                    .map(n => others.find(o => o.toLowerCase() === String(n).toLowerCase()))
-                    .filter(Boolean)
-                : [],
+            everyone: parsed.everyone === true,
+            targets,
         };
     } catch (err) {
         // Screening must never block play. Fall back to letting it through.

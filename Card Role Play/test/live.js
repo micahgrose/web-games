@@ -57,6 +57,39 @@ async function main() {
     });
     ok(idle.targets.length === 0, `minding your own business targets nobody (got [${idle.targets}])`);
 
+    console.log('\n── Who has to defend themselves');
+    // Getting this wrong is the worst failure in the game: a missed
+    // target means somebody is struck with no chance to answer.
+    const CASES = [
+        ['I shove Bram off the ledge', ['Bram'], 'a plain named attack'],
+        ['I bring the whole ceiling down on top of everyone', ['Bram', 'Vex'], 'an area effect hits all'],
+        ['I swing at whoever is standing closest', ['Bram', 'Vex'], 'an unnamed attack hits all'],
+        ['I set fire to the deck under Bram and Vex', ['Bram', 'Vex'], 'two named at once'],
+        ['I snatch the key out of Vex\'s hand', ['Vex'], 'theft counts'],
+        ['I lash Bram to the mast with the rope', ['Bram'], 'restraint counts'],
+        ['I lie to Vex about what is in the hold', ['Vex'], 'deception counts'],
+        ['I climb the rigging to get a better view', [], 'minding your own business'],
+        ['I ask Bram what he saw down there', [], 'a mention is not a target'],
+        ['I bind my wound with a strip of sailcloth', [], 'tending to yourself'],
+    ];
+    for (const [line, want, label] of CASES) {
+        const v = await ai.triage({
+            text: line, actor: 'Kira', others: ['Bram', 'Vex'], previous: [], setup: false,
+        });
+        const got = [...v.targets].sort();
+        const hit = JSON.stringify(got) === JSON.stringify([...want].sort());
+        ok(hit, `${label}: "${line}" → [${got}]${hit ? '' : ` (wanted [${want}])`}`);
+    }
+
+    // Context: "I twist free" only has a target if someone has hold of you.
+    const freed = await ai.triage({
+        text: 'I twist free and drive my knee up',
+        actor: 'Kira', others: ['Bram', 'Vex'], previous: [], setup: false,
+        recent: 'Bram has Kira pinned against the rail with one stone hand.',
+    });
+    ok(freed.targets.includes('Bram'),
+        `context resolves an unnamed target (got [${freed.targets}])`);
+
     console.log('\n── Narration (streamed, with a state block)');
 
     const res = R.resolveSolo({ rank: '3', suit: 'Clubs' }, CAST[0].sheet);

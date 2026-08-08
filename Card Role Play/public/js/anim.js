@@ -112,8 +112,9 @@ export async function dealOne(card, deckEl, slotEl, bandKey) {
     await wait(620);
     const band = bandOf(card, bandKey);
     sfx.play('verdict', band.key);
-    el.querySelector('.inner').style.filter =
-        `drop-shadow(0 0 26px ${band.glow}) drop-shadow(0 16px 30px rgba(0,0,0,0.7))`;
+    // On the face, not the .inner — see the note in theme.css.
+    el.querySelector('.face.front').style.boxShadow =
+        `0 0 30px 4px ${band.glow}, 0 16px 30px rgba(0,0,0,0.7)`;
 
     await wait(620);
     el.style.left = to.left + 'px';
@@ -183,8 +184,8 @@ export async function dealClash(cards, deckEl) {
     await wait(660);
     items.forEach(({ el, card, value }) => {
         const band = bandOf(card, null, value);
-        el.querySelector('.inner').style.filter =
-            `drop-shadow(0 0 20px ${band.glow}) drop-shadow(0 14px 26px rgba(0,0,0,0.65))`;
+        el.querySelector('.face.front').style.boxShadow =
+            `0 0 24px 3px ${band.glow}, 0 14px 26px rgba(0,0,0,0.65)`;
     });
     sfx.play('verdict', bandOf(items[0].card, null, items[0].value).key);
 

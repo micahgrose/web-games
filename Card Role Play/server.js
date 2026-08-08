@@ -156,9 +156,7 @@ function beginTurn(room, { setup = false, announce = true } = {}) {
     });
 
     if (setup && announce) {
-        io.to(room.id).emit('ask', {
-            text: `${p.name}, who are you? Describe the character ${p.name} steps into. No actions yet — this turn is only for becoming someone.`,
-        });
+        io.to(room.id).emit('ask', { text: `${p.name}, who are you? Describe your character.` });
     }
 }
 
@@ -318,6 +316,14 @@ async function handleSetup(room, player, text) {
     beginTurn(room, { setup: !room.setupDone.has(room.currentId) });
 }
 
+/** The last thing the narrator said — context for "I twist free". */
+function lastNarration(room) {
+    for (let i = room.history.length - 1; i >= 0; i--) {
+        if (room.history[i].role === 'assistant') return room.history[i].content;
+    }
+    return '';
+}
+
 async function handleAction(room, player, text) {
     const others = alive(room).filter(p => p.id !== player.id);
 
@@ -327,6 +333,7 @@ async function handleAction(room, player, text) {
         others: others.map(p => p.name),
         previous: player.previous,
         setup: false,
+        recent: lastNarration(room),
     });
 
     io.to(room.id).emit('said', { name: player.name, color: player.color, text });

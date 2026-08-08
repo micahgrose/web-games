@@ -117,6 +117,28 @@ async function main() {
         }
     }
 
+    head('The card flip keeps its 3D context');
+    {
+        const fs2 = require('fs');
+        const css = fs2.readFileSync(path.join(__dirname, '..', 'public', 'css', 'theme.css'), 'utf8');
+        const animSrc = fs2.readFileSync(path.join(__dirname, '..', 'public', 'js', 'anim.js'), 'utf8');
+
+        // A filter on the element carrying transform-style:preserve-3d
+        // flattens the 3D context, and the card turns over without ever
+        // showing its face. This cost me a bug once; never again.
+        const innerRules = [...css.matchAll(/\.fly[^{]*\.inner[^{]*\{([^}]*)\}/g)].map(m => m[1]);
+        ok(innerRules.length > 0, 'the .fly .inner rule exists');
+        for (const body of innerRules) {
+            ok(!/[^-]filter\s*:/.test(body),
+                'no filter is declared on the element holding preserve-3d');
+        }
+        ok(innerRules.some(b => /preserve-3d/.test(b)), 'preserve-3d is still set');
+        ok(/\.fly\s+\.face[^{]*\{[^}]*backface-visibility/.test(css),
+            'the faces still hide their backs');
+        ok(!/\.inner['"]\)?\s*\)?\.style\.filter/.test(animSrc),
+            'the animation code never sets a filter on .inner');
+    }
+
     head('The page and its script agree on element ids');
     const ids = [...indexHtml.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
     const fs = require('fs');

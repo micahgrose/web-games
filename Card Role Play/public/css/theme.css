@@ -890,7 +890,10 @@ input[type="checkbox"]:checked::after {
     width: 100%; height: 100%;
     transform-style: preserve-3d;
     transition: transform 0.62s var(--ease);
-    filter: drop-shadow(0 16px 30px rgba(0,0,0,0.72));
+    /* NO filter on this element, ever. A filter makes it render as a
+       group, which flattens the 3D context and silently cancels
+       preserve-3d — the card then turns without revealing its face.
+       Shadows and glows belong on .face, which has no 3D children. */
 }
 .fly .face {
     position: absolute;
@@ -899,6 +902,8 @@ input[type="checkbox"]:checked::after {
     -webkit-backface-visibility: hidden;
     border-radius: 9px;
     overflow: hidden;
+    box-shadow: 0 16px 30px rgba(0,0,0,0.72);
+    transition: box-shadow 0.45s var(--ease);
 }
 .fly .face svg { width: 100%; height: 100%; display: block; }
 .fly .face.front { transform: rotateY(180deg); }
@@ -932,8 +937,10 @@ input[type="checkbox"]:checked::after {
 }
 .fly-tag.on { opacity: 1; transform: none; }
 
-.fly.loser .inner { filter: grayscale(0.85) brightness(0.55) drop-shadow(0 10px 20px rgba(0,0,0,0.7)); }
-.fly.winner .inner { filter: drop-shadow(0 0 26px rgba(243,220,134,0.65)) drop-shadow(0 14px 26px rgba(0,0,0,0.6)); }
+/* Filter the artwork itself, never the element holding the 3D context. */
+.fly.loser .face svg { filter: grayscale(0.9) brightness(0.52); }
+.fly.loser .face { box-shadow: 0 10px 20px rgba(0,0,0,0.7); }
+.fly.winner .face { box-shadow: 0 0 30px 4px rgba(243,220,134,0.7), 0 14px 26px rgba(0,0,0,0.6); }
 
 /* Clash spark where two cards meet */
 .spark {
