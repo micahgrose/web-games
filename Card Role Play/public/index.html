@@ -22,11 +22,21 @@
         <!-- ══ Landing ══════════════════════════════════ -->
         <div id="landingWrapper">
 
+            <!-- One identity, used by every way of getting to a table. -->
+            <section class="panel" id="youPanel">
+                <h2>You</h2>
+                <div class="you-row">
+                    <input type="text" id="playerName" placeholder="Your name" maxlength="24" autocomplete="off">
+                    <div class="seg" id="genderSeg" role="radiogroup" aria-label="How the story refers to you">
+                        <button type="button" class="seg-btn" data-gender="male" role="radio" aria-checked="false">Male</button>
+                        <button type="button" class="seg-btn" data-gender="female" role="radio" aria-checked="false">Female</button>
+                    </div>
+                </div>
+                <div class="status-line" id="youNote">Pick a name, and how the story should speak of you.</div>
+            </section>
+
             <section class="panel">
                 <h2>Open Tables</h2>
-                <div class="name-row">
-                    <input type="text" id="quickNameInput" placeholder="Your name, to sit down or to watch" maxlength="24" autocomplete="off">
-                </div>
                 <div class="tabs">
                     <button class="tab active" id="tabOpen" type="button">Waiting <span class="count" id="openCount">0</span></button>
                     <button class="tab" id="tabInPlay" type="button">In Play <span class="count" id="inplayCount">0</span></button>
@@ -43,7 +53,6 @@
                 <h2>Deal a New Table</h2>
                 <div class="field">
                     <div class="fieldset">
-                        <input type="text" id="createNameInput" placeholder="Your name" maxlength="24" autocomplete="off">
                         <div class="inline">
                             <input type="checkbox" id="publicToggle">
                             <label for="publicToggle">List it publicly — strangers may join or watch</label>
@@ -64,7 +73,6 @@
                     <div class="or-line">or join by code</div>
 
                     <div class="fieldset">
-                        <input type="text" id="joinNameInput" placeholder="Your name" maxlength="24" autocomplete="off">
                         <input type="text" id="joinCodeInput" placeholder="Table code" maxlength="5" style="text-transform:uppercase; letter-spacing:0.22em; font-family:'Cinzel',serif;" autocomplete="off">
                         <button class="btn ghost" id="joinRoomBtn" disabled>Take a Seat</button>
                     </div>

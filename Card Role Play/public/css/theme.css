@@ -254,7 +254,41 @@ label { font-size: 0.9rem; color: var(--parch-dim); }
     margin: 6px auto 0;
 }
 
-.name-row { margin-bottom: 14px; }
+/* ── Who you are ────────────────────────────────────── */
+.you-row { display: flex; gap: 10px; align-items: stretch; }
+.you-row input { flex: 1; min-width: 0; }
+
+.seg {
+    display: flex;
+    flex-shrink: 0;
+    border: 1px solid var(--felt-edge);
+    border-radius: 3px;
+    overflow: hidden;
+    background: rgba(0,0,0,0.34);
+}
+.seg-btn {
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0 15px;
+    color: var(--parch-faint);
+    background: none;
+    border: 0;
+    cursor: pointer;
+    transition: color 0.18s, background 0.18s;
+}
+.seg-btn + .seg-btn { border-left: 1px solid var(--felt-edge); }
+.seg-btn:hover { color: var(--parch-dim); }
+.seg-btn.active {
+    color: #1a1207;
+    background: linear-gradient(180deg, var(--brass-hi), var(--brass) 55%, #a9861d);
+}
+
+@media (max-width: 460px) {
+    .you-row { flex-direction: column; }
+    .seg-btn { flex: 1; padding: 9px 0; }
+}
 
 .tabs {
     display: flex;

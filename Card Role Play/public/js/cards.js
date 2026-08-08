@@ -87,95 +87,184 @@ function pip(suit, cx, cy, size, colour, rotate) {
 }
 
 // ── Court illustrations ────────────────────────────────
-// A bust drawn in a 104×124 box, then stamped twice (once rotated)
-// so the card reads correctly from either end.
+// Drawn the way a real court card is drawn: dense outlined linework
+// filling the panel edge to edge, a half-length figure cropped at the
+// waist, then stamped twice so the card reads from either end.
+// Traditional colouring — red, blue, gold and cream on heavy black
+// line — with the suit deciding which of red or blue leads.
+
+const CINK   = '#1a1512';   // every outline
+const CSKIN  = '#f2ddbd';
+const CRED   = '#c2302a';
+const CBLUE  = '#2c4a78';
+const CGOLD  = '#e2b53f';
+const CCREAM = '#f6efdc';
+const CHAIR  = '#c9902f';
+const CBEARD = '#8d6b45';
+const CSTEEL = '#c3ccd4';
+const CLEAF  = '#4f7a44';
+
+/** A half-length figure in a 146 × 129 box. */
 function courtFigure(rank, suit) {
-    const red = isRed(suit);
-    const cloth = red ? '#9d2d26' : '#22303f';   // robe
-    const cloth2 = red ? '#c1443a' : '#33475d';  // robe highlight
-    const gold = '#c9a227';
-    const gold2 = '#8a6f22';
-    const ink = '#1b1512';
-    const skin = '#e8cfa9';
+    const lead = isRed(suit) ? CRED : CBLUE;     // robe
+    const trim = isRed(suit) ? CBLUE : CRED;     // mantle and jewels
+    const p = [];
+    const add = (s) => p.push(s);
 
-    const parts = [];
+    // Outlined band: a thick ink stroke with the colour laid over it.
+    const band = (d, colour, w) =>
+        `<path d="${d}" fill="none" stroke="${CINK}" stroke-width="${w + 2.2}" stroke-linecap="round"/>` +
+        `<path d="${d}" fill="none" stroke="${colour}" stroke-width="${w}" stroke-linecap="round"/>`;
 
-    // Shoulders / robe
-    parts.push(`<path d="M14 124 L14 96 C14 80 30 70 52 70 C74 70 90 80 90 96 L90 124 Z" fill="${cloth}"/>`);
-    parts.push(`<path d="M14 124 L14 96 C14 84 24 76 38 72 L44 124 Z" fill="${cloth2}" opacity="0.55"/>`);
-    // Robe trim
-    parts.push(`<path d="M14 124 L14 96 C14 80 30 70 52 70 C74 70 90 80 90 96 L90 124" fill="none" stroke="${gold2}" stroke-width="2"/>`);
-    // Collar
-    parts.push(`<path d="M34 74 C40 88 64 88 70 74 L78 78 C70 96 34 96 26 78 Z" fill="${gold}" stroke="${gold2}" stroke-width="1.2"/>`);
-    // Neck
-    parts.push(`<path d="M44 60 L60 60 L60 78 L44 78 Z" fill="${skin}"/>`);
-    // Head
-    parts.push(`<ellipse cx="52" cy="42" rx="20" ry="23" fill="${skin}" stroke="${ink}" stroke-width="1.4"/>`);
-    // Eye + brow (profile-ish three-quarter)
-    parts.push(`<path d="M44 38 q5 -3 10 0" fill="none" stroke="${ink}" stroke-width="1.8" stroke-linecap="round"/>`);
-    parts.push(`<circle cx="49" cy="42" r="2.1" fill="${ink}"/>`);
-    parts.push(`<path d="M58 46 q3 3 0 5" fill="none" stroke="${ink}" stroke-width="1.2" stroke-linecap="round"/>`);
+    // ── Garment ────────────────────────────────────────
+    add(`<path d="M4 129 L4 110 C4 95 24 83 48 78 L98 78 C122 83 142 95 142 110 L142 129 Z"
+          fill="${lead}" stroke="${CINK}" stroke-width="1.6"/>`);
+
+    // Mantle over each shoulder
+    add(`<path d="M4 129 L4 110 C4 97 20 87 40 82 L50 97 C32 102 21 109 21 117 L21 129 Z"
+          fill="${trim}" stroke="${CINK}" stroke-width="1.3"/>`);
+    add(`<path d="M142 129 L142 110 C142 97 126 87 106 82 L96 97 C114 102 125 109 125 117 L125 129 Z"
+          fill="${trim}" stroke="${CINK}" stroke-width="1.3"/>`);
+
+    // Ermine trim, with the tail-tick marks that make it ermine
+    add(band('M44 86 C28 92 17 102 17 116 L17 129', CCREAM, 6));
+    add(band('M102 86 C118 92 129 102 129 116 L129 129', CCREAM, 6));
+    [[24, 108], [20, 121], [122, 108], [126, 121]].forEach(([x, y]) =>
+        add(`<path d="M${x} ${y} l0 4" stroke="${CINK}" stroke-width="1.6" stroke-linecap="round"/>`));
+
+    // Placket down the centre, jewelled
+    add(`<path d="M61 80 L85 80 L91 129 L55 129 Z" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.4"/>`);
+    [[73, 92, 4.4], [73, 106, 4.4], [74, 120, 4.4]].forEach(([x, y, r]) => {
+        add(`<path d="M${x} ${y - r} L${x + r} ${y} L${x} ${y + r} L${x - r} ${y} Z"
+              fill="${trim}" stroke="${CINK}" stroke-width="1.1"/>`);
+    });
+
+    // ── Arm and implement ──────────────────────────────
+    const sleeve = () => add(`<path d="M99 86 C112 84 121 92 121 101 L121 114 C110 118 99 110 99 100 Z"
+        fill="${trim}" stroke="${CINK}" stroke-width="1.3"/>`);
+    const hand = (cx, cy) => {
+        add(`<ellipse cx="${cx}" cy="${cy}" rx="7.6" ry="6.4" fill="${CSKIN}" stroke="${CINK}" stroke-width="1.3"/>`);
+        for (let i = -1; i <= 1; i++) {
+            add(`<path d="M${cx - 4} ${cy + i * 2.6} l8 0" stroke="${CINK}" stroke-width="0.85" opacity="0.65"/>`);
+        }
+    };
 
     if (rank === 'K') {
-        // Beard + long hair
-        parts.push(`<path d="M32 44 C30 62 38 76 52 76 C66 76 74 62 72 44 C72 58 64 66 52 66 C40 66 32 58 32 44 Z" fill="#4a3527"/>`);
-        parts.push(`<path d="M34 50 C36 70 44 80 52 80 C60 80 68 70 70 50 C66 68 60 74 52 74 C44 74 38 68 34 50 Z" fill="#5c4433"/>`);
-        parts.push(`<path d="M52 52 q-9 2 -10 12 q10 6 20 0 q-1 -10 -10 -12 Z" fill="#6b5140"/>`);
-        // Crown
-        parts.push(`<path d="M28 24 L34 8 L42 20 L52 4 L62 20 L70 8 L76 24 Z" fill="${gold}" stroke="${gold2}" stroke-width="1.4"/>`);
-        parts.push(`<rect x="28" y="22" width="48" height="8" rx="2" fill="${gold}" stroke="${gold2}" stroke-width="1.2"/>`);
-        parts.push(`<circle cx="52" cy="26" r="3" fill="${cloth}"/>`);
-        parts.push(`<circle cx="38" cy="26" r="2.2" fill="${cloth}"/>`);
-        parts.push(`<circle cx="66" cy="26" r="2.2" fill="${cloth}"/>`);
-        // Sword held upright
-        parts.push(`<rect x="82" y="30" width="5" height="70" fill="#cfd6dd" stroke="${ink}" stroke-width="0.9"/>`);
-        parts.push(`<path d="M84.5 22 L88 32 L81 32 Z" fill="#e6ebf0" stroke="${ink}" stroke-width="0.9"/>`);
-        parts.push(`<rect x="74" y="98" width="21" height="5" rx="2" fill="${gold}" stroke="${gold2}" stroke-width="1"/>`);
-        parts.push(`<rect x="81" y="102" width="7" height="14" rx="2" fill="${gold2}"/>`);
+        add(`<path d="M115 4 L121 17 L121 90 L109 90 L109 17 Z" fill="${CSTEEL}" stroke="${CINK}" stroke-width="1.3"/>`);
+        add(`<path d="M115 20 L115 86" stroke="${CINK}" stroke-width="0.9" opacity="0.45"/>`);
+        add(`<rect x="99" y="89" width="32" height="6.5" rx="2" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.2"/>`);
+        add(`<rect x="111" y="95" width="8" height="17" fill="${CBEARD}" stroke="${CINK}" stroke-width="1"/>`);
+        add(`<circle cx="115" cy="116" r="5.2" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.2"/>`);
+        sleeve();
+        hand(115, 103);
     } else if (rank === 'Q') {
-        // Flowing hair
-        parts.push(`<path d="M30 40 C26 20 38 10 52 10 C66 10 78 20 74 40 C74 26 64 20 52 20 C40 20 30 26 30 40 Z" fill="#4a3527"/>`);
-        parts.push(`<path d="M30 38 C24 56 26 78 22 96 L34 96 C34 76 34 56 36 42 Z" fill="#5c4433"/>`);
-        parts.push(`<path d="M74 38 C80 56 78 78 82 96 L70 96 C70 76 70 56 68 42 Z" fill="#5c4433"/>`);
-        // Coronet
-        parts.push(`<path d="M32 20 L38 8 L45 17 L52 5 L59 17 L66 8 L72 20 Z" fill="${gold}" stroke="${gold2}" stroke-width="1.3"/>`);
-        parts.push(`<circle cx="52" cy="13" r="2.6" fill="${cloth}"/>`);
-        // Rose on a stem
-        parts.push(`<path d="M86 44 C86 38 92 34 96 38 C100 34 104 40 101 45 C104 49 100 55 95 53 C90 56 85 51 86 44 Z" fill="${red ? '#c1443a' : '#8fa8bf'}" stroke="${gold2}" stroke-width="0.9"/>`);
-        parts.push(`<circle cx="94" cy="45" r="3.4" fill="${red ? '#9d2d26' : '#5d7a8f'}" opacity="0.8"/>`);
-        parts.push(`<path d="M93 54 C92 72 88 86 86 100" fill="none" stroke="#4a7a45" stroke-width="2.4"/>`);
-        parts.push(`<path d="M92 68 q-10 -4 -14 4 q10 5 14 -4 Z" fill="#4a7a45"/>`);
+        add(band('M114 116 C111 92 113 68 116 46', CLEAF, 3.2));
+        add(`<path d="M114 84 C102 77 95 83 97 92 C106 95 113 90 114 84 Z"
+              fill="${CLEAF}" stroke="${CINK}" stroke-width="1.1"/>`);
+        for (let i = 0; i < 5; i++) {
+            const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+            add(`<circle cx="${(116 + Math.cos(a) * 7).toFixed(1)}" cy="${(42 + Math.sin(a) * 7).toFixed(1)}"
+                  r="6.2" fill="${trim}" stroke="${CINK}" stroke-width="1.1"/>`);
+        }
+        add(`<circle cx="116" cy="42" r="4.6" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.1"/>`);
+        sleeve();
+        hand(114, 108);
     } else {
-        // Jack — feathered cap, halberd
-        parts.push(`<path d="M32 34 C28 18 40 8 52 8 C64 8 76 18 72 34 C70 22 62 18 52 18 C42 18 34 22 32 34 Z" fill="#4a3527"/>`);
-        parts.push(`<path d="M26 30 C26 16 38 6 52 6 C68 6 80 16 78 30 L72 26 C70 16 62 12 52 12 C42 12 33 17 31 27 Z" fill="${cloth}" stroke="${gold2}" stroke-width="1.2"/>`);
-        parts.push(`<path d="M78 26 C90 18 98 6 96 -2 C88 4 80 12 74 22 Z" fill="${gold}" stroke="${gold2}" stroke-width="1"/>`);
-        parts.push(`<path d="M30 40 C26 56 28 74 26 96 L36 96 C36 74 34 56 36 44 Z" fill="#5c4433"/>`);
-        // Halberd
-        parts.push(`<rect x="84" y="26" width="4.6" height="76" fill="#6b4f31" stroke="${ink}" stroke-width="0.8"/>`);
-        parts.push(`<path d="M86 12 L90 26 L82 26 Z" fill="#cfd6dd" stroke="${ink}" stroke-width="0.9"/>`);
-        parts.push(`<path d="M88 28 C98 30 100 40 94 46 L88 42 Z" fill="#cfd6dd" stroke="${ink}" stroke-width="0.9"/>`);
+        add(`<rect x="111" y="6" width="6.4" height="108" fill="${CBEARD}" stroke="${CINK}" stroke-width="1.1"/>`);
+        add(`<path d="M114 0 L120 18 L108 18 Z" fill="${CSTEEL}" stroke="${CINK}" stroke-width="1.2"/>`);
+        add(`<path d="M117 21 C133 24 137 39 127 49 L117 44 Z" fill="${CSTEEL}" stroke="${CINK}" stroke-width="1.2"/>`);
+        add(`<path d="M117 30 C126 32 128 39 124 44" fill="none" stroke="${CINK}" stroke-width="0.9" opacity="0.5"/>`);
+        sleeve();
+        hand(114, 101);
     }
 
-    return parts.join('');
+    // ── Collar ─────────────────────────────────────────
+    add(`<path d="M64 56 L82 56 L82 78 L64 78 Z" fill="${CSKIN}" stroke="${CINK}" stroke-width="1.2"/>`);
+    [[55, 73, 7], [73, 75, 7], [91, 73, 7]].forEach(([x, y, r]) =>
+        add(`<circle cx="${x}" cy="${y}" r="${r}" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.2"/>`));
+    [[48, 79, 9], [61, 83, 9], [73, 85, 9], [85, 83, 9], [98, 79, 9]].forEach(([x, y, r]) =>
+        add(`<circle cx="${x}" cy="${y}" r="${r}" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.2"/>`));
+
+    // ── Head ───────────────────────────────────────────
+    add(`<ellipse cx="73" cy="44" rx="16.5" ry="18.5" fill="${CSKIN}" stroke="${CINK}" stroke-width="1.6"/>`);
+
+    // Hair, framing
+    if (rank === 'Q') {
+        add(`<path d="M54 42 C46 64 49 92 44 129 L61 129 C61 92 57 64 60 44 Z"
+              fill="${CHAIR}" stroke="${CINK}" stroke-width="1.3"/>`);
+        add(`<path d="M92 42 C100 64 97 92 102 129 L85 129 C85 92 89 64 86 44 Z"
+              fill="${CHAIR}" stroke="${CINK}" stroke-width="1.3"/>`);
+    }
+    add(`<path d="M55 40 C52 21 61 13 73 13 C85 13 94 21 91 40 C88 29 82 25 73 25 C64 25 58 29 55 40 Z"
+          fill="${CHAIR}" stroke="${CINK}" stroke-width="1.3"/>`);
+    if (rank !== 'K') {
+        [[55, 45], [56, 55], [91, 45], [90, 55]].forEach(([x, y]) =>
+            add(`<circle cx="${x}" cy="${y}" r="6.4" fill="${CHAIR}" stroke="${CINK}" stroke-width="1.1"/>`));
+    }
+
+    // ── Face ───────────────────────────────────────────
+    // Brows, then almond eyes with pupils, a nose in profile line and
+    // a drawn mouth. Not two dots.
+    add(`<path d="M60 37 q6 -4 11 -1" fill="none" stroke="${CINK}" stroke-width="2" stroke-linecap="round"/>`);
+    add(`<path d="M75 36 q5 -3 11 1" fill="none" stroke="${CINK}" stroke-width="2" stroke-linecap="round"/>`);
+    add(`<path d="M61 44 q5 -5 10 -1 q-5 4 -10 1 Z" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.2"/>`);
+    add(`<circle cx="66.5" cy="43" r="1.9" fill="${CINK}"/>`);
+    add(`<path d="M75 43 q5 -4 10 1 q-5 3 -10 -1 Z" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.2"/>`);
+    add(`<circle cx="80" cy="43.5" r="1.9" fill="${CINK}"/>`);
+    add(`<path d="M73 42 L70 53 Q73 55 76 53" fill="none" stroke="${CINK}" stroke-width="1.4" stroke-linecap="round"/>`);
+
+    if (rank === 'K') {
+        add(`<path d="M57 50 C55 71 63 86 73 86 C83 86 91 71 89 50 C87 65 82 71 73 71 C64 71 59 65 57 50 Z"
+              fill="${CBEARD}" stroke="${CINK}" stroke-width="1.3"/>`);
+        add(`<path d="M64 74 q5 5 9 2 M78 76 q3 4 -2 6" fill="none" stroke="${CINK}"
+              stroke-width="0.9" opacity="0.55"/>`);
+        add(band('M60 56 Q67 63 73 59', CBEARD, 4.4));
+        add(band('M86 56 Q79 63 73 59', CBEARD, 4.4));
+    } else {
+        add(`<path d="M67 59 Q73 63 79 59" fill="none" stroke="${CINK}" stroke-width="1.7" stroke-linecap="round"/>`);
+    }
+
+    // ── Headwear ───────────────────────────────────────
+    if (rank === 'K') {
+        add(`<path d="M40 26 L45 5 L57 19 L73 1 L89 19 L101 5 L106 26 Z"
+              fill="${CGOLD}" stroke="${CINK}" stroke-width="1.5"/>`);
+        add(`<rect x="40" y="24" width="66" height="10.5" rx="2" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.4"/>`);
+        [[45, 5, 3.4], [73, 1, 3.8], [101, 5, 3.4]].forEach(([x, y, r]) =>
+            add(`<circle cx="${x}" cy="${y}" r="${r}" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.1"/>`));
+        add(`<circle cx="73" cy="29" r="3.8" fill="${trim}" stroke="${CINK}" stroke-width="1.1"/>`);
+        [[56, 29], [90, 29]].forEach(([x, y]) =>
+            add(`<circle cx="${x}" cy="${y}" r="2.9" fill="${lead}" stroke="${CINK}" stroke-width="1"/>`));
+    } else if (rank === 'Q') {
+        add(`<path d="M46 22 L52 7 L60 18 L73 3 L86 18 L94 7 L100 22 Z"
+              fill="${CGOLD}" stroke="${CINK}" stroke-width="1.4"/>`);
+        add(`<rect x="46" y="20" width="54" height="9" rx="2" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.3"/>`);
+        [[52, 7, 2.8], [73, 3, 3.2], [94, 7, 2.8]].forEach(([x, y, r]) =>
+            add(`<circle cx="${x}" cy="${y}" r="${r}" fill="${CCREAM}" stroke="${CINK}" stroke-width="1.1"/>`));
+        add(`<circle cx="73" cy="24.5" r="3.4" fill="${trim}" stroke="${CINK}" stroke-width="1.1"/>`);
+        [[59, 24.5], [87, 24.5]].forEach(([x, y]) =>
+            add(`<circle cx="${x}" cy="${y}" r="2.4" fill="${lead}" stroke="${CINK}" stroke-width="1"/>`));
+    } else {
+        add(`<path d="M100 24 C118 20 130 10 132 1 L137 8 C133 20 119 29 103 33 Z"
+              fill="${trim}" stroke="${CINK}" stroke-width="1.2"/>`);
+        add(`<path d="M46 30 C44 13 57 5 73 5 C89 5 102 13 100 30 L92 27 C90 16 83 12 73 12 C63 12 56 16 54 27 Z"
+              fill="${lead}" stroke="${CINK}" stroke-width="1.5"/>`);
+        add(`<rect x="46" y="27" width="54" height="9" rx="2.5" fill="${CGOLD}" stroke="${CINK}" stroke-width="1.3"/>`);
+        add(`<circle cx="73" cy="31.5" r="3.2" fill="${trim}" stroke="${CINK}" stroke-width="1.1"/>`);
+    }
+
+    return p.join('');
 }
 
 function courtCard(card) {
-    const { rank, suit } = card;
-    const colour = isRed(suit) ? 'var(--suit-red)' : 'var(--suit-ink)';
-    const fig = courtFigure(rank, suit);
+    const fig = courtFigure(card.rank, card.suit);
     return `
         <g clip-path="url(#courtClip)">
-            <rect x="52" y="46" width="146" height="258" fill="#f0e4cc"/>
-            <g transform="translate(73 48)">${fig}</g>
-            <g transform="rotate(180 125 175) translate(73 48)">${fig}</g>
+            <rect x="52" y="46" width="146" height="258" fill="#f6efdc"/>
+            <g transform="translate(52 46)">${fig}</g>
+            <g transform="rotate(180 125 175) translate(52 46)">${fig}</g>
         </g>
         <rect x="52" y="46" width="146" height="258" fill="none" stroke="#b09a6a" stroke-width="1.6"/>
-        <line x1="52" y1="175" x2="198" y2="175" stroke="#b09a6a" stroke-width="1.6"/>
-        <line x1="52" y1="171" x2="198" y2="171" stroke="#b09a6a" stroke-width="0.7"/>
-        <line x1="52" y1="179" x2="198" y2="179" stroke="#b09a6a" stroke-width="0.7"/>
-        <text x="125" y="180" text-anchor="middle" font-family="Cinzel, serif" font-size="15"
-              font-weight="700" fill="${colour}" opacity="0.85">${rank}</text>`;
+        <line x1="52" y1="175" x2="198" y2="175" stroke="#1a1512" stroke-width="1.4"/>`;
 }
 
 function aceCard(card) {

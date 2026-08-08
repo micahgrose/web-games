@@ -21,7 +21,9 @@ export const el = {
     waiting: $('waitingPanel'),
     game: $('gamePanel'),
 
-    quickName: $('quickNameInput'),
+    playerName: $('playerName'),
+    genderSeg: $('genderSeg'),
+    youNote: $('youNote'),
     openList: $('openRoomsList'),
     inplayList: $('inplayRoomsList'),
     tabOpen: $('tabOpen'),
@@ -29,12 +31,10 @@ export const el = {
     openCount: $('openCount'),
     inplayCount: $('inplayCount'),
 
-    createName: $('createNameInput'),
     createBtn: $('createRoomBtn'),
     publicToggle: $('publicToggle'),
     maxRow: $('maxPlayersRow'),
     maxSelect: $('maxPlayersSelect'),
-    joinName: $('joinNameInput'),
     joinCode: $('joinCodeInput'),
     joinBtn: $('joinRoomBtn'),
     lobbyError: $('lobbyError'),

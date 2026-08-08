@@ -118,6 +118,52 @@ function startClockFrom(ms) {
     });
 }
 
+// ── Who you are ────────────────────────────────────────
+// One name and one choice of pronouns, shared by every route to a
+// table: creating one, sitting at a public one, or joining by code.
+let gender = '';
+try { gender = localStorage.getItem('crp_gender') || ''; } catch {}
+
+function identity() {
+    const name = el.playerName.value.trim();
+    return (name && gender) ? { name, gender } : null;
+}
+
+function paintIdentity() {
+    for (const b of el.genderSeg.querySelectorAll('.seg-btn')) {
+        const on = b.dataset.gender === gender;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', String(on));
+    }
+    const who = identity();
+    el.createBtn.disabled = !who;
+    joinGate();
+    el.youNote.textContent = who
+        ? `The story will call ${who.name} "${gender === 'female' ? 'she' : 'he'}".`
+        : (el.playerName.value.trim() ? 'Choose one.' : 'Pick a name, and how the story should speak of you.');
+}
+
+el.genderSeg.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.seg-btn');
+    if (!btn) return;
+    gender = btn.dataset.gender;
+    try { localStorage.setItem('crp_gender', gender); } catch {}
+    paintIdentity();
+});
+
+el.playerName.addEventListener('input', paintIdentity);
+
+/** Nudge whatever is missing before a table can be joined. */
+function needIdentity() {
+    if (!el.playerName.value.trim()) {
+        el.playerName.focus();
+        el.youNote.textContent = 'A name first.';
+    } else {
+        el.youNote.textContent = 'Choose male or female first.';
+    }
+    return null;
+}
+
 // ── Lobby ──────────────────────────────────────────────
 el.tabOpen.addEventListener('click', () => {
     el.tabOpen.classList.add('active');
@@ -136,50 +182,42 @@ el.tabInPlay.addEventListener('click', () => {
 function roomClick(ev) {
     const btn = ev.target.closest('button[data-id]');
     if (!btn || btn.disabled) return;
-    const name = el.quickName.value.trim();
-    if (!name) {
-        el.quickName.focus();
-        el.quickName.placeholder = 'Your name first…';
-        setTimeout(() => { el.quickName.placeholder = 'Your name, to sit down or to watch'; }, 2200);
-        return;
-    }
+    const who = identity();
+    if (!who) return needIdentity();
     sfx.unlock();
     btn.disabled = true;
-    socket.emit('room:join', { code: btn.dataset.id, name });
+    socket.emit('room:join', { code: btn.dataset.id, ...who });
 }
 el.openList.addEventListener('click', roomClick);
 el.inplayList.addEventListener('click', roomClick);
 
-el.createName.addEventListener('input', () => {
-    el.createBtn.disabled = !el.createName.value.trim();
-});
 el.publicToggle.addEventListener('change', () => {
     el.maxRow.classList.toggle('hidden', !el.publicToggle.checked);
 });
 el.createBtn.addEventListener('click', () => {
-    const name = el.createName.value.trim();
-    if (!name) return;
+    const who = identity();
+    if (!who) return needIdentity();
     sfx.unlock();
     el.createBtn.disabled = true;
     socket.emit('room:create', {
-        name,
+        ...who,
         isPublic: el.publicToggle.checked,
         maxPlayers: parseInt(el.maxSelect.value, 10),
     });
 });
 
 function joinGate() {
-    el.joinBtn.disabled = !el.joinName.value.trim() || el.joinCode.value.trim().length < 5;
+    el.joinBtn.disabled = !identity() || el.joinCode.value.trim().length < 5;
 }
-el.joinName.addEventListener('input', joinGate);
 el.joinCode.addEventListener('input', joinGate);
 el.joinBtn.addEventListener('click', () => {
-    const name = el.joinName.value.trim();
+    const who = identity();
     const code = el.joinCode.value.trim().toUpperCase();
-    if (!name || code.length < 5) return;
+    if (!who) return needIdentity();
+    if (code.length < 5) return;
     sfx.unlock();
     el.joinBtn.disabled = true;
-    socket.emit('room:join', { code, name });
+    socket.emit('room:join', { code, ...who });
 });
 el.joinCode.addEventListener('keypress', e => { if (e.key === 'Enter') el.joinBtn.click(); });
 
@@ -295,8 +333,6 @@ ui.setQuillGlyphHook(() => { if (Math.random() < 0.11) sfx.play('scratch'); });
 
 // ── Reset ──────────────────────────────────────────────
 function toLanding(message) {
-    const known = el.quickName.value.trim() || el.createName.value.trim() || el.joinName.value.trim();
-    if (known) el.quickName.value = known;
     S.room = null; S.players = []; S.spectator = false; S.isHost = false;
     S.over = false; S.setupTurn = false;
     S.counter = { on: false, target: false, attacker: null, sent: false };
@@ -313,8 +349,7 @@ function toLanding(message) {
     el.input.disabled = false;
     el.submit.disabled = true;
     el.lobbyError.textContent = message || '';
-    el.createBtn.disabled = !el.createName.value.trim();
-    joinGate();
+    paintIdentity();
     document.querySelectorAll('.room-row button').forEach(b => { b.disabled = false; });
     ui.show('landing');
 }
@@ -579,8 +614,7 @@ socket.on('left', () => {
 
 socket.on('joinError', (d) => {
     el.lobbyError.textContent = d.message;
-    el.createBtn.disabled = !el.createName.value.trim();
-    joinGate();
+    paintIdentity();
     document.querySelectorAll('.room-row button').forEach(b => { b.disabled = false; });
 });
 
@@ -602,5 +636,6 @@ socket.on('disconnect', () => {
 ['pointerdown', 'keydown'].forEach(evt =>
     window.addEventListener(evt, () => sfx.unlock(), { once: true, passive: true }));
 
+paintIdentity();
 ui.show('landing');
 socket.emit('rooms:get');

@@ -421,20 +421,46 @@ async function main() {
     const clients = [A, B, C];
 
     head('Sitting down');
-    A.emit('room:create', { name: 'Kira', isPublic: true, maxPlayers: 4 });
+    A.emit('room:create', { name: 'Kira', gender: 'female', isPublic: true, maxPlayers: 4 });
     await until(() => A.room, 'the table is dealt');
     ok(!!A.room && A.room.length === 5, 'a five-character table code is issued');
 
     // Names must be unique at a table.
-    B.emit('room:join', { code: A.room, name: 'Kira' });
+    B.emit('room:join', { code: A.room, name: 'Kira', gender: 'male' });
     await until(() => B.log.errors.length, 'the duplicate name is refused');
     ok(B.log.errors.some(e => /already goes by that name/i.test(e)),
         'two players cannot share a name');
 
-    B.emit('room:join', { code: A.room, name: 'Bram' });
+    B.emit('room:join', { code: A.room, name: 'Bram', gender: 'male' });
     await until(() => B.room, 'Bram sits');
-    C.emit('room:join', { code: A.room, name: 'Vex' });
+    C.emit('room:join', { code: A.room, name: 'Vex', gender: 'female' });
     await until(() => C.room, 'Vex sits');
+
+    head('Pronouns come from the player, not from a guess');
+    {
+        const room = rooms.get(A.room);
+        const seat = (n) => room.players.find(p => p.name === n);
+        eq(seat('Kira').sheet.calls, 'she/her', 'Kira chose she/her at the lobby');
+        eq(seat('Bram').sheet.calls, 'he/him', 'Bram chose he/him');
+        eq(seat('Vex').sheet.calls, 'she/her', 'Vex chose she/her');
+
+        const cast = ai.castBlock(room.players);
+        ok(cast.includes('call: she/her') && cast.includes('call: he/him'),
+            'the narrator is handed each choice');
+        // The trailing instruction mentions the phrase; no SEAT should.
+        const seatLines = cast.split('\n').filter(l => /^\w[\w '-]*\s\|/.test(l));
+        eq(seatLines.length, 3, 'every seat has a line');
+        ok(seatLines.every(l => /call: (she\/her|he\/him)$/.test(l)),
+            'and none is left for the narrator to guess about');
+
+        // A narrator that tries to reassign them is ignored.
+        const before = seat('Kira').sheet.calls;
+        room.players.forEach(p => { p.sheet.calls = p.sheet.calls; });
+        const applied = ai.parseState(
+            'x\n<<<STATE\nKira | is: pirate | call: he/him\n>>>', room.players.map(p => p.name));
+        ok(applied.sheets.Kira.calls === 'he/him', 'the block parses whatever it says');
+        eq(seat('Kira').sheet.calls, before, 'but the seated choice is what stands');
+    }
 
     await until(() => A.players?.length === 3, 'everyone sees three seats');
     eq(A.players.map(p => p.name), ['Kira', 'Bram', 'Vex'], 'seat order is stable');

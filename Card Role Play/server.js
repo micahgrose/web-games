@@ -48,6 +48,10 @@ const rooms = new Map();
 // ── Small helpers ──────────────────────────────────────
 const clip = (s, n = MAX_TEXT) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
+/** Players choose this at the lobby, so the story never has to guess. */
+const pronounsFor = (gender) =>
+    (String(gender).toLowerCase() === 'female' ? 'she/her' : 'he/him');
+
 function roomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let id;
@@ -212,9 +216,9 @@ function applySheets(room, sheets) {
         if (s.wounds) p.sheet.wounds = s.wounds;
         if (s.boons) p.sheet.boons = s.boons;
         if (s.status) p.sheet.status = s.status;
-        // Only ever upgrades unset → set, so a sloppy turn cannot
-        // erase how a player asked to be referred to.
-        if (s.calls) p.sheet.calls = s.calls;
+        // The player chose their own pronouns at the lobby; the
+        // narrator does not get a vote on them.
+        if (s.calls && !p.sheet.calls) p.sheet.calls = s.calls;
     }
 }
 
@@ -605,7 +609,10 @@ function launchRematch(room, ids) {
         name: p.name,
         color: SEAT_COLOURS[i % SEAT_COLOURS.length],
         eliminated: false,
-        sheet: { character: '', wounds: [], boons: [], status: [], calls: '' },
+        calls: p.calls,
+        // Everything else resets for the new game; how somebody is
+        // spoken of does not.
+        sheet: { character: '', wounds: [], boons: [], status: [], calls: p.calls },
         previous: [],
     }));
 
@@ -723,10 +730,11 @@ io.on('connection', (socket) => {
 
     socket.on('rooms:get', () => socket.emit('rooms', lobbyList()));
 
-    socket.on('room:create', ({ name, isPublic, maxPlayers } = {}) => {
+    socket.on('room:create', ({ name, gender, isPublic, maxPlayers } = {}) => {
         if (socket.data.roomId) return;
         const playerName = clip(name, 24);
         if (!playerName) return socket.emit('joinError', { message: 'Pick a name first.' });
+        const calls = pronounsFor(gender);
 
         const id = roomCode();
         const room = {
@@ -736,7 +744,8 @@ io.on('connection', (socket) => {
             maxPlayers: Math.min(10, Math.max(2, parseInt(maxPlayers, 10) || 10)),
             players: [{
                 id: socket.id, name: playerName, color: SEAT_COLOURS[0], eliminated: false,
-                sheet: { character: '', wounds: [], boons: [], status: [], calls: '' }, previous: [],
+                calls,
+                sheet: { character: '', wounds: [], boons: [], status: [], calls }, previous: [],
             }],
             spectators: [],
             deck: new Deck(),
@@ -766,12 +775,13 @@ io.on('connection', (socket) => {
         pushLobby();
     });
 
-    socket.on('room:join', ({ code, name } = {}) => {
+    socket.on('room:join', ({ code, name, gender } = {}) => {
         if (socket.data.roomId) return;
         const playerName = clip(name, 24);
         const room = rooms.get(String(code || '').toUpperCase());
         if (!room) return socket.emit('joinError', { message: 'No table with that code.' });
         if (!playerName) return socket.emit('joinError', { message: 'Pick a name first.' });
+        const calls = pronounsFor(gender);
 
         const clash = [...room.players, ...room.spectators]
             .some(p => p.name.toLowerCase() === playerName.toLowerCase());
@@ -779,7 +789,8 @@ io.on('connection', (socket) => {
 
         if (room.started) {
             if (!room.isPublic) return socket.emit('joinError', { message: 'That game is already under way.' });
-            room.spectators.push({ id: socket.id, name: playerName });
+            // Watchers carry their pronouns too — they may be seated next game.
+            room.spectators.push({ id: socket.id, name: playerName, calls });
             socket.join(room.id);
             socket.data.roomId = room.id;
             socket.data.spectator = true;
@@ -806,7 +817,8 @@ io.on('connection', (socket) => {
             id: socket.id, name: playerName,
             color: SEAT_COLOURS[room.players.length % SEAT_COLOURS.length],
             eliminated: false,
-            sheet: { character: '', wounds: [], boons: [], status: [], calls: '' },
+            calls,
+            sheet: { character: '', wounds: [], boons: [], status: [], calls },
             previous: [],
         });
         socket.join(room.id);

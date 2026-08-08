@@ -148,6 +148,26 @@ async function main() {
     ok(!cText.includes('<<<'), 'again, no block in the stream');
     console.log(`\n    prose: "${cOut.prose}"`);
 
+    console.log('\n── Pronouns come from the player, not from a guess');
+    {
+        const cast = [
+            { name: 'Kira', eliminated: false, sheet: { character: 'a sky-pirate', wounds: ['gashed left arm'], boons: ['rope-gun'], status: [], calls: 'she/her' } },
+            { name: 'Bram', eliminated: false, sheet: { character: 'a stone golem', wounds: [], boons: ['stone hide'], status: [], calls: 'he/him' } },
+        ];
+        const res = R.resolveCounter(
+            { card: { rank: 'K', suit: 'Spades' }, sheet: cast[0].sheet },
+            [{ id: 'b', name: 'Bram', sheet: cast[1].sheet, card: { rank: '4', suit: 'Hearts' }, text: 'plants both feet' }],
+        );
+        const o = await ai.narrate({
+            players: cast, history: [],
+            directive: R.counterDirective('Kira', 'swings the boom into Bram', res),
+            onChunk: () => {},
+        });
+        ok(/\b(she|her)\b/i.test(o.prose), 'Kira, who chose she/her, gets she/her');
+        ok(/\b(he|him|his)\b/i.test(o.prose), 'Bram, who chose he/him, gets he/him');
+        console.log(`    prose: "${o.prose}"`);
+    }
+
     console.log('\n── Arrival is dealt for too');
 
     const arrival = R.resolveSetup({ rank: 'K', suit: 'Spades' });
