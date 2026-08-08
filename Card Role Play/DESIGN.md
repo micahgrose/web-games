@@ -83,10 +83,46 @@ The counter rule from `Instructions.md` — *a defender whose card is higher tur
 the action aside, for that defender only* — is a comparison in code, resolved
 per defender, with ties going to the attacker. It cannot drift.
 
-Condition is mechanical too, which is what the spec asked for: each lasting
-wound is −1 (max −3), each advantage +1 (max +2). The same King triumphs for a
-hale character and merely succeeds for a wounded one. Armour genuinely raises
-the card an attacker needs to get through. Caps keep the card the loud part.
+### What a character carries hits hard
+
+Condition is mechanical, and deliberately heavy — this is the part of the spec
+that makes the game a game rather than a chat:
+
+| | |
+|---|---|
+| each lasting wound | **−2**, capped at −5 |
+| each advantage | **+2**, capped at +4 |
+
+So a King triumphs for a hale character and lands as merely *mixed* for one
+carrying two wounds — a two-band drop on the identical card. A nine with two
+advantages climbs from mixed to triumph. Armour genuinely raises the card an
+attacker needs to get through it, because a defender's advantages count in the
+counter comparison. The caps keep the card itself the loudest single thing, and
+nothing heals unless someone tends to it in the story.
+
+The narrator is pushed hard in the same direction. Every directive **names the
+actual tags** rather than just their arithmetic — "Kira is carrying: shattered
+right knee, deep gash across the ribs. This drags down everything Kira attempts,
+and must show in the telling" — so the prose gives the *reason* a card came out
+the way it did. When a wounded character fails, the wound is why; when an
+equipped one succeeds, the gear is how.
+
+### Every turn leaves a mark
+
+Each narration must change at least one field on at least one character: a fresh
+injury, an advantage gained, lost or broken, a condition that sets in or lifts.
+A turn that leaves the cast exactly as it found them is a failed turn. The rule
+sits in the system prompt *and* at the foot of every directive, because a model
+follows the last thing it read far more reliably than the first.
+
+### Arrival is dealt for too
+
+A setup turn draws a card, and it rules on how fully the character takes hold —
+RUIN arrives badly diminished and starts with a flaw, TRIUMPH arrives at full
+height with two advantages, a Joker bends them into something stranger than
+asked for. Whatever the arrival grants or costs is written onto the sheet and is
+real for the rest of the game, so the deck has a say in who you are before it
+has a say in what you do.
 
 ### Context is bounded
 

@@ -148,6 +148,96 @@ async function main() {
     ok(!cText.includes('<<<'), 'again, no block in the stream');
     console.log(`\n    prose: "${cOut.prose}"`);
 
+    console.log('\n── Arrival is dealt for too');
+
+    const arrival = R.resolveSetup({ rank: 'K', suit: 'Spades' });
+    ok(arrival.band === 'triumph', 'a king arrives at full height');
+    const aOut = await ai.narrate({
+        players: [{ name: 'Oro', eliminated: false, sheet: { character: '', wounds: [], boons: [], status: [] } }],
+        history: [],
+        directive: R.setupDirective('Oro', 'a purple dragon who builds walls and brings them to life', arrival),
+        onChunk: () => {},
+    });
+    ok(/Oro/.test(aOut.prose), 'the new character is named');
+    ok(aOut.sheets?.Oro, 'the arrival is written onto a sheet');
+    const granted = (aOut.sheets?.Oro?.boons || []).length;
+    ok(granted > 0, `a triumphant arrival grants something (${granted}: ${aOut.sheets?.Oro?.boons})`);
+    console.log(`\n    prose: "${aOut.prose}"`);
+
+    const poor = await ai.narrate({
+        players: [{ name: 'Nix', eliminated: false, sheet: { character: '', wounds: [], boons: [], status: [] } }],
+        history: [],
+        directive: R.setupDirective('Nix', 'an unbeatable warrior of pure diamond', R.resolveSetup({ rank: '2', suit: 'Clubs' })),
+        onChunk: () => {},
+    });
+    const flawed = (poor.sheets?.Nix?.wounds || []).length + (poor.sheets?.Nix?.status || []).length;
+    ok(flawed > 0, `a ruinous arrival costs something (${JSON.stringify(poor.sheets?.Nix)})`);
+    console.log(`    prose: "${poor.prose}"`);
+
+    console.log('\n── Tags have to bite');
+
+    // A heavily wounded character on a good card: the failure must
+    // read as caused by the injuries, and they must be named.
+    const wrecked = {
+        name: 'Kira', eliminated: false,
+        sheet: {
+            character: 'a sky-pirate', wounds: ['shattered right knee', 'deep gash across the ribs'],
+            boons: [], status: ['bleeding'],
+        },
+    };
+    const hurtRes = R.resolveSolo({ rank: 'Q', suit: 'Hearts' }, wrecked.sheet);
+    ok(hurtRes.eff === 8, `a queen on two wounds resolves at 8, not 12 (got ${hurtRes.eff})`);
+    const hurtOut = await ai.narrate({
+        players: [wrecked, CAST[1]],
+        history: [],
+        directive: R.soloDirective('Kira', 'sprints the length of the deck and vaults the rail', hurtRes),
+        onChunk: () => {},
+    });
+    const named = /knee|gash|rib|bleed/i.test(hurtOut.prose);
+    ok(named, 'the injuries are named in the prose, not just implied');
+    console.log(`    prose: "${hurtOut.prose}"`);
+
+    // An equipped character: the gear should be how the thing is done.
+    const geared = {
+        name: 'Bram', eliminated: false,
+        sheet: { character: 'a tinker', wounds: [], boons: ['grappling line', 'clockwork arm'], status: [] },
+    };
+    const gearRes = R.resolveSolo({ rank: '9', suit: 'Clubs' }, geared.sheet);
+    ok(gearRes.eff === 13, `a nine with two advantages reaches 13 (got ${gearRes.eff})`);
+    ok(gearRes.band === 'triumph', 'which carries it two bands, from mixed to triumph');
+    const gearOut = await ai.narrate({
+        players: [geared, CAST[0]],
+        history: [],
+        directive: R.soloDirective('Bram', 'crosses the gap to the far tower', gearRes),
+        onChunk: () => {},
+    });
+    ok(/grappl|line|clockwork|arm/i.test(gearOut.prose), 'the gear is what does the work');
+    console.log(`    prose: "${gearOut.prose}"`);
+
+    console.log('\n── Every turn leaves a mark');
+
+    let marked = 0;
+    const trials = 3;
+    for (let i = 0; i < trials; i++) {
+        const sheet = { character: 'a sky-pirate', wounds: [], boons: ['rope-gun'], status: [] };
+        const r = R.resolveSolo({ rank: ['5', '10', 'J'][i], suit: 'Spades' }, sheet);
+        const o = await ai.narrate({
+            players: [{ name: 'Kira', eliminated: false, sheet }, CAST[1]],
+            history: [],
+            directive: R.soloDirective('Kira', `forces the hatch on the ${i + 2}th deck`, r),
+            onChunk: () => {},
+        });
+        const s = o.sheets?.Kira;
+        const changed = !!s && (
+            (s.wounds || []).length > 0 ||
+            (s.status || []).length > 0 ||
+            JSON.stringify(s.boons || []) !== JSON.stringify(['rope-gun'])
+        );
+        if (changed) marked++;
+        console.log(`    ${r.label.padEnd(8)} → ${changed ? 'left a mark' : 'NOTHING CHANGED'} ${JSON.stringify(s)}`);
+    }
+    ok(marked >= trials - 1, `at least ${trials - 1} of ${trials} turns changed something (${marked})`);
+
     console.log(`\n${'─'.repeat(46)}`);
     console.log(failures ? `${checks - failures}/${checks} passed — ${failures} FAILED`
                          : `${checks} checks, all green.`);

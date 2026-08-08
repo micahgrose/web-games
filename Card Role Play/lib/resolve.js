@@ -24,18 +24,42 @@ const BANDS = [
                  'nobody asked for — surprising, irreversible, and fitting.' },
 ];
 
-// Bounded so that neither a pile of wounds nor a hoard of trinkets
-// can decide a turn on its own. The card is always the loud part.
-const MAX_WOUND_PENALTY = 3;
-const MAX_BOON_BONUS = 2;
+// What a character carries hits hard. An injury is worth two points
+// and a real advantage two the other way, so three wounds cost most of
+// a band and a shield genuinely raises the card needed to get through
+// it. Still bounded — the card stays the loudest single thing — but a
+// wounded character now plainly needs a better card for the same feat,
+// which is what the game is supposed to be about.
+const WOUND_WEIGHT = 2;
+const BOON_WEIGHT = 2;
+const MAX_WOUND_PENALTY = 5;
+const MAX_BOON_BONUS = 4;
+
+// How well a character comes into being when they first arrive.
+// A setup turn attempts nothing, so the card rules only on how fully
+// the description takes hold.
+const ARRIVAL = {
+    ruin: 'The character arrives badly diminished — the idea is intact, the execution is not. '
+        + 'Saddle this character with one clear lasting flaw or injury from the very start.',
+    falter: 'The character arrives shakily, noticeably less than was described. '
+        + 'Give this character one real weakness.',
+    mixed: 'The character arrives much as described, but with one genuine limitation attached.',
+    success: 'The character arrives fully and convincingly as described. '
+        + 'Give this character one clear advantage.',
+    triumph: 'The character arrives at the very height of what was described, better than hoped. '
+        + 'Give this character two clear advantages, or one formidable one.',
+    fate: 'The Joker. The character arrives, but fate bends them into something adjacent and '
+        + 'stranger than described. Give this character something nobody asked for — a real '
+        + 'advantage with a catch in it.',
+};
 
 const bandFor = (v) => BANDS.find(b => v <= b.max) || BANDS[BANDS.length - 1];
 
 function penalty(sheet) {
-    return Math.min((sheet?.wounds || []).length, MAX_WOUND_PENALTY);
+    return Math.min((sheet?.wounds || []).length * WOUND_WEIGHT, MAX_WOUND_PENALTY);
 }
 function bonus(sheet) {
-    return Math.min((sheet?.boons || []).length, MAX_BOON_BONUS);
+    return Math.min((sheet?.boons || []).length * BOON_WEIGHT, MAX_BOON_BONUS);
 }
 
 /** Card value adjusted for what the tale has already done to this character. */
@@ -52,7 +76,24 @@ function effective(card, sheet) {
 function resolveSolo(card, sheet) {
     const e = effective(card, sheet);
     const band = bandFor(e.eff);
-    return { card, ...e, band: band.key, label: band.label, directive: band.directive };
+    return {
+        card, ...e,
+        wounds: sheet?.wounds || [],
+        boons: sheet?.boons || [],
+        status: sheet?.status || [],
+        band: band.key, label: band.label, directive: band.directive,
+    };
+}
+
+/** A character coming into being. Nothing is attempted; the card only
+ *  rules on how fully the description takes hold. */
+function resolveSetup(card) {
+    const e = effective(card, null);
+    const band = bandFor(e.eff);
+    return {
+        card, ...e, wounds: [], boons: [], status: [],
+        band: band.key, label: band.label, directive: ARRIVAL[band.key],
+    };
 }
 
 /**
@@ -70,6 +111,10 @@ function resolveCounter(attacker, defenders) {
         return {
             id: d.id, name: d.name, card: d.card, text: d.text,
             ...e, beaten, band: band.key, label: band.label,
+            // Carried through so the directive can name them, not just count them.
+            wounds: d.sheet?.wounds || [],
+            boons: d.sheet?.boons || [],
+            status: d.sheet?.status || [],
         };
     });
     return { attacker: atk, defenders: rows, allHeld: rows.every(r => r.beaten) };
@@ -81,19 +126,61 @@ function resolveCounter(attacker, defenders) {
 
 function modNote(r) {
     const bits = [];
-    if (r.pen) bits.push(`-${r.pen} hurt`);
-    if (r.bon) bits.push(`+${r.bon} advantage`);
-    return bits.length ? ` (${cardValue(r.card)} ${bits.join(' ')} = ${r.eff})` : '';
+    if (r.pen) bits.push(`-${r.pen} for injuries`);
+    if (r.bon) bits.push(`+${r.bon} for advantages`);
+    return bits.length ? ` → ${cardValue(r.card)} ${bits.join(' ')} = ${r.eff}` : '';
+}
+
+// Repeated at the foot of every directive. The rule is in the system
+// prompt too, but a model follows the last thing it read far more
+// reliably than the first.
+const MARK = 'Before the state block, decide what this turn cost, caught, broke or won, '
+    + 'and record that change on the sheet of whoever it happened to. Something always changes.';
+
+/** Spell out what a character is carrying, by name. The narrator has
+ *  to be able to SEE the reason a card came out the way it did. */
+function conditionLines(name, r) {
+    const out = [];
+    if (r.wounds?.length) {
+        out.push(`${name} is carrying: ${r.wounds.join(', ')}. `
+            + `This drags down everything ${name} attempts, and must show in the telling.`);
+    }
+    if (r.boons?.length) {
+        out.push(`${name} has: ${r.boons.join(', ')}. `
+            + `This is what ${name} brings to bear, and should do the work here.`);
+    }
+    if (r.status?.length) out.push(`${name} is currently ${r.status.join(', ')}.`);
+    return out;
 }
 
 function soloDirective(name, text, r) {
     return [
         `ACTOR: ${name}`,
         `DECLARES: "${text}"`,
+        ...conditionLines(name, r),
         `CARD: ${cardName(r.card)}${modNote(r)}`,
         `OUTCOME: ${r.label} — ${r.directive}`,
         '',
         `Narrate exactly this outcome for ${name} in 2-4 sentences.`,
+        (r.wounds?.length || r.boons?.length)
+            ? `What ${name} is carrying must be visible in how this plays out — name it, do not just imply it.`
+            : '',
+        MARK,
+    ].filter(Boolean).join('\n');
+}
+
+function setupDirective(name, text, r) {
+    return [
+        `SETUP — a new character enters. Nothing is at stake and no action is attempted; `
+            + `the card rules only on how well this character comes into being.`,
+        `ACTOR: ${name}`,
+        `BECOMES: "${text}"`,
+        `CARD: ${cardName(r.card)} (${r.eff})`,
+        `ARRIVAL: ${r.label} — ${r.directive}`,
+        '',
+        `Introduce ${name} arriving, in two sentences. Do not invent a location the tale has `
+            + `not already established. Whatever this arrival grants or costs ${name}, write it `
+            + `into the state block as an advantage or an injury — it is real from now on.`,
     ].join('\n');
 }
 
@@ -101,6 +188,7 @@ function counterDirective(attackerName, attackerText, res) {
     const lines = [
         `${attackerName} moves against ${res.defenders.map(d => d.name).join(' and ')}.`,
         `${attackerName} DECLARES: "${attackerText}"`,
+        ...conditionLines(attackerName, res.attacker),
         `${attackerName}'s card: ${cardName(res.attacker.card)}${modNote(res.attacker)}`,
         `FORCE: ${res.attacker.label} — against anyone who fails to turn it aside, ` +
             res.attacker.directive.replace(/^It /, 'the move '),
@@ -108,8 +196,9 @@ function counterDirective(attackerName, attackerText, res) {
         'THE ANSWERS:',
     ];
     for (const d of res.defenders) {
+        lines.push(`- ${d.name} answers: "${d.text}"`);
+        for (const line of conditionLines(d.name, d)) lines.push(`  ${line}`);
         lines.push(
-            `- ${d.name} answers: "${d.text}"`,
             `  card: ${cardName(d.card)}${modNote(d)} → ${d.beaten
                 ? `TURNS IT ASIDE. ${d.name}'s answer works; ${attackerName}'s action fails against ${d.name} alone.`
                 : `FAILS. ${attackerName}'s action lands on ${d.name}.`}`,
@@ -120,13 +209,16 @@ function counterDirective(attackerName, attackerText, res) {
         res.allHeld
             ? `Every answer held. ${attackerName}'s move fails completely, and ${attackerName} bears the cost of it.`
             : `Resolve each name exactly as marked above — one may be struck while another walks away.`,
-        `Narrate the whole exchange as one passage, 3-6 sentences.`,
+        `Narrate the whole exchange as one passage, 3-6 sentences. What each character is `
+            + `carrying is what they meet this with — make that visible, by name.`,
+        MARK,
     );
     return lines.join('\n');
 }
 
 module.exports = {
-    BANDS, bandFor, effective, resolveSolo, resolveCounter,
-    soloDirective, counterDirective,
-    MAX_WOUND_PENALTY, MAX_BOON_BONUS,
+    BANDS, ARRIVAL, bandFor, effective,
+    resolveSolo, resolveSetup, resolveCounter,
+    soloDirective, setupDirective, counterDirective,
+    WOUND_WEIGHT, BOON_WEIGHT, MAX_WOUND_PENALTY, MAX_BOON_BONUS,
 };

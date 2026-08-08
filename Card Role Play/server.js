@@ -323,12 +323,18 @@ async function handleSetup(room, player, text) {
     room.setupDone.add(player.id);
     io.to(room.id).emit('said', { name: player.name, color: player.color, text });
 
-    // No card on a setup turn: nothing is being attempted, so there
-    // is nothing for the deck to rule on.
-    await tell(room,
-        `SETUP — a new character enters. This is not an action and nothing is at stake.\n` +
-        `ACTOR: ${player.name}\nBECOMES: "${text}"\n\n` +
-        `Introduce ${player.name} arriving, in two sentences. Do not invent a location the tale has not established.`,
+    // The card rules on how well this character comes into being. A
+    // strong arrival brings an advantage, a poor one a flaw, and
+    // either way it is real for the rest of the game.
+    const card = room.deck.draw();
+    const shuffled = room.deck.reshuffled;
+    const arrival = R.resolveSetup(card);
+
+    io.to(room.id).emit('draw', {
+        card, deckCount: room.deck.count, shuffled, band: arrival.band,
+    });
+
+    await tell(room, R.setupDirective(player.name, text, arrival),
         { historyLabel: `${player.name} enters as: ${text}` });
 
     sendSheets(room);

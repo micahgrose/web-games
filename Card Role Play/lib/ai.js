@@ -46,8 +46,16 @@ const GM_SYSTEM = `You are the Game Master of a multiplayer elimination role-pla
 HOW OUTCOMES ARE DECIDED
 You do NOT decide whether an action succeeds. Every turn you are given a verdict — RUIN, FALTER, MIXED, SUCCESS, TRIUMPH or FATE — already worked out from the cards and from each character's condition. Narrate that verdict faithfully. Never soften a failure into a success or inflate a success. If a defender is marked as turning an action aside, it is turned aside for that defender and no other.
 
-CONTEXT
-You are given a CAST block holding every character: who they are, lasting injuries, advantages they hold, and their present condition. Treat it as true and keep it true. A character who was crippled last turn is still crippled. Gear and powers a character holds should show up when they are used.
+WHAT CHARACTERS CARRY — THE MOST IMPORTANT THING YOU DO
+You are given a CAST block holding every character: who they are, lasting injuries, advantages they hold, their present condition. This is not decoration and it is not background. It is the substance of the game, and every line of it must bite:
+- An injured character is visibly hampered. Do not merely mention the injury — show it interfering. A gashed arm fumbles the grip. A broken rib turns a sprint into a stagger.
+- A character's advantages are HOW that character acts. If Kira holds a rope-gun and Kira must cross a gap, the rope-gun is how Kira crosses it. If an advantage would plainly apply, it applies.
+- When something is aimed at a character, what that character carries is what they meet it with. Armour turns blades. Stone hide does not bruise. A power that was established three turns ago is still theirs.
+- A character who was crippled last turn is still crippled. Nothing heals unless someone tends to it in the story.
+The verdict you are handed has already weighed all of this. Your job is to make the REASON visible: when a wounded character fails, the failure should read as caused by the wound; when an equipped character succeeds, the gear should be why.
+
+CONSEQUENCES — EVERY TURN LEAVES A MARK
+Each time you narrate, at least one character's line in the state block must change: a fresh injury, an advantage gained, an advantage lost or broken, a condition that sets in or lifts. A turn that leaves the whole cast exactly as it found them is a failed turn — something always costs, catches, breaks, or is won. What you record must be what your prose just described, in the same words where possible.
 
 VOICE
 Write only what happens in the story. Never mention cards, values, numbers, dice, odds, verdicts, modifiers, or any machinery behind the scene. Never address the players or explain rules.
@@ -73,7 +81,8 @@ Name | is: short description | hurt: injury; injury | has: advantage; advantage 
 DEAD: Name, Name
 ${STATE_CLOSE}
 
-Rules for the block: one line per living character, using their exact name. Carry forward everything still true and add whatever this turn changed. Use "-" for an empty field. Keep every field under twelve words. For "call:", copy forward whatever the CAST block already says, and set it only when a player's own words established how they wish to be referred to. Include the DEAD line only when someone died this turn, and only then. Write no text after ${STATE_CLOSE}.`;
+Rules for the block: one line per living character, using their exact name. Carry forward everything still true and add whatever this turn changed. Use "-" for an empty field. Keep every field under twelve words.
+"hurt:" is lasting damage — a shattered knee, a burnt hand. "has:" is anything that makes this character more capable — gear, powers, allies, high ground. "now:" is a temporary state of the body or mind — winded, blinded, bleeding, cornered, enraged — never a location and never a place name. For "call:", copy forward whatever the CAST block already says, and set it only when a player's own words established how they wish to be referred to. Include the DEAD line only when someone died this turn, and only then. Write no text after ${STATE_CLOSE}.`;
 
 // ── Transport ──────────────────────────────────────────
 
@@ -196,7 +205,11 @@ function castBlock(players) {
         bits.push(`call: ${s.calls || 'by name only'}`);
         return bits.join(' | ');
     });
-    return `CAST — every character in play, and what is true of each:\n${lines.join('\n')}`;
+    return 'CAST — every character in play, and what is true of each:\n'
+        + lines.join('\n')
+        + '\nEvery injury and advantage above must shape what happens and be named where it does. '
+        + 'Refer to each character exactly as their "call:" directs — where it says "by name only", '
+        + 'write that name every time and never he, she or they.';
 }
 
 // ── Local screening (no API call needed) ───────────────
@@ -510,7 +523,16 @@ function understudy(directive, players) {
 
     if (/^SETUP/.test(directive)) {
         const who = /BECOMES:\s*"([^"]*)"/.exec(directive)?.[1] || 'a stranger';
-        return `${actor} steps into the light: ${who}. The table takes ${actor}'s measure and says nothing.`;
+        const arrival = /^ARRIVAL:\s*([A-Z]+)/m.exec(directive)?.[1] || 'MIXED';
+        const how = {
+            RUIN: `and arrives badly diminished, less than the words promised`,
+            FALTER: `and arrives shakily, not quite what was described`,
+            MIXED: `and arrives close to the description, with something missing`,
+            SUCCESS: `and arrives exactly as described`,
+            TRIUMPH: `and arrives at full height, better than the words promised`,
+            FATE: `and arrives as something stranger than what was asked for`,
+        }[arrival];
+        return `${actor} steps into the light: ${who} — ${how}. The table takes ${actor}'s measure.`;
     }
 
     // A counter exchange: report each answer as the cards ruled it.

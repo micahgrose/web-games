@@ -88,21 +88,76 @@ head('Condition changes what a card is worth');
 
     const king = { rank: 'K', suit: 'Spades' };
     eq(R.resolveSolo(king, clean).eff, 13, 'a hale character draws a king at 13');
-    eq(R.resolveSolo(king, hurt).eff, 11, 'two wounds cost two points');
-    eq(R.resolveSolo(king, armed).eff, 14, 'an advantage is worth a point');
+    eq(R.resolveSolo(king, hurt).eff, 9, 'two wounds cost four points');
+    eq(R.resolveSolo(king, armed).eff, 14, 'an advantage is worth two, clamped at the top');
 
-    // Instructions.md: the wounded need higher cards for the same feat.
-    ok(R.resolveSolo(king, hurt).band === 'success'
-        && R.resolveSolo(king, clean).band === 'triumph',
-        'the same king triumphs for the hale and merely succeeds for the wounded');
+    // Instructions.md: the wounded need much higher cards for the same feat.
+    eq(R.resolveSolo(king, clean).band, 'triumph', 'a king triumphs for the hale');
+    eq(R.resolveSolo(king, hurt).band, 'mixed', 'the same king is merely mixed for the wounded');
+    ok(R.resolveSolo({ rank: '9', suit: 'Hearts' }, armed).band === 'success'
+        && R.resolveSolo({ rank: '9', suit: 'Hearts' }, clean).band === 'mixed',
+        'an advantage lifts a nine from mixed to a clean success');
+
+    // What it takes to reach the same band, hale versus hurt.
+    const bandAt = (v, sheet) => R.resolveSolo({ rank: String(v), suit: 'Hearts' }, sheet).band;
+    ok(bandAt(8, clean) === 'mixed' && bandAt(8, hurt) === 'ruin',
+        'the wounded fall two whole bands on the same card');
 
     const piled = { wounds: ['a', 'b', 'c', 'd', 'e'], boons: [] };
     eq(R.resolveSolo(king, piled).pen, R.MAX_WOUND_PENALTY, 'wound penalty is capped');
+    ok(R.resolveSolo(king, piled).eff >= 1, 'and never drops below one');
     const hoard = { wounds: [], boons: ['a', 'b', 'c', 'd'] };
     eq(R.resolveSolo(king, hoard).bon, R.MAX_BOON_BONUS, 'advantage bonus is capped');
 
     const joker = { joker: true };
     eq(R.resolveSolo(joker, piled).eff, 15, 'nothing drags a joker down');
+}
+
+head('Becoming someone is dealt for too');
+{
+    const arrival = (rank) => R.resolveSetup({ rank, suit: 'Spades' });
+    eq(arrival('K').band, 'triumph', 'a king arrives at full height');
+    eq(arrival('3').band, 'ruin', 'a three arrives diminished');
+    eq(R.resolveSetup({ joker: true }).band, 'fate', 'the joker bends a character sideways');
+
+    for (const rank of ['2', '7', 'Q', 'A']) {
+        const r = arrival(rank);
+        ok(!!r.directive && r.directive.length > 30, `${rank}: the arrival has its own guidance`);
+        ok(!/fails outright|half-works/.test(r.directive),
+            `${rank}: arrival guidance is about becoming, not about attempting`);
+    }
+
+    // A setup turn has no tags yet, so the card stands alone.
+    eq(R.resolveSetup({ rank: '9', suit: 'Spades' }).eff, 9, 'nothing modifies an arrival');
+
+    const d = R.setupDirective('Kira', 'a sky-pirate with a rope-gun', arrival('K'));
+    ok(d.includes('TRIUMPH'), 'the arrival band is stated');
+    ok(/state block/i.test(d), 'and what it grants is asked to be recorded');
+    ok(!/OUTCOME:/.test(d), 'an arrival is not phrased as an action outcome');
+}
+
+head('Tags are named in the instructions, not just counted');
+{
+    const sheet = { wounds: ['gashed left arm'], boons: ['rope-gun'], status: ['winded'] };
+    const r = R.resolveSolo({ rank: '9', suit: 'Spades' }, sheet);
+    const d = R.soloDirective('Kira', 'swings across the gap', r);
+    ok(d.includes('gashed left arm'), 'the injury is named for the narrator');
+    ok(d.includes('rope-gun'), 'the advantage is named');
+    ok(d.includes('winded'), 'the condition is named');
+    ok(/must be visible/i.test(d), 'and the narrator is told to show them');
+    ok(/-2 for injuries/.test(d) && /\+2 for advantages/.test(d), 'the arithmetic is spelled out');
+
+    const bare = R.soloDirective('Bram', 'looks around',
+        R.resolveSolo({ rank: '9', suit: 'Spades' }, { wounds: [], boons: [] }));
+    ok(!/must be visible/i.test(bare), 'a character carrying nothing gets no such demand');
+
+    const cd = R.counterDirective('Kira', 'swings the boom', R.resolveCounter(
+        { card: { rank: 'K', suit: 'Spades' }, sheet },
+        [{ id: 'b', name: 'Bram', sheet: { wounds: [], boons: ['stone hide'] },
+           card: { rank: '4', suit: 'Hearts' }, text: 'takes it' }],
+    ));
+    ok(cd.includes('stone hide'), 'a defender\'s advantages are named too');
+    ok(cd.includes('rope-gun'), 'and so are the attacker\'s');
 }
 
 head('The counter rule');
@@ -396,7 +451,9 @@ async function main() {
     const before = A.draws || 0;
     A.emit('act', { text: 'I am a sky-pirate with a rope-gun and a bad temper' });
     await until(() => A.currentId === B.me, 'the turn passes to Bram');
-    eq(A.draws || 0, before, 'no card is dealt for declaring who you are');
+    ok((A.draws || 0) > before, 'a card decides how well the character arrives');
+    ok(!!A.lastDraw?.card, 'and it is a real card');
+    ok(typeof A.lastDraw?.band === 'string', 'with a band the table can see');
     ok(A.log.gm.length > 0, 'the narrator introduces the character');
     ok(!A.log.gm.includes('<<<'), 'no state machinery reaches the players');
 
