@@ -317,6 +317,65 @@ head('Reading the narrator\'s state block');
     ok(long.sheets.Kira.boons.length <= 3, 'a runaway inventory is clipped');
 }
 
+head('Only characters who must DEFEND become targets');
+{
+    // Naming a target opens the counter phase, which can ask exactly one
+    // question: how do you defend? A player who wanted to ACT is then
+    // trapped into defending, and winning that exchange gets read as
+    // "the attacker's action was turned aside" — so a ghost who plays a
+    // Jack to possess someone is told nobody possessed the ghost.
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/must DEFEND THEMSELVES/i.test(sys), 'targeting is defined by having to defend');
+    ok(/NOT whether they would want to answer/i.test(sys),
+        'and explicitly not by wanting to respond');
+    ok(/own body, position, belongings or visibility is NEVER a target/i.test(sys),
+        'a self-directed action targets nobody');
+    ok(/dropping your guard/i.test(sys), 'including deliberately dropping your guard');
+    ok(/gets their own turn/i.test(sys), 'whoever wants to answer acts on their own turn instead');
+    ok(/close call, include them/i.test(sys), 'genuine attacks still err toward including');
+
+    const ex = ai.TARGET_EXAMPLES;
+    const find = (needle) => ex.find(([q]) => q.includes(needle));
+    const invite = find('leaving myself open');
+    ok(!!invite, 'the invitation case is taught by example');
+    ok(invite && JSON.parse(invite[1]).targets.length === 0
+        && JSON.parse(invite[1]).everyone === false,
+        'and it targets nobody');
+    for (const n of ['I taunt Bram', 'I hide from Vex']) {
+        const e = find(n);
+        ok(e && JSON.parse(e[1]).targets.length === 0, `"${n}…" targets nobody`);
+    }
+    const grab = find('grab Vex by the arm');
+    ok(grab && JSON.parse(grab[1]).targets[0] === 'Vex',
+        'but grabbing the same character still does');
+
+    // Examples teach by balance as well as by content; a pile of empty
+    // answers would train it to stop targeting real attacks.
+    const withTargets = ex.filter(([, a]) => {
+        const p = JSON.parse(a); return p.targets.length || p.everyone;
+    }).length;
+    ok(withTargets >= ex.length - withTargets - 2,
+        `the examples stay balanced (${withTargets} of ${ex.length} target someone)`);
+}
+
+head('A forced consequence cannot invent unrelated damage');
+{
+    // "something always changes" had the narrator breaking whatever tag
+    // was nearest: a monkey who stepped into the open lost his climbing.
+    const d = R.soloDirective('Kira', 'waits', R.resolveSolo({ rank: '9', suit: 'Spades' }, null));
+    ok(/never break a tag the passage never touched/i.test(d),
+        'an untouched tag may not be broken');
+    ok(/never invent a loss/i.test(d), 'and a loss may not be invented to fill the slot');
+    ok(/"now:" is change enough/i.test(d), 'a passing condition counts as change');
+    ok(!/something always changes/i.test(d), 'the unconditional demand is gone');
+
+    const AI = require('../lib/ai');
+    ok(/must FOLLOW from what happened/i.test(AI.GM_SYSTEM),
+        'the system prompt requires the change to follow from the fiction');
+    ok(/has not damaged his climbing/i.test(AI.GM_SYSTEM),
+        'with the observed failure as the example');
+}
+
 head('A reasoning model\'s thinking never reaches the table');
 {
     // The narrator is a reasoning model now. Its thinking arrives in a

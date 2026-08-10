@@ -89,7 +89,8 @@ USE ONLY THE TAGS THAT BEAR ON THIS MOMENT. Usually one, sometimes two. Every ot
 - A character crippled last turn is still crippled.
 
 CONSEQUENCES — EVERY TURN LEAVES A MARK
-Each time you narrate, at least one character's line in the state block must change: a fresh injury, an advantage gained, an advantage lost or broken, a condition that sets in or lifts. A turn that leaves the whole cast exactly as it found them is a failed turn — something always costs, catches, breaks, or is won. What you record must be what your prose just described, in the same words where possible.
+Each time you narrate, at least one character's line in the state block changes: a fresh injury, an advantage gained, an advantage lost or broken, a condition that sets in or lifts. Record only what your prose actually described, in the same words where possible.
+The change must FOLLOW from what happened. Never break a tag the passage did not touch, and never invent a loss simply to have something to record — a monkey who steps out into the open has not damaged his climbing. Where a moment leaves nothing lasting behind, a change to "now:" is change enough.
 
 TAGS ARE ALIVE — ADD, CHANGE, REMOVE
 Tags are a running record of one body in one situation, not a list that only grows. Each turn every existing tag is still exactly true, true in some altered way, or no longer true — act on which.
@@ -318,6 +319,24 @@ function namesIn(text, candidates) {
 
 // ── Triage ─────────────────────────────────────────────
 
+// Naming a target opens the counter phase, and the counter phase can
+// only ask one question: how do you DEFEND against this. So a character
+// named here is committed to defending, whatever they actually wanted to
+// do. Over-including is not the safe direction it looks like.
+const TRIAGE_ACTION_SYSTEM =
+`You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"targets":string[],"everyone":boolean}.
+
+Your one important job is deciding who must DEFEND THEMSELVES this instant.
+
+targets — every OTHER character this action is done TO, against their will: struck, grabbed, blocked, restrained, chased, stolen from, tricked, endangered. Chosen only from the OTHERS list.
+The test is whether they must defend, NOT whether they would want to answer. Those are different, and confusing them breaks the game.
+An action the actor performs on their own body, position, belongings or visibility is NEVER a target, even when another character is named in it, and even when it obviously invites a response. Showing yourself to someone, hiding from them, calling out, taunting, daring, offering, baiting, deliberately dropping your guard — none of these are done TO anyone. Whoever wants to act on that gets their own turn to do it, and gets to act rather than being forced to defend.
+When a genuine attack is a close call, include them: a missed target is struck with no chance to answer.
+everyone — true when the action strikes at other characters WITHOUT naming them: an area effect, a blast, a collapse, a spell over the whole room, or "whoever is nearest". Leave targets empty in that case.
+Neither — an action on the actor alone, on the surroundings, or a friendly or conversational exchange that nobody would need to defend against.
+ok — false ONLY for keyboard mashing or text that is not intelligible English. Anything understandable, however fantastical, is valid.
+reason — one short sentence, only when ok=false.`;
+
 // Worked examples beat prose rules on a small model, and getting
 // targeting wrong is the worst failure this game has: a missed target
 // means somebody is struck without ever being allowed to answer.
@@ -342,6 +361,24 @@ const TARGET_EXAMPLES = [
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I swing at whoever is closest to me"',
      '{"ok":true,"reason":"","targets":[],"everyone":true}'],
+
+    // Done to their own person, however much it invites an answer. The
+    // one that broke the game: this was read as an attack on Vex, so Vex
+    // was asked to DEFEND, answered by attacking, won the exchange — and
+    // the engine turned that win into "Vex was not possessed".
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I show myself to Vex, leaving myself open to whatever Vex tries"',
+     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I taunt Bram, daring Bram to come at me"',
+     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I hide from Vex behind the crates"',
+     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+
+    // The near miss: same character named, same room, but this one is
+    // done TO Vex and Vex must be allowed to answer it.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I grab Vex by the arm and haul Vex into the light"',
+     '{"ok":true,"reason":"","targets":["Vex"],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "asdkjh a;lskdjf"',
      '{"ok":false,"reason":"That came through as noise.","targets":[],"everyone":false}'],
@@ -368,15 +405,7 @@ async function triage({ text, actor, others, previous, setup, existingCharacters
         ? `You screen inputs for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"duplicate":boolean}.
 The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard mashing or is not intelligible English — any character, however strange, is fine. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters?.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
 
-        : `You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"targets":string[],"everyone":boolean}.
-
-Your one important job is deciding who has to defend themselves. Anyone you leave out gets no chance to react, so when it is close, include them.
-
-targets — every OTHER character who would be struck, grabbed, blocked, chased, stolen from, tricked, endangered or otherwise acted upon against their will. Chosen only from the OTHERS list. Include a character if any reasonable player would want to react.
-everyone — true when the action strikes at other characters WITHOUT naming them: an area effect, a blast, a collapse, a spell over the whole room, or "whoever is nearest". Leave targets empty in that case.
-Neither — an action on the actor alone, on the surroundings, or a friendly or conversational exchange that nobody would need to defend against.
-ok — false ONLY for keyboard mashing or text that is not intelligible English. Anything understandable, however fantastical, is valid.
-reason — one short sentence, only when ok=false.`;
+        : TRIAGE_ACTION_SYSTEM;
 
     const messages = [{ role: 'system', content: system }];
 
@@ -666,5 +695,6 @@ function understudyDead(directive, names) {
 module.exports = {
     triage, narrate, epilogue,
     castBlock, parseState, looksLikeNoise, isRehash, namesIn, visibleFrom,
-    GM_SYSTEM, OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,
+    GM_SYSTEM, TRIAGE_ACTION_SYSTEM, TARGET_EXAMPLES,
+    OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,
 };

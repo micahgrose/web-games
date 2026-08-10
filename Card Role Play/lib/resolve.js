@@ -134,9 +134,11 @@ function modNote(r) {
 // Repeated at the foot of every directive. The rule is in the system
 // prompt too, but a model follows the last thing it read far more
 // reliably than the first.
-const MARK = 'Before the state block, decide what this turn cost, caught, broke, mended or won and '
-    + 'record it on whoever it happened to; something always changes. Then reread their existing '
-    + 'tags and rewrite or delete any this turn made untrue. '
+const MARK = 'Before the state block: whatever this turn cost, caught, broke, mended or won, record '
+    + 'it on whoever it happened to. It has to be something the passage actually described — never '
+    + 'break a tag the passage never touched, and never invent a loss just to have one to write '
+    + 'down. If nothing lasting came of the moment, a change to "now:" is change enough. '
+    + 'Then reread their existing tags and rewrite or delete any this turn made untrue. '
     + 'Name no card, no number, and none of the words ruin, falter, mixed, success, triumph or fate.';
 
 /** Spell out what a character is carrying, by name. The narrator has
