@@ -134,8 +134,11 @@ function modNote(r) {
 // Repeated at the foot of every directive. The rule is in the system
 // prompt too, but a model follows the last thing it read far more
 // reliably than the first.
-const MARK = 'Before the state block, decide what this turn cost, caught, broke or won, '
-    + 'and record that change on the sheet of whoever it happened to. Something always changes.';
+const MARK = 'Before the state block, decide what this turn cost, caught, broke, mended or won, '
+    + 'and record it on the sheet of whoever it happened to. Something always changes. '
+    + 'Then reread the tags those characters already had, one by one: any tag this turn has made '
+    + 'untrue must be rewritten or deleted outright, not left sitting beside what contradicts it. '
+    + 'Add, change, remove — all three are part of the job.';
 
 /** Spell out what a character is carrying, by name. The narrator has
  *  to be able to SEE the reason a card came out the way it did. */
@@ -143,13 +146,19 @@ function conditionLines(name, r) {
     const out = [];
     if (r.wounds?.length) {
         out.push(`${name} is carrying: ${r.wounds.join(', ')}. `
-            + `This drags down everything ${name} attempts, and must show in the telling.`);
+            + `This is WHY the outcome fell the way it did. It drags down everything ${name} `
+            + `attempts and must be named in the telling. If this turn tends to any of it, `
+            + `soften that tag or strike it out.`);
     }
     if (r.boons?.length) {
         out.push(`${name} has: ${r.boons.join(', ')}. `
-            + `This is what ${name} brings to bear, and should do the work here.`);
+            + `This is what ${name} brings to bear and it should do the work here, by name. `
+            + `If any of it is spent, broken or lost this turn, strike it out.`);
     }
-    if (r.status?.length) out.push(`${name} is currently ${r.status.join(', ')}.`);
+    if (r.status?.length) {
+        out.push(`${name} is currently ${r.status.join(', ')} — a passing state. `
+            + `If this moment ends it, clear it.`);
+    }
     return out;
 }
 

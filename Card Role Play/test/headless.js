@@ -294,6 +294,57 @@ head('Reading the narrator\'s state block');
     ok(long.sheets.Kira.boons.length <= 3, 'a runaway inventory is clipped');
 }
 
+head('Tags can be changed and removed, not only added');
+{
+    // The narrator is told tags are add/change/REMOVE. That instruction is
+    // worthless unless a removal actually survives the plumbing, and the
+    // difference between "cleared" and "left alone" is a single character.
+    const { applySheets } = require('../server');
+    const names = ['Kira'];
+
+    const carrying = () => ({
+        players: [{
+            name: 'Kira', id: 'k',
+            sheet: {
+                character: 'a sky-pirate', wounds: ['shattered left leg'],
+                boons: ['rope-gun', 'superb health'], status: ['winded'], calls: '',
+            },
+        }],
+    });
+
+    // A field written as "-" empties it.
+    let room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | hurt: - | has: - | now: -\n>>>', names).sheets);
+    ok(room.players[0].sheet.wounds.length === 0, 'an injury written as "-" is cleared');
+    ok(room.players[0].sheet.boons.length === 0, 'an advantage written as "-" is cleared');
+    ok(room.players[0].sheet.status.length === 0, 'a passing condition is cleared');
+    ok(room.players[0].sheet.character === 'a sky-pirate', 'and who they are survives it');
+
+    // A field left off the line is NOT cleared — it carries forward. This
+    // is why the prompt insists every field is always written out.
+    room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | now: -\n>>>', names).sheets);
+    ok(room.players[0].sheet.wounds.length === 1, 'a field left off the line carries forward');
+
+    // One tag changing must replace it, not stack a second beside it.
+    room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | hurt: mending left leg; venom in the blood '
+        + '| has: - | now: -\n>>>', names).sheets);
+    const w = room.players[0].sheet.wounds;
+    ok(w.length === 2 && w[0] === 'mending left leg', 'a changed injury replaces the old wording');
+    ok(!w.includes('shattered left leg'), 'and the contradicted version is gone');
+    ok(!room.players[0].sheet.boons.includes('superb health'),
+        'an advantage the story disproved can be removed');
+
+    // Removal has to matter mechanically, or none of this is worth doing.
+    const hurt = R.effective({ rank: 'K', suit: 'Spades' }, { wounds: ['a', 'b'], boons: [] });
+    const healed = R.effective({ rank: 'K', suit: 'Spades' }, { wounds: [], boons: [] });
+    ok(healed.eff > hurt.eff, 'clearing an injury measurably improves what a card can do');
+}
+
 head('Screening before the model is called');
 {
     ok(ai.looksLikeNoise('a;owkjb;lasdjfi ;wajfadkjdkck'), 'keyboard mash is caught locally');

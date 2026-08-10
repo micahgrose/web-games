@@ -980,4 +980,4 @@ if (require.main === module) {
     server.listen(PORT, () => console.log(`Card Role Play — http://localhost:${PORT}`));
 }
 
-module.exports = { app, server, io, rooms, readingDelay, endingLength };
+module.exports = { app, server, io, rooms, readingDelay, endingLength, applySheets };
