@@ -4,6 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "host": "node tools/host.js",
+    "tunnel": "cloudflared tunnel --no-autoupdate --url http://localhost:3000",
     "test": "node test/headless.js && node test/smoke.js",
     "test:live": "node test/live.js"
   },
