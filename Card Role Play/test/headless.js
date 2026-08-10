@@ -138,13 +138,36 @@ head('Becoming someone is dealt for too');
 
 head('Tags are named in the instructions, not just counted');
 {
+    // The footer repeated at the end of every directive, whatever the shape.
+    const MARKED = R.soloDirective('Kira', 'waits', R.resolveSolo({ rank: '9', suit: 'Spades' }, null));
     const sheet = { wounds: ['gashed left arm'], boons: ['rope-gun'], status: ['winded'] };
     const r = R.resolveSolo({ rank: '9', suit: 'Spades' }, sheet);
     const d = R.soloDirective('Kira', 'swings across the gap', r);
     ok(d.includes('gashed left arm'), 'the injury is named for the narrator');
     ok(d.includes('rope-gun'), 'the advantage is named');
     ok(d.includes('winded'), 'the condition is named');
-    ok(/must be visible/i.test(d), 'and the narrator is told to show them');
+    ok(/show that one interfering/i.test(d), 'and the narrator is told to show them working');
+
+    // The narrator was reciting every tag it was given, including
+    // announcing which ones did not apply. Relevance is now explicit,
+    // and so is naming a tag at most once.
+    ok(/bears on this moment/i.test(d), 'only the tags that bear on the moment are wanted');
+    ok(/Say nothing of the others|Pass over the rest/i.test(d), 'the rest are passed over in silence');
+    ok(/name it once/i.test(d), 'and a tag is named once, not repeated');
+    ok(/no sentence may restate/i.test(d), 'sentences may not restate each other');
+
+    // The band label is handed over for calibration, so the words
+    // themselves have to be forbidden or they get echoed as prose.
+    for (const w of ['ruin', 'falter', 'mixed', 'success', 'triumph', 'fate']) {
+        ok(new RegExp(`\\b${w}\\b`, 'i').test(MARKED), `"${w}" is named as a banned word`);
+    }
+    const AI = require('../lib/ai');
+    ok(/BANNED WORDS/.test(AI.GM_SYSTEM), 'the system prompt bans the machine vocabulary outright');
+    ok(/not "the triumph is complete"/i.test(AI.GM_SYSTEM),
+        'with the exact leak that was observed given as an example');
+    ok(/SAY EACH THING ONCE/.test(AI.GM_SYSTEM), 'and forbids saying the same thing twice');
+    ok(/USE ONLY THE TAGS THAT BEAR ON THIS MOMENT/.test(AI.GM_SYSTEM),
+        'and asks for relevant tags only');
     ok(/-2 for injuries/.test(d) && /\+2 for advantages/.test(d), 'the arithmetic is spelled out');
 
     const bare = R.soloDirective('Bram', 'looks around',
@@ -292,6 +315,25 @@ head('Reading the narrator\'s state block');
         `Words.\n<<<STATE\nKira | is: ${'x'.repeat(400)} | has: ${Array(9).fill('trinket').join(';')}\n>>>`, names);
     ok(long.sheets.Kira.character.length <= 110, 'a runaway description is clipped');
     ok(long.sheets.Kira.boons.length <= 3, 'a runaway inventory is clipped');
+}
+
+head('A reasoning model\'s thinking never reaches the table');
+{
+    // The narrator is a reasoning model now. Its thinking arrives in a
+    // delta field we never read, but some models also wrap it inline —
+    // and a player must never see the machinery deliberating.
+    ok(ai.visibleFrom('The rope bites.') === 0, 'ordinary prose shows immediately');
+    ok(ai.visibleFrom('') === -1, 'an empty stream shows nothing yet');
+    ok(ai.visibleFrom('<th') === -1, 'a half-written tag is held back until it is known');
+    ok(ai.visibleFrom('<think>weighing it up') === -1, 'thinking is withheld while it runs');
+
+    const done = '<think>weighing it up</think>The rope bites.';
+    ok(ai.visibleFrom(done) === done.indexOf('</think>') + '</think>'.length,
+        'and the prose starts the moment the thinking closes');
+    ok(done.slice(ai.visibleFrom(done)) === 'The rope bites.', 'leaving only the story');
+
+    // A tag that is not <think> must not stall the stream forever.
+    ok(ai.visibleFrom('<i>leaning</i> in') === 0, 'some other tag is shown, not swallowed');
 }
 
 head('Tags can be changed and removed, not only added');

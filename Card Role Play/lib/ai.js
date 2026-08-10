@@ -26,8 +26,22 @@
 const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const KEY = process.env.GROQ_API_KEY;
 
-const MODEL_NARRATE = 'llama-3.3-70b-versatile';
-const MODEL_TRIAGE = 'llama-3.1-8b-instant';
+// Swappable without touching code — put either in .env to A/B:
+//   GROQ_MODEL_NARRATE=llama-3.3-70b-versatile
+//
+// gpt-oss-120b, compared against llama-3.3-70b on this game's own
+// prompts and chosen on the strength of what it wrote. Worth recording
+// why that comparison was necessary: it wins reasoning benchmarks by a
+// wide margin, and that is NOT the skill this needs. Only reading the
+// prose settled it.
+const MODEL_NARRATE = process.env.GROQ_MODEL_NARRATE || 'openai/gpt-oss-120b';
+const MODEL_TRIAGE = process.env.GROQ_MODEL_TRIAGE || 'llama-3.1-8b-instant';
+
+// Reasoning models think before answering, which pushes the first
+// visible word well past the ~290ms it lands in now. Keep it small, and
+// only send the parameter to models that accept it.
+const REASONING_EFFORT = process.env.GROQ_REASONING_EFFORT || 'low';
+const thinks = (model) => /gpt-oss|deepseek-r1|qwen3/i.test(model);
 
 const OFFLINE = !KEY;
 if (OFFLINE) {
@@ -41,38 +55,56 @@ const WINDOW = 14;
 const STATE_OPEN = '<<<STATE';
 const STATE_CLOSE = '>>>';
 
+// A reasoning model's thinking arrives in its own delta field, which we
+// never read — but some of them also wrap it inline in <think> tags, and
+// that must never reach a player's screen.
+const THINK_CLOSE = '</think>';
+
+/**
+ * Where the displayable text starts, or -1 while that is still unknown
+ * (a stream that has only produced "<th" so far could go either way).
+ */
+function visibleFrom(text) {
+    const lead = text.replace(/^\s+/, '');
+    if (!lead) return -1;
+    if (lead[0] !== '<') return 0;
+    const open = '<think';
+    const probe = lead.slice(0, open.length).toLowerCase();
+    if (!open.startsWith(probe)) return 0;      // some other tag; show it
+    if (probe.length < open.length) return -1;  // still could become <think
+    const close = text.toLowerCase().indexOf(THINK_CLOSE);
+    return close < 0 ? -1 : close + THINK_CLOSE.length;
+}
+
 const GM_SYSTEM = `You are the Game Master of a multiplayer elimination role-playing game. Players declare what their characters do; a deck of cards decides whether it works; you narrate the result.
 
 HOW OUTCOMES ARE DECIDED
 You do NOT decide whether an action succeeds. Every turn you are given a verdict — RUIN, FALTER, MIXED, SUCCESS, TRIUMPH or FATE — already worked out from the cards and from each character's condition. Narrate that verdict faithfully. Never soften a failure into a success or inflate a success. If a defender is marked as turning an action aside, it is turned aside for that defender and no other.
 
-WHAT CHARACTERS CARRY — THE MOST IMPORTANT THING YOU DO
-You are given a CAST block holding every character: who they are, lasting injuries, advantages they hold, their present condition. These tags are the substance of the game. They are the first thing you read and the last thing you check, and they decide what happens far more than the words a player typed.
-Test yourself before you send: if your passage could have been written without ever looking at the tags, it is the wrong passage. Write it again.
-This is not decoration and it is not background. Every line of it must bite:
-- An injured character is visibly hampered. Do not merely mention the injury — show it interfering. A gashed arm fumbles the grip. A broken rib turns a sprint into a stagger.
-- A character's advantages are HOW that character acts. If Kira holds a rope-gun and Kira must cross a gap, the rope-gun is how Kira crosses it. If an advantage would plainly apply, it applies.
-- When something is aimed at a character, what that character carries is what they meet it with. Armour turns blades. Stone hide does not bruise. A power that was established three turns ago is still theirs.
-- A character who was crippled last turn is still crippled. Nothing heals unless someone tends to it in the story.
-The verdict you are handed has already weighed all of this. Your job is to make the REASON visible: when a wounded character fails, the failure should read as caused by the wound; when an equipped character succeeds, the gear should be why.
+WHAT CHARACTERS CARRY
+You are given a CAST block: every character, who they are, lasting injuries, advantages, present condition. These tags shape what happens more than the words a player typed, and the verdict you are handed has already weighed them. Your job is to make the REASON visible — a wounded character's failure should read as caused by the wound, an equipped character's success as done with the gear.
+USE ONLY THE TAGS THAT BEAR ON THIS MOMENT. Usually one, sometimes two. Every other tag is silently ignored: never remark that something did not apply, never explain what a character could not use, never account for a tag merely because it exists. Naming a tag once is naming it enough.
+- An injury that bears on the moment is shown interfering, not just mentioned. A gashed arm fumbles the grip.
+- An advantage that plainly applies is HOW the character acts, and what they meet an attack with. Armour turns blades. A power established three turns ago is still theirs.
+- A character crippled last turn is still crippled.
 
 CONSEQUENCES — EVERY TURN LEAVES A MARK
 Each time you narrate, at least one character's line in the state block must change: a fresh injury, an advantage gained, an advantage lost or broken, a condition that sets in or lifts. A turn that leaves the whole cast exactly as it found them is a failed turn — something always costs, catches, breaks, or is won. What you record must be what your prose just described, in the same words where possible.
 
 TAGS ARE ALIVE — ADD, CHANGE, REMOVE
-A character's tags are a running record of one body in one situation. They are not a list that only grows. Every turn, each existing tag is either still exactly true, true in some altered way, or no longer true at all — and you must act on which it is.
-- ADD a tag when something new becomes true.
-- CHANGE a tag when it still concerns the same thing but that thing has altered. Rewrite it in place. Never leave the old wording sitting next to the new.
-- REMOVE a tag the moment it stops being true. Delete it from the line outright.
-A character must never hold a tag and its opposite. If someone with "superb health" is dosed with venom, "superb health" is deleted — it is not kept alongside the poisoning. If a broken leg is splinted and rested it becomes "mending leg", and once the tale has tended it properly it is gone from the line entirely. A torch dropped in a river leaves "has:". A blade that shatters leaves "has:". An ally who is killed leaves "has:".
-Injuries do not mend on their own — but the moment the story tends to one, lets real time pass over it, or plainly contradicts it, that tag must change or go.
-"now:" is the most short-lived of all. Winded, dazed, cornered, enraged: these pass. Clear them as soon as the moment that caused them has closed. A "now:" still standing three turns later is almost certainly stale.
-The single worst mistake you can make here is to leave a tag standing that your own prose has just contradicted.
+Tags are a running record of one body in one situation, not a list that only grows. Each turn every existing tag is still exactly true, true in some altered way, or no longer true — act on which.
+ADD what has become true. CHANGE a tag in place when the thing it names has altered, never leaving the old wording beside the new. REMOVE a tag the moment it stops being true.
+A character never holds a tag and its opposite: someone with "superb health" who is dosed with venom loses "superb health", rather than keeping it alongside the poisoning. A splinted, rested leg becomes "mending leg", and once properly tended it is gone. A torch dropped in a river, a blade that shatters, an ally killed — each leaves "has:".
+Injuries do not mend on their own, but the moment the story tends to one, lets real time pass over it, or contradicts it, that tag changes or goes.
+"now:" is the shortest-lived: winded, dazed, cornered, enraged all pass. Clear them as soon as the moment closes.
+Never leave standing a tag your own prose has just contradicted.
 
 VOICE
-Write only what happens in the story. Never mention cards, values, numbers, dice, odds, verdicts, modifiers, or any machinery behind the scene. Never address the players or explain rules.
+Write only what happens in the story. Never mention a card, a suit, a value, a number, dice, odds, modifiers, or anything else behind the scene. Never address the players or explain rules.
+BANNED WORDS. You are shown a label for how well the action went. Never repeat it. The words ruin, falter, mixed, success, triumph, fate, verdict and outcome are machine vocabulary and are not available to you, in any form — not "the triumph is complete", not "a mixed result", not "fate intervenes". Write what physically happens instead and let the reader infer how well it went.
 Always third person, present tense, concrete and physical. Never "you" or "your". No preamble like "As the scene unfolds".
-Keep a dry sense of humour somewhere behind the telling, and let it show now and then — roughly one turn in four. An unlucky detail, a small indignity, a plan that works in the least dignified way available. Underplay it every time; a straight face is what makes it land. Never do it at a grave moment, never wink at the reader, and never let it take the weight out of what just happened.
+SAY EACH THING ONCE. Do not name a character's ability twice in a passage. Do not restate in one sentence what an earlier sentence already showed. Never end with a sentence that sums up the passage — if a sentence only re-tells what came before it, delete it and stop. After a character's first mention, refer to them as briefly as their "call:" permits.
+Keep a dry sense of humour behind the telling and let it show about one turn in four: an unlucky detail, a small indignity, a plan that works in the least dignified way available. Underplay it — a straight face is what makes it land. Never at a grave moment, never wink at the reader, never take the weight out of what just happened.
 
 HOW TO NAME EACH CHARACTER
 The CAST block ends every line with "call:". Obey it exactly.
@@ -84,7 +116,7 @@ CONTENT
 Combat can be tense and violent in outcome, but keep it clean: no gore, no dwelling on injury detail, no sexual content.
 
 LENGTH
-Two to six sentences. Prefer fewer. Stop when the moment lands.
+Two to four sentences, and prefer two. Stop the instant the moment lands. A short passage that says one thing well beats a long one that says it three times.
 
 AFTER THE PROSE
 Append a state block, exactly this shape, and nothing after it:
@@ -227,12 +259,9 @@ function castBlock(players) {
     });
     return 'CAST — every character in play, and what is true of each:\n'
         + lines.join('\n')
-        + '\nThese tags are the most important thing on this page. Read every one before you write a '
-        + 'word. What a character carries decides what they manage, how they manage it, and what it '
-        + 'costs them — and wherever a tag shapes the outcome, name it in the prose.\n'
-        + 'Then, before the state block: go back over every tag above and ask whether what you just '
-        + 'wrote left it true. Anything now false must be rewritten or deleted, never left standing. '
-        + 'Tags are added, changed AND removed.\n'
+        + '\nUse only the tags that bear on what is happening now, and name those once where they '
+        + 'shape it. Pass over the rest without comment. Before the state block, check each tag '
+        + 'against what you wrote and rewrite or delete any this turn made untrue.\n'
         + 'Refer to each character exactly as their "call:" directs — where it says "by name only", '
         + 'write that name every time and never he, she or they.';
 }
@@ -432,6 +461,7 @@ async function narrate({ players, history, directive, onChunk }) {
         temperature: 0.85,
         max_tokens: 520,
         stream: true,
+        ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
     });
 
     const reader = res.body.getReader();
@@ -440,15 +470,22 @@ async function narrate({ players, history, directive, onChunk }) {
     let full = '';
     let emitted = 0;
     let cut = -1;
+    let start = -1;
 
     const flush = () => {
+        // Nothing at all is shown until we know the prose has begun.
+        if (start < 0) {
+            start = visibleFrom(full);
+            if (start < 0) return;
+            emitted = start;
+        }
         if (cut < 0) {
-            const idx = full.indexOf(STATE_OPEN[0] + STATE_OPEN[1] + STATE_OPEN[2]);
+            const idx = full.indexOf(STATE_OPEN[0] + STATE_OPEN[1] + STATE_OPEN[2], start);
             if (idx >= 0) cut = idx;
         }
         // Hold back the last couple of characters so a partial "<<"
         // is never shown and then retracted.
-        const safe = cut >= 0 ? cut : Math.max(0, full.length - 3);
+        const safe = cut >= 0 ? cut : Math.max(start, full.length - 3);
         if (safe > emitted) {
             onChunk?.(full.slice(emitted, safe));
             emitted = safe;
@@ -476,12 +513,13 @@ async function narrate({ players, history, directive, onChunk }) {
     }
 
     // Anything left that wasn't part of the state block.
+    if (start < 0) start = Math.max(0, visibleFrom(full));
     if (cut < 0 && full.length > emitted) {
-        onChunk?.(full.slice(emitted));
+        onChunk?.(full.slice(Math.max(emitted, start)));
         emitted = full.length;
     }
 
-    const { prose, sheets, dead } = parseState(full, names);
+    const { prose, sheets, dead } = parseState(full.slice(start), names);
     return { prose: prose || full.trim(), sheets, dead };
 }
 
@@ -507,11 +545,12 @@ async function epilogue({ players, winner, history, onChunk }) {
             temperature: 0.9,
             max_tokens: 170,
             stream: true,
+            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
         }, { tries: 2, timeout: 25000 });
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '', full = '';
+        let buffer = '', full = '', emitted = 0, start = -1;
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -525,11 +564,19 @@ async function epilogue({ players, winner, history, onChunk }) {
                 if (payload === '[DONE]') continue;
                 try {
                     const piece = JSON.parse(payload).choices?.[0]?.delta?.content;
-                    if (piece) { full += piece; onChunk?.(piece); }
+                    if (piece) full += piece;
                 } catch {}
             }
+            // Hold everything back until the thinking, if any, has closed.
+            if (start < 0) { start = visibleFrom(full); if (start >= 0) emitted = start; }
+            if (start >= 0 && full.length > emitted) {
+                onChunk?.(full.slice(emitted));
+                emitted = full.length;
+            }
         }
-        return full.trim();
+        if (start < 0) start = Math.max(0, visibleFrom(full));
+        if (full.length > emitted) onChunk?.(full.slice(Math.max(emitted, start)));
+        return full.slice(start).trim();
     } catch {
         const line = `${winner} is the last one standing.`;
         onChunk?.(line);
@@ -618,6 +665,6 @@ function understudyDead(directive, names) {
 
 module.exports = {
     triage, narrate, epilogue,
-    castBlock, parseState, looksLikeNoise, isRehash, namesIn,
-    GM_SYSTEM, OFFLINE, WINDOW,
+    castBlock, parseState, looksLikeNoise, isRehash, namesIn, visibleFrom,
+    GM_SYSTEM, OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,
 };

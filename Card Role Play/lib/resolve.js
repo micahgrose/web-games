@@ -134,11 +134,10 @@ function modNote(r) {
 // Repeated at the foot of every directive. The rule is in the system
 // prompt too, but a model follows the last thing it read far more
 // reliably than the first.
-const MARK = 'Before the state block, decide what this turn cost, caught, broke, mended or won, '
-    + 'and record it on the sheet of whoever it happened to. Something always changes. '
-    + 'Then reread the tags those characters already had, one by one: any tag this turn has made '
-    + 'untrue must be rewritten or deleted outright, not left sitting beside what contradicts it. '
-    + 'Add, change, remove — all three are part of the job.';
+const MARK = 'Before the state block, decide what this turn cost, caught, broke, mended or won and '
+    + 'record it on whoever it happened to; something always changes. Then reread their existing '
+    + 'tags and rewrite or delete any this turn made untrue. '
+    + 'Name no card, no number, and none of the words ruin, falter, mixed, success, triumph or fate.';
 
 /** Spell out what a character is carrying, by name. The narrator has
  *  to be able to SEE the reason a card came out the way it did. */
@@ -146,14 +145,13 @@ function conditionLines(name, r) {
     const out = [];
     if (r.wounds?.length) {
         out.push(`${name} is carrying: ${r.wounds.join(', ')}. `
-            + `This is WHY the outcome fell the way it did. It drags down everything ${name} `
-            + `attempts and must be named in the telling. If this turn tends to any of it, `
-            + `soften that tag or strike it out.`);
+            + `Whichever of these bears on this moment is why it went as it did — show that one `
+            + `interfering, once. Say nothing of the others. If this turn tends to any, soften or strike it.`);
     }
     if (r.boons?.length) {
         out.push(`${name} has: ${r.boons.join(', ')}. `
-            + `This is what ${name} brings to bear and it should do the work here, by name. `
-            + `If any of it is spent, broken or lost this turn, strike it out.`);
+            + `Whichever applies here is how ${name} acts — name it once and never again in the same `
+            + `passage. Pass over the rest in silence. If any is spent, broken or lost, strike it.`);
     }
     if (r.status?.length) {
         out.push(`${name} is currently ${r.status.join(', ')} — a passing state. `
@@ -170,10 +168,7 @@ function soloDirective(name, text, r) {
         `CARD: ${cardName(r.card)}${modNote(r)}`,
         `OUTCOME: ${r.label} — ${r.directive}`,
         '',
-        `Narrate exactly this outcome for ${name} in 2-4 sentences.`,
-        (r.wounds?.length || r.boons?.length)
-            ? `What ${name} is carrying must be visible in how this plays out — name it, do not just imply it.`
-            : '',
+        `Narrate exactly this for ${name} in 2-3 sentences. No sentence may restate another.`,
         MARK,
     ].filter(Boolean).join('\n');
 }
@@ -218,8 +213,8 @@ function counterDirective(attackerName, attackerText, res) {
         res.allHeld
             ? `Every answer held. ${attackerName}'s move fails completely, and ${attackerName} bears the cost of it.`
             : `Resolve each name exactly as marked above — one may be struck while another walks away.`,
-        `Narrate the whole exchange as one passage, 3-6 sentences. What each character is `
-            + `carrying is what they meet this with — make that visible, by name.`,
+        `Narrate the whole exchange as one passage, 3-4 sentences — one clean pass through it, `
+            + `no sentence restating another and no closing summary.`,
         MARK,
     );
     return lines.join('\n');
