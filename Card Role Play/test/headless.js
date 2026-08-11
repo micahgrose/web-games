@@ -366,9 +366,25 @@ head('The world is compacted, carried, and grows');
     ok(!W.isReady(W.blankWorld()), 'a room with no setting has no world');
     ok(W.worldBlock(W.blankWorld()) === null, 'and the narrator is told nothing about one');
 
+    // The interview must settle the two things that decide most
+    // resolutions: what the players are after, and how far the world bends.
+    ok(/WHAT THE PLAYERS ARE HERE TO DO/.test(W.INTERVIEW_SYSTEM),
+        'the interview asks what the players are here to do');
+    ok(/HOW FAR THIS WORLD BENDS/.test(W.INTERVIEW_SYSTEM),
+        'and how far the world bends');
+    ok(/throw fire, fly, walk through walls/.test(W.INTERVIEW_SYSTEM),
+        'naming the powers it has to pin down');
+    ok(/hours and roads, or a step through the right door/.test(W.INTERVIEW_SYSTEM),
+        'and how travel works');
+    for (const f of ['goal:', 'power:']) {
+        ok(W.COMPACT_SYSTEM.includes(f), `and the brief has somewhere to keep "${f}"`);
+    }
+
     const w = W.parseWorld(`chatter before
 <<<WORLD
 where: A drowned cathedral city in the year of the long tide.
+goal: Reach the bells and ring them before the tide takes the last dry floor.
+power: Ordinary bodies, but the drowned answer anyone who speaks their name; no flight.
 tone: sunken, votive, patient
 places: the bell tower; the flooded nave; the almoner's stair; the tide gate
 holds: the bells command the water; the drowned still speak
@@ -376,11 +392,18 @@ absent: engines; gunpowder; daylight
 >>>
 trailing junk`);
     ok(/drowned cathedral/.test(w.where), 'the setting survives compaction');
+    ok(/Reach the bells/.test(w.goal), 'so does what they are here for');
+    ok(/no flight/.test(w.power), 'and the ceiling on the possible');
     eq(w.places.length, 4, 'its places are listed');
     eq(w.absent.length, 3, 'and what it does not contain');
     ok(W.isReady(w), 'that is enough to play in');
 
     const block = W.worldBlock(w);
+    ok(/WHAT THEY ARE HERE FOR: Reach the bells/.test(block), 'the narrator is given the goal');
+    ok(/HOW FAR THIS WORLD BENDS/.test(block), 'and the ceiling on the possible');
+    ok(/still closes with\s*\n?\s*one of them left standing|still closes with one of them left standing/
+        .test(block.replace(/\s+/g, ' ')),
+        'and told the goal is a reason to move, not the ending');
     ok(/DOES NOT EXIST HERE: engines/.test(block), 'the narrator is told what is absent');
     ok(/PLACES THAT EXIST/.test(block), 'and where there is to go');
     ok(/how the action would really go IN THIS PLACE/i.test(block),
@@ -390,6 +413,7 @@ trailing junk`);
 
     // Triage refuses what the world cannot contain.
     const bounds = W.worldConstraint(w);
+    ok(/HOW FAR IT BENDS/.test(bounds), 'triage measures outrageous actions against the ceiling');
     ok(/DOES NOT EXIST HERE: engines/.test(bounds), 'triage is told the same absences');
     ok(!/really go IN THIS PLACE/i.test(bounds), 'but not the narration guidance it cannot use');
 

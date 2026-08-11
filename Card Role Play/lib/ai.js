@@ -439,10 +439,12 @@ The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard
             messages.push({ role: 'system', content:
                 `${bounds}\n\nAlso set ok=false when the action needs something this world does not `
                 + `contain — a car where there are no engines, a phone call where there is no `
-                + `electricity. Give reason as one line of plain fiction naming what is not there, `
-                + `never a rule ("There is no telephone in this century."). Be strict only about `
-                + `what is genuinely absent: unusual, difficult, reckless and far-fetched all pass, `
-                + `and going somewhere unlisted is fine — the story can grow a new room.` });
+                + `electricity — or a power beyond what this world bends to, like flying or `
+                + `crossing a continent in a breath where people simply cannot. Give reason as one `
+                + `line of plain fiction naming what is not there, never a rule ("There is no `
+                + `telephone in this century."). Be strict only about what is genuinely out of `
+                + `reach: unusual, difficult, reckless and far-fetched all pass, and going `
+                + `somewhere unlisted is fine — the story can grow a new room.` });
         }
     }
 

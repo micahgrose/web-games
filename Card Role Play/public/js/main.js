@@ -343,8 +343,10 @@ function toLanding(message) {
 // else sees the finished brief so they know what world they are in.
 
 const SCENE_LABELS = {
-    tone: 'Tone', places: 'Places', holds: 'True here', absent: 'Not here',
+    goal: 'Here for', power: 'Bends to', tone: 'Tone',
+    places: 'Places', holds: 'True here', absent: 'Not here',
 };
+const SCENE_ORDER = ['goal', 'power', 'tone', 'places', 'holds', 'absent'];
 
 function paintScene(w) {
     if (!w) return;
@@ -398,7 +400,7 @@ function paintScene(w) {
     if (showBrief) {
         el.briefWhere.textContent = w.brief.where || '';
         el.briefRows.innerHTML = '';
-        for (const key of ['tone', 'places', 'holds', 'absent']) {
+        for (const key of SCENE_ORDER) {
             const val = w.brief[key];
             const text = Array.isArray(val) ? val.join(' · ') : val;
             if (!text) continue;

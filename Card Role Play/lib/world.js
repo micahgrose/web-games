@@ -28,7 +28,9 @@ function list(raw, maxItems, maxLen = 44) {
         .slice(0, maxItems);
 }
 
-const blankWorld = () => ({ where: '', tone: '', places: [], holds: [], absent: [] });
+const blankWorld = () => ({
+    where: '', goal: '', power: '', tone: '', places: [], holds: [], absent: [],
+});
 
 /** A world is usable once it knows where everyone is. */
 const isReady = (w) => !!(w && w.where);
@@ -38,9 +40,14 @@ const isReady = (w) => !!(w && w.where);
 const INTERVIEW_SYSTEM =
 `You are the Game Master of a card-driven role-playing game, reading the setting the host has just written for it.
 
-Ask at most three short questions — fewer is better, and none at all is a fine answer when the setting is already clear enough to play in.
+Ask at most three short questions. Two of them are nearly always these, and you should ask them unless the host has already made the answer plain:
 
-Only ask what would change how an ACTION RESOLVES. Useful: what is impossible here, what technology or magic exists, how large the place is, who else is around, what the players are there to do. Useless: backstory, names of things nobody will touch, anything you could invent yourself without contradicting what you were told, anything answerable "whatever you like".
+1. WHAT THE PLAYERS ARE HERE TO DO. What do their characters want out of this place, and what would count as getting somewhere?
+2. HOW FAR THIS WORLD BENDS. What can a character actually be and do here — ordinary people, or throw fire, fly, walk through walls, come back from the dead? And how does travel work: hours and roads, or a step through the right door?
+
+Those two decide more about how an action resolves than anything else you could ask, because between them they settle what players will reach for and what they will be told is not there.
+
+The third, if you ask one, is whatever else would genuinely change a resolution: what is flatly impossible, how big the place is, who else is around, what the danger actually is. Never ask about backstory, the names of things nobody will touch, anything you could invent yourself without contradicting what you were told, or anything answerable "whatever you like".
 
 Reply with JSON only: {"questions":["...","..."]}. Each question one plain sentence, under twenty words, answerable in a few words. Empty array if you have enough.`;
 
@@ -51,13 +58,15 @@ Reply with exactly this block and nothing else:
 
 ${OPEN}
 where: one sentence — the place, the era, and what kind of story this is
+goal: one sentence — what the characters want here, and what getting somewhere looks like
+power: one sentence — how far this world bends, and how travel works
 tone: three or four words
 places: four to eight specific locations, separated by semicolons
 holds: what is true or possible here that would not be elsewhere; semicolons
 absent: what plainly does not exist here; semicolons
 ${CLOSE}
 
-Rules. "places" are locations a character could stand in or walk to, named as a player would name them — a room, a street, a landmark, not a region. "holds" is what the world permits that a narrator might otherwise get wrong: magic that works, laws of the place, who holds power, dangers. "absent" is the one to be concrete about, because it is what lets an impossible action be refused: name the things players will reach for and not find — firearms, engines, telephones, electricity, magic, help. Keep every field under twenty-five words. Invent what the host left out, as long as it does not contradict what they said.`;
+Rules. "goal" is what gives every character a reason to act; write it so it is still true whoever is playing. "power" is the ceiling on the possible — say plainly whether these are ordinary people or can throw fire, fly, pass through walls, cross the world in a step; it is what an outrageous action gets measured against. "places" are locations a character could stand in or walk to, named as a player would name them — a room, a street, a landmark, not a region. "holds" is what the world permits that a narrator might otherwise get wrong: magic that works, laws of the place, who holds power, dangers. "absent" is the one to be concrete about, because it is what lets an impossible action be refused: name the things players will reach for and not find — firearms, engines, telephones, electricity, magic, help. Keep every field under twenty-five words. Invent what the host left out, as long as it does not contradict what they said.`;
 
 /** Pull the compacted brief out of a model reply. */
 function parseWorld(text) {
@@ -72,6 +81,8 @@ function parseWorld(text) {
         if (!m) continue;
         const key = m[1].toLowerCase();
         if (key === 'where') w.where = clip(m[2], 220);
+        else if (key === 'goal') w.goal = clip(m[2], 200);
+        else if (key === 'power') w.power = clip(m[2], 200);
         else if (key === 'tone') w.tone = clip(m[2], 60);
         else if (key === 'places') w.places = list(m[2], 8);
         else if (key === 'holds') w.holds = list(m[2], 5);
@@ -102,6 +113,8 @@ function worldBlock(world) {
     if (!isReady(world)) return null;
     const lines = [`THE WORLD — everything happens here, and nothing happens that this world forbids.`,
         `WHERE: ${world.where}`];
+    if (world.goal) lines.push(`WHAT THEY ARE HERE FOR: ${world.goal}`);
+    if (world.power) lines.push(`HOW FAR THIS WORLD BENDS: ${world.power}`);
     if (world.tone) lines.push(`TONE: ${world.tone}`);
     if (world.places.length) lines.push(`PLACES THAT EXIST: ${world.places.join('; ')}`);
     if (world.holds.length) lines.push(`WHAT HOLDS TRUE HERE: ${world.holds.join('; ')}`);
@@ -109,6 +122,9 @@ function worldBlock(world) {
 
     lines.push(
         '',
+        'What they are here for is why anyone acts: let it pull at them, give them something to '
+        + 'want in the room they are standing in. It is not the ending — the tale still closes with '
+        + 'one of them left standing — it is the reason they are moving at all.',
         'Work out how the action would really go IN THIS PLACE before you write it. The same '
         + 'sentence resolves differently in a flooded tunnel and on an open roof, and the world '
         + 'decides which — reach for what is actually to hand here.',
@@ -126,6 +142,9 @@ function worldBlock(world) {
 function worldConstraint(world) {
     if (!isReady(world)) return '';
     const bits = [`THE WORLD: ${world.where}`];
+    // The ceiling on the possible is the whole point of showing triage
+    // the world: it is what "I fly to the moon" gets measured against.
+    if (world.power) bits.push(`HOW FAR IT BENDS: ${world.power}`);
     if (world.absent.length) bits.push(`DOES NOT EXIST HERE: ${world.absent.join('; ')}`);
     if (world.holds.length) bits.push(`TRUE HERE: ${world.holds.join('; ')}`);
     if (world.places.length) bits.push(`KNOWN PLACES: ${world.places.join('; ')}`);
