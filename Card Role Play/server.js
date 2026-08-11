@@ -10,6 +10,7 @@ const { Server } = require('socket.io');
 
 const { Deck, cardValue } = require('./lib/deck');
 const R = require('./lib/resolve');
+const W = require('./lib/world');
 const ai = require('./lib/ai');
 
 const app = express();
@@ -86,11 +87,20 @@ function publicPlayers(room) {
         color: p.color,
         eliminated: p.eliminated,
         character: p.sheet.character || '',
+        where: p.sheet.where || '',
         wounds: p.sheet.wounds || [],
         boons: p.sheet.boons || [],
         status: p.sheet.status || [],
     }));
 }
+
+/** What every seat at the table is told about the setting. */
+const worldState = (room) => ({
+    stage: room.world.stage,
+    raw: room.world.raw,
+    questions: room.world.qa.filter(x => !x.a).map(x => x.q),
+    brief: W.isReady(room.world.brief) ? room.world.brief : null,
+});
 
 function lobbyList() {
     const out = [];
@@ -124,6 +134,7 @@ function sendSheets(room) {
     for (const p of room.players) {
         sheets[p.id] = {
             character: p.sheet.character || '',
+            where: p.sheet.where || '',
             wounds: p.sheet.wounds || [],
             boons: p.sheet.boons || [],
             status: p.sheet.status || [],
@@ -192,10 +203,20 @@ async function tell(room, directive, { historyLabel } = {}) {
             players: room.players.map(p => ({ ...p, sheet: p.sheet })),
             history: room.history,
             directive,
+            setting: room.world.brief,
             onChunk: (chunk) => io.to(room.id).emit('gm', { chunk }),
         });
     } finally {
         io.to(room.id).emit('gmEnd', {});
+    }
+
+    // Somewhere the story just put on the map is as real as the rest.
+    if (result.places?.length && W.isReady(room.world.brief)) {
+        const before = room.world.brief.places.length;
+        W.addPlaces(room.world.brief, result.places);
+        if (room.world.brief.places.length !== before) {
+            io.to(room.id).emit('world', { stage: 'ready', brief: room.world.brief, questions: [] });
+        }
     }
 
     // Rolling window of prose, so the narrator keeps its voice
@@ -214,6 +235,7 @@ function applySheets(room, sheets) {
         const s = sheets[p.name];
         if (!s) continue;
         if (s.character) p.sheet.character = s.character;
+        if (s.where) p.sheet.where = s.where;
         if (s.wounds) p.sheet.wounds = s.wounds;
         if (s.boons) p.sheet.boons = s.boons;
         if (s.status) p.sheet.status = s.status;
@@ -365,6 +387,7 @@ async function handleAction(room, player, text) {
         previous: player.previous,
         setup: false,
         recent: lastNarration(room),
+        setting: room.world.brief,
     });
 
     io.to(room.id).emit('said', { name: player.name, color: player.color, text });
@@ -746,7 +769,7 @@ io.on('connection', (socket) => {
             players: [{
                 id: socket.id, name: playerName, color: SEAT_COLOURS[0], eliminated: false,
                 calls,
-                sheet: { character: '', wounds: [], boons: [], status: [], calls }, previous: [],
+                sheet: { character: '', where: '', wounds: [], boons: [], status: [], calls }, previous: [],
             }],
             spectators: [],
             deck: new Deck(),
@@ -757,6 +780,10 @@ io.on('connection', (socket) => {
             setupTurn: false,
             setupDone: new Set(),
             pending: null,
+            // The setting, built with the host while people are arriving.
+            // stage: blank → asking → ready. Optional throughout; a room
+            // that never sets one plays exactly as it always did.
+            world: { raw: '', qa: [], brief: W.blankWorld(), stage: 'blank', busy: false },
             history: [],
             clock: null,
             deadline: 0,
@@ -772,6 +799,7 @@ io.on('connection', (socket) => {
             roomId: id, playerId: socket.id, players: publicPlayers(room),
             hostId: room.hostId, isPublic: room.isPublic, maxPlayers: room.maxPlayers,
             started: false, spectator: false,
+            world: worldState(room)
         });
         pushLobby();
     });
@@ -803,6 +831,7 @@ io.on('connection', (socket) => {
                 deckCount: room.deck.count, drawnCard: null,
                 currentId: room.currentId, deadlineIn: clockLeft(room),
                 spectatorCount: room.spectators.length,
+            world: worldState(room)
             });
             sendPlayers(room);
             sendSheets(room);
@@ -819,7 +848,7 @@ io.on('connection', (socket) => {
             color: SEAT_COLOURS[room.players.length % SEAT_COLOURS.length],
             eliminated: false,
             calls,
-            sheet: { character: '', wounds: [], boons: [], status: [], calls },
+            sheet: { character: '', where: '', wounds: [], boons: [], status: [], calls },
             previous: [],
         });
         socket.join(room.id);
@@ -829,16 +858,92 @@ io.on('connection', (socket) => {
             roomId: room.id, playerId: socket.id, players: publicPlayers(room),
             hostId: room.hostId, isPublic: room.isPublic, maxPlayers: room.maxPlayers,
             started: false, spectator: false,
+            world: worldState(room)
         });
         sendPlayers(room);
         pushLobby();
     });
+
+    // ── Building the setting ───────────────────────────
+    // Everything here is the host's alone, only before the game starts,
+    // and every failure path leaves the room playable.
+
+    const canShapeWorld = (room) =>
+        room && room.hostId === socket.id && !room.started && !room.world.busy;
+
+    socket.on('world:draft', async ({ text } = {}) => {
+        const room = myRoom();
+        if (!canShapeWorld(room)) return;
+        const raw = String(text || '').trim().slice(0, 2000);
+        if (raw.length < 12) {
+            return socket.emit('world:error', { message: 'Give it a sentence or two to work with.' });
+        }
+
+        room.world.raw = raw;
+        room.world.qa = [];
+        room.world.busy = true;
+        io.to(room.id).emit('world', { ...worldState(room), stage: 'thinking' });
+
+        let questions = [];
+        try {
+            questions = await ai.interviewWorld({ raw, qa: [] });
+        } catch (err) {
+            console.warn('[world] interview failed:', err.message);
+        }
+        if (!rooms.has(room.id) || room.started) return;
+
+        if (questions.length) {
+            room.world.qa = questions.map(q => ({ q, a: '' }));
+            room.world.stage = 'asking';
+            room.world.busy = false;
+            io.to(room.id).emit('world', worldState(room));
+            return;
+        }
+        // Nothing worth asking: go straight to the reference card.
+        await settleWorld(room);
+    });
+
+    socket.on('world:answers', async ({ answers } = {}) => {
+        const room = myRoom();
+        if (!canShapeWorld(room) || room.world.stage !== 'asking') return;
+        const given = Array.isArray(answers) ? answers : [];
+        room.world.qa = room.world.qa.map((x, i) => ({
+            q: x.q, a: String(given[i] || '').trim().slice(0, 400) || 'whatever suits the story',
+        }));
+        await settleWorld(room);
+    });
+
+    socket.on('world:clear', () => {
+        const room = myRoom();
+        if (!canShapeWorld(room)) return;
+        room.world = { raw: '', qa: [], brief: W.blankWorld(), stage: 'blank', busy: false };
+        io.to(room.id).emit('world', worldState(room));
+    });
+
+    /** Compact whatever we have into the brief the narrator will read. */
+    async function settleWorld(room) {
+        room.world.busy = true;
+        io.to(room.id).emit('world', { ...worldState(room), stage: 'thinking' });
+        try {
+            room.world.brief = await ai.compactWorld({ raw: room.world.raw, qa: room.world.qa });
+        } catch (err) {
+            console.warn('[world] compaction failed:', err.message);
+            room.world.brief = W.blankWorld();
+            room.world.brief.where = room.world.raw.slice(0, 220);
+        }
+        room.world.stage = W.isReady(room.world.brief) ? 'ready' : 'blank';
+        room.world.busy = false;
+        if (rooms.has(room.id)) io.to(room.id).emit('world', worldState(room));
+    }
 
     socket.on('game:start', () => {
         const room = myRoom();
         if (!room || room.hostId !== socket.id || room.started) return;
         if (room.players.length < 2) {
             return socket.emit('joinError', { message: 'Two players at least.' });
+        }
+        if (room.world.busy) {
+            return socket.emit('joinError', { message: 'The setting is still being read.' });
         }
         room.started = true;
         room.currentId = room.players[0].id;
@@ -847,6 +952,7 @@ io.on('connection', (socket) => {
             players: publicPlayers(room),
             currentId: room.currentId,
             deckCount: room.deck.count,
+            world: worldState(room)
         });
         beginTurn(room, { setup: true });
         pushLobby();

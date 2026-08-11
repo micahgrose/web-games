@@ -72,12 +72,43 @@ const R = require('../lib/resolve');
 head('Outcome bands');
 {
     const band = (v) => R.bandFor(v).key;
-    eq([2, 3, 4].map(band), ['ruin', 'ruin', 'ruin'], '2-4 is ruin');
-    eq([5, 6, 7].map(band), ['falter', 'falter', 'falter'], '5-7 falters');
-    eq([8, 9, 10].map(band), ['mixed', 'mixed', 'mixed'], '8-10 is mixed');
-    eq([11, 12].map(band), ['success', 'success'], '11-12 succeeds');
+    eq([2, 3].map(band), ['ruin', 'ruin'], '2-3 is ruin');
+    eq([4, 5, 6].map(band), ['falter', 'falter', 'falter'], '4-6 falters');
+    eq([7, 8, 9].map(band), ['mixed', 'mixed', 'mixed'], '7-9 is mixed');
+    eq([10, 11, 12].map(band), ['success', 'success', 'success'], '10-12 succeeds');
     eq([13, 14].map(band), ['triumph', 'triumph'], '13-14 is triumph');
     eq(band(15), 'fate', 'a joker is its own band');
+
+    // The ladder deliberately turns below centre: a coin-flip card used
+    // to fail more often than not, which made every hand feel like
+    // wading. Counted over a real deck rather than asserted by eye.
+    const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    const deck = ranks.flatMap(rank => Array(4).fill(rank));
+    const share = (keys) => deck.filter(r =>
+        keys.includes(band(R.effective({ rank: r, suit: 'Spades' }, null).eff))).length / deck.length;
+    const halfOrBetter = share(['mixed', 'success', 'triumph']);
+    const clean = share(['success', 'triumph']);
+    ok(halfOrBetter > 0.58 && halfOrBetter < 0.66,
+        `something lands on ${(halfOrBetter * 100).toFixed(0)}% of the deck`);
+    ok(clean > 0.34 && clean < 0.42,
+        `it works cleanly on ${(clean * 100).toFixed(0)}%`);
+    ok(band(7) === 'mixed' && band(6) === 'falter', 'the turn is between 6 and 7');
+}
+
+head('The server and the client agree on the ladder');
+{
+    // Two copies of BANDS: the rules read one, the glow and the verdict
+    // plate read the other. Drift would show as a card glowing SUCCESS
+    // while the story tells you it failed.
+    const clientSrc = require('fs').readFileSync(
+        require('path').join(__dirname, '..', 'public', 'js', 'cards.js'), 'utf8');
+    const found = [...clientSrc.matchAll(/\{\s*max:\s*(\d+),\s*key:\s*'(\w+)'/g)]
+        .map(m => ({ max: Number(m[1]), key: m[2] }));
+    ok(found.length === R.BANDS.length, `both sides list ${R.BANDS.length} bands`);
+    for (let i = 0; i < R.BANDS.length; i++) {
+        ok(found[i] && found[i].key === R.BANDS[i].key && found[i].max === R.BANDS[i].max,
+            `${R.BANDS[i].key} tops out at ${R.BANDS[i].max} on both sides`);
+    }
 }
 
 head('Condition changes what a card is worth');
@@ -100,8 +131,19 @@ head('Condition changes what a card is worth');
 
     // What it takes to reach the same band, hale versus hurt.
     const bandAt = (v, sheet) => R.resolveSolo({ rank: String(v), suit: 'Hearts' }, sheet).band;
-    ok(bandAt(8, clean) === 'mixed' && bandAt(8, hurt) === 'ruin',
-        'the wounded fall two whole bands on the same card');
+    ok(bandAt(8, clean) === 'mixed' && bandAt(8, hurt) === 'falter',
+        'the same card drops the wounded a whole band');
+
+    // Stated as what it actually costs, rather than as a band count —
+    // band counts move whenever the ladder is retuned, and this does not.
+    const lowestFor = (want, sheet) => {
+        for (let v = 2; v <= 14; v++) if (bandAt(v, sheet) === want) return v;
+        return null;
+    };
+    eq(lowestFor('mixed', hurt) - lowestFor('mixed', clean), 4,
+        'two wounds cost four points of card to reach the same band');
+    eq(lowestFor('success', armed) - lowestFor('success', clean), -2,
+        'and an advantage buys two points back');
 
     const piled = { wounds: ['a', 'b', 'c', 'd', 'e'], boons: [] };
     eq(R.resolveSolo(king, piled).pen, R.MAX_WOUND_PENALTY, 'wound penalty is capped');
@@ -315,6 +357,80 @@ head('Reading the narrator\'s state block');
         `Words.\n<<<STATE\nKira | is: ${'x'.repeat(400)} | has: ${Array(9).fill('trinket').join(';')}\n>>>`, names);
     ok(long.sheets.Kira.character.length <= 110, 'a runaway description is clipped');
     ok(long.sheets.Kira.boons.length <= 3, 'a runaway inventory is clipped');
+}
+
+head('The world is compacted, carried, and grows');
+{
+    const W = require('../lib/world');
+
+    ok(!W.isReady(W.blankWorld()), 'a room with no setting has no world');
+    ok(W.worldBlock(W.blankWorld()) === null, 'and the narrator is told nothing about one');
+
+    const w = W.parseWorld(`chatter before
+<<<WORLD
+where: A drowned cathedral city in the year of the long tide.
+tone: sunken, votive, patient
+places: the bell tower; the flooded nave; the almoner's stair; the tide gate
+holds: the bells command the water; the drowned still speak
+absent: engines; gunpowder; daylight
+>>>
+trailing junk`);
+    ok(/drowned cathedral/.test(w.where), 'the setting survives compaction');
+    eq(w.places.length, 4, 'its places are listed');
+    eq(w.absent.length, 3, 'and what it does not contain');
+    ok(W.isReady(w), 'that is enough to play in');
+
+    const block = W.worldBlock(w);
+    ok(/DOES NOT EXIST HERE: engines/.test(block), 'the narrator is told what is absent');
+    ok(/PLACES THAT EXIST/.test(block), 'and where there is to go');
+    ok(/how the action would really go IN THIS PLACE/i.test(block),
+        'and to work the action through the place it happens in');
+    ok(/it is simply not there/.test(block), 'somewhere contradicting the world is not there');
+    ok(/show them the wall/.test(block), 'and the refusal is shown, not explained');
+
+    // Triage refuses what the world cannot contain.
+    const bounds = W.worldConstraint(w);
+    ok(/DOES NOT EXIST HERE: engines/.test(bounds), 'triage is told the same absences');
+    ok(!/really go IN THIS PLACE/i.test(bounds), 'but not the narration guidance it cannot use');
+
+    // A place the story invents becomes as real as the first ones.
+    W.addPlaces(w, ['the reliquary', 'the bell tower', 'THE BELL TOWER ']);
+    eq(w.places.length, 5, 'a new place is added, and duplicates are not');
+    ok(w.places.includes('the reliquary'), 'the story can put a room on the map');
+
+    // It is a reference card, so it cannot grow without limit.
+    W.addPlaces(w, Array.from({ length: 30 }, (_, i) => `room ${i}`));
+    ok(w.places.length <= 14, `the list stays short (${w.places.length})`);
+    ok(w.places[0] === 'the bell tower', 'the anchors of the setting are kept');
+    ok(w.places.at(-1) === 'room 29', 'and so is wherever the story just went');
+
+    // A malformed reply must not produce a half-world that claims to work.
+    ok(!W.isReady(W.parseWorld('I could not think of anything.')), 'garbage is not a world');
+}
+
+head('Characters stand somewhere, and it moves with them');
+{
+    const names = ['Kira'];
+    const p = ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a diver | at: the flooded nave | hurt: - | has: - | now: -\n'
+        + 'WORLD: the flooded nave; the tide gate\n>>>', names);
+    eq(p.sheets.Kira.where, 'the flooded nave', 'where a character stands is read off the block');
+    eq(p.places.length, 2, 'and any place the turn established');
+
+    const { applySheets } = require('../server');
+    const room = { players: [{ name: 'Kira', id: 'k', sheet: { character: 'a diver', where: 'the bell tower', wounds: [], boons: [], status: [], calls: '' } }] };
+    applySheets(room, p.sheets);
+    eq(room.players[0].sheet.where, 'the flooded nave', 'moving updates the sheet');
+
+    // "at:" left off carries forward, like every other field.
+    applySheets(room, ai.parseState('Prose.\n<<<STATE\nKira | is: a diver | now: -\n>>>', names).sheets);
+    eq(room.players[0].sheet.where, 'the flooded nave', 'and a turn that does not move them leaves it');
+
+    ok(/never a location and never a place name; that is what "at:" is for/.test(ai.GM_SYSTEM),
+        'locations are kept out of "now:" now that they have their own field');
+
+    const cast = ai.castBlock([{ name: 'Kira', sheet: { character: 'a diver', where: 'the tide gate' } }]);
+    ok(/at: the tide gate/.test(cast), 'and the narrator is reminded where everyone is');
 }
 
 head('Only characters who must DEFEND become targets');

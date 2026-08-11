@@ -89,6 +89,41 @@
                 <p id="roomShareMsg">Share this code</p>
             </div>
             <ul class="seat-list" id="waitingPlayerList"></ul>
+
+            <!-- The setting, built with the host while people arrive. -->
+            <div class="scene" id="scenePanel">
+                <div class="scene-head">
+                    <span class="scene-title">The Setting</span>
+                    <span class="scene-state" id="sceneState"></span>
+                </div>
+
+                <div id="sceneDraft">
+                    <textarea id="sceneInput" rows="3" maxlength="2000"
+                        placeholder="Where does this happen? A drowned cathedral city, ruled by whoever holds the bells…"></textarea>
+                    <div class="dock-row">
+                        <button class="btn" id="sceneSetBtn">Set the Scene</button>
+                        <button class="btn ghost" id="sceneSkipBtn">Play Anywhere</button>
+                    </div>
+                </div>
+
+                <div id="sceneAsk" class="hidden">
+                    <p class="scene-note">A few things worth settling first.</p>
+                    <div id="sceneQuestions"></div>
+                    <div class="dock-row">
+                        <button class="btn" id="sceneAnswerBtn">That's the World</button>
+                        <button class="btn ghost" id="sceneRedoBtn">Start Over</button>
+                    </div>
+                </div>
+
+                <div id="sceneBrief" class="hidden">
+                    <div class="brief-where" id="briefWhere"></div>
+                    <div class="brief-rows" id="briefRows"></div>
+                    <button class="btn ghost" id="sceneEditBtn">Change It</button>
+                </div>
+
+                <div class="error" id="sceneError"></div>
+            </div>
+
             <div class="status-line" id="waitingStatus"></div>
             <div class="status-line" id="waitingSpectatorNote"></div>
             <button class="btn" id="startGameBtn" disabled>Begin</button>

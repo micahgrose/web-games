@@ -8,12 +8,17 @@
 
 const { cardValue, cardName } = require('./deck');
 
+// The ladder sits one step below centre on purpose. Dead centre of 2-14
+// put the pivot between 7 and 8, which made a coin-flip card fail more
+// often than not and every hand feel like wading. It now turns between 6
+// and 7: "at least half works" goes from 54% of the deck to 62%, and a
+// clean success from 15% to 23%. RUIN is the band that gave up the room.
 const BANDS = [
-    { max: 4,  key: 'ruin',    label: 'RUIN',
+    { max: 3,  key: 'ruin',    label: 'RUIN',
       directive: 'It fails outright, and the failure costs the actor something.' },
-    { max: 7,  key: 'falter',  label: 'FALTER',
+    { max: 6,  key: 'falter',  label: 'FALTER',
       directive: 'It mostly fails. At most a sliver of the intent lands.' },
-    { max: 10, key: 'mixed',   label: 'MIXED',
+    { max: 9,  key: 'mixed',   label: 'MIXED',
       directive: 'It half-works. The actor gets part of what was wanted and pays for it.' },
     { max: 12, key: 'success', label: 'SUCCESS',
       directive: 'It works, cleanly and without much cost.' },
@@ -184,8 +189,9 @@ function setupDirective(name, text, r) {
         `CARD: ${cardName(r.card)} (${r.eff})`,
         `ARRIVAL: ${r.label} — ${r.directive}`,
         '',
-        `Introduce ${name} arriving, in two sentences. Do not invent a location the tale has `
-            + `not already established. Whatever this arrival grants or costs ${name}, write it `
+        `Introduce ${name} arriving, in two sentences. Stand ${name} in one of the places the `
+            + `world already has and record it as "at:" — do not invent a location the tale has `
+            + `not established. Whatever this arrival grants or costs ${name}, write it `
             + `into the state block as an advantage or an injury — it is real from now on.`,
     ].join('\n');
 }

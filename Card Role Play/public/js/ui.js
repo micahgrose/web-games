@@ -46,6 +46,22 @@ export const el = {
     waitSpectators: $('waitingSpectatorNote'),
     startBtn: $('startGameBtn'),
 
+    scene: $('scenePanel'),
+    sceneState: $('sceneState'),
+    sceneDraft: $('sceneDraft'),
+    sceneInput: $('sceneInput'),
+    sceneSetBtn: $('sceneSetBtn'),
+    sceneSkipBtn: $('sceneSkipBtn'),
+    sceneAsk: $('sceneAsk'),
+    sceneQuestions: $('sceneQuestions'),
+    sceneAnswerBtn: $('sceneAnswerBtn'),
+    sceneRedoBtn: $('sceneRedoBtn'),
+    sceneBrief: $('sceneBrief'),
+    briefWhere: $('briefWhere'),
+    briefRows: $('briefRows'),
+    sceneEditBtn: $('sceneEditBtn'),
+    sceneError: $('sceneError'),
+
     turnIndicator: $('turnIndicator'),
     candle: $('turnCandle'),
     candleStick: document.querySelector('#turnCandle .stick'),
@@ -210,6 +226,13 @@ export function renderDramatis(players, myId, currentId) {
             role.className = 'role';
             role.textContent = p.character;
             card.appendChild(role);
+        }
+
+        if (p.where) {
+            const at = document.createElement('span');
+            at.className = 'whereat';
+            at.textContent = p.where;
+            card.appendChild(at);
         }
 
         const marks = [

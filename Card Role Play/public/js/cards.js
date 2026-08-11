@@ -61,9 +61,12 @@ export function cardArt(card) {
 // The glow around a card IS the rules text. Players learn what a
 // number means by seeing the same colour every time it is dealt.
 export const BANDS = [
-    { max: 4,  key: 'ruin',    label: 'RUIN',    hint: 'it fails, and it costs something', ink: '#7d8ea3', glow: 'rgba(125,142,163,0.55)' },
-    { max: 7,  key: 'falter',  label: 'FALTER',  hint: 'mostly fails; a sliver lands',     ink: '#a8763f', glow: 'rgba(168,118,63,0.55)' },
-    { max: 10, key: 'mixed',   label: 'MIXED',   hint: 'it half-works, and it costs',      ink: '#c9a227', glow: 'rgba(201,162,39,0.55)' },
+    // These boundaries MUST match lib/resolve.js — the server rules, the
+    // client's glow and the verdict plate all read from their own copy.
+    // test/headless.js fails if the two ever drift apart.
+    { max: 3,  key: 'ruin',    label: 'RUIN',    hint: 'it fails, and it costs something', ink: '#7d8ea3', glow: 'rgba(125,142,163,0.55)' },
+    { max: 6,  key: 'falter',  label: 'FALTER',  hint: 'mostly fails; a sliver lands',     ink: '#a8763f', glow: 'rgba(168,118,63,0.55)' },
+    { max: 9,  key: 'mixed',   label: 'MIXED',   hint: 'it half-works, and it costs',      ink: '#c9a227', glow: 'rgba(201,162,39,0.55)' },
     { max: 12, key: 'success', label: 'SUCCESS', hint: 'it works, cleanly',                ink: '#d8b43a', glow: 'rgba(216,180,58,0.72)' },
     // TRIUMPH is the one band that ramps: paper, then white, then gold,
     // innermost outward. core/mid are optional and default to glow.

@@ -20,6 +20,7 @@ const S = {
     counter: { on: false, target: false, attacker: null, sent: false },
     lastSent: '',
     busy: false,
+    scene: null,
 };
 
 const me = () => S.players.find(p => p.id === S.id);
@@ -337,6 +338,108 @@ function toLanding(message) {
     ui.show('landing');
 }
 
+// ══ The setting ════════════════════════════════════════
+// Only the host composes it, and only before the game starts. Everyone
+// else sees the finished brief so they know what world they are in.
+
+const SCENE_LABELS = {
+    tone: 'Tone', places: 'Places', holds: 'True here', absent: 'Not here',
+};
+
+function paintScene(w) {
+    if (!w) return;
+    S.scene = w;
+    const stage = w.stage || 'blank';
+    const mine = S.isHost && !S.spectator;
+
+    el.scene.style.display = S.over ? 'none' : 'block';
+    el.sceneError.textContent = '';
+
+    const thinking = stage === 'thinking';
+    el.sceneState.textContent = thinking
+        ? 'reading it…'
+        : stage === 'ready' ? '' : (mine ? 'optional' : 'the host is setting it');
+
+    const showDraft = mine && !thinking && (stage === 'blank');
+    const showAsk = mine && !thinking && stage === 'asking';
+    const showBrief = stage === 'ready' && !!w.brief;
+
+    el.sceneDraft.classList.toggle('hidden', !showDraft);
+    el.sceneAsk.classList.toggle('hidden', !showAsk);
+    el.sceneBrief.classList.toggle('hidden', !showBrief);
+    el.sceneEditBtn.style.display = mine ? 'inline-block' : 'none';
+
+    // Nothing to show a guest until there is a world to show them.
+    if (!mine && !showBrief && !thinking) el.scene.style.display = 'none';
+
+    for (const b of [el.sceneSetBtn, el.sceneSkipBtn, el.sceneAnswerBtn, el.sceneRedoBtn]) {
+        b.disabled = thinking;
+    }
+
+    if (showAsk) {
+        el.sceneQuestions.innerHTML = '';
+        (w.questions || []).forEach((q, i) => {
+            const row = document.createElement('div');
+            row.className = 'scene-q';
+            const label = document.createElement('label');
+            label.htmlFor = `sceneA${i}`;
+            label.textContent = q;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = `sceneA${i}`;
+            input.maxLength = 400;
+            input.placeholder = 'or leave it to the story';
+            row.append(label, input);
+            el.sceneQuestions.appendChild(row);
+        });
+        el.sceneQuestions.querySelector('input')?.focus();
+    }
+
+    if (showBrief) {
+        el.briefWhere.textContent = w.brief.where || '';
+        el.briefRows.innerHTML = '';
+        for (const key of ['tone', 'places', 'holds', 'absent']) {
+            const val = w.brief[key];
+            const text = Array.isArray(val) ? val.join(' · ') : val;
+            if (!text) continue;
+            const row = document.createElement('div');
+            row.className = 'brief-row' + (key === 'absent' ? ' gone' : '');
+            const k = document.createElement('span');
+            k.className = 'k';
+            k.textContent = SCENE_LABELS[key];
+            const v = document.createElement('span');
+            v.className = 'v';
+            v.textContent = text;
+            row.append(k, v);
+            el.briefRows.appendChild(row);
+        }
+    }
+}
+
+el.sceneSetBtn.addEventListener('click', () => {
+    const text = el.sceneInput.value.trim();
+    if (text.length < 12) {
+        el.sceneError.textContent = 'Give it a sentence or two to work with.';
+        return;
+    }
+    socket.emit('world:draft', { text });
+});
+
+el.sceneSkipBtn.addEventListener('click', () => {
+    el.scene.style.display = 'none';
+});
+
+el.sceneAnswerBtn.addEventListener('click', () => {
+    const answers = [...el.sceneQuestions.querySelectorAll('input')].map(i => i.value);
+    socket.emit('world:answers', { answers });
+});
+
+el.sceneRedoBtn.addEventListener('click', () => socket.emit('world:clear'));
+el.sceneEditBtn.addEventListener('click', () => socket.emit('world:clear'));
+
+socket.on('world', (w) => paintScene(w));
+socket.on('world:error', (d) => { el.sceneError.textContent = d.message || ''; });
+
 // ══ Socket ═════════════════════════════════════════════
 socket.on('rooms', (rooms) => ui.renderRooms(rooms));
 
@@ -363,6 +466,7 @@ socket.on('joined', (d) => {
         startClockFrom(d.deadlineIn);
     } else {
         ui.show('waiting');
+        if (d.world) paintScene(d.world);
         el.roomCode.textContent = d.roomId;
         el.shareMsg.textContent = d.isPublic
             ? `Public · ${d.maxPlayers} seats · listed in the lobby`
@@ -402,6 +506,14 @@ socket.on('started', (d) => seq(async () => {
     S.over = false;
     ui.show('game');
     ui.clearChronicle();
+    // Open on the world, so nobody has to remember what the host typed.
+    if (d.world?.brief?.where) {
+        ui.systemLine(d.world.brief.where);
+        if (d.world.brief.places?.length) {
+            ui.systemLine(`Places: ${d.world.brief.places.join(' · ')}`);
+        }
+        S.scene = d.world;
+    }
     ui.paintDeck(d.deckCount);
     ui.paintDrawn(null);
     el.victory.classList.remove('on');

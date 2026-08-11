@@ -23,6 +23,8 @@
 //    arithmetic and hands over a verdict to be dramatised, so the
 //    cards actually govern the fiction.
 
+const world = require('./world');
+
 const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const KEY = process.env.GROQ_API_KEY;
 
@@ -123,7 +125,8 @@ AFTER THE PROSE
 Append a state block, exactly this shape, and nothing after it:
 
 ${STATE_OPEN}
-Name | is: short description | hurt: injury; injury | has: advantage; advantage | now: temporary condition | call: pronouns or -
+Name | is: short description | at: where they are standing | hurt: injury; injury | has: advantage; advantage | now: temporary condition | call: pronouns or -
+WORLD: any place this turn established that was not already listed
 DEAD: Name, Name
 ${STATE_CLOSE}
 
@@ -135,7 +138,8 @@ Kira | is: a sky-pirate | hurt: shattered left leg | has: rope-gun; superb healt
 and this turn Kira splints the leg, is bitten by something venomous, and loses the rope-gun over the side. The new line reads:
 Kira | is: a sky-pirate | hurt: mending left leg; venom in the blood | has: - | now: - | call: -
 The leg tag CHANGED rather than gaining a second entry beside it. "venom in the blood" was ADDED. "rope-gun" was REMOVED because it is gone, and "superb health" was REMOVED because it is no longer true — a poisoned character does not keep it. "winded" was cleared because that moment has passed.
-"hurt:" is lasting damage — a shattered knee, a burnt hand. "has:" is anything that makes this character more capable — gear, powers, allies, high ground. "now:" is a temporary state of the body or mind — winded, blinded, bleeding, cornered, enraged — never a location and never a place name. For "call:", copy forward whatever the CAST block already says, and set it only when a player's own words established how they wish to be referred to. Include the DEAD line only when someone died this turn, and only then. Write no text after ${STATE_CLOSE}.`;
+"at:" is where that character is standing right now, named as one of the world's places — it changes when they move and only when they move. "hurt:" is lasting damage — a shattered knee, a burnt hand. "has:" is anything that makes this character more capable — gear, powers, allies, high ground. "now:" is a temporary state of the body or mind — winded, blinded, bleeding, cornered, enraged — never a location and never a place name; that is what "at:" is for. For "call:", copy forward whatever the CAST block already says, and set it only when a player's own words established how they wish to be referred to.
+Include the WORLD line only when this turn put a place on the map that was not there before, and the DEAD line only when someone died this turn. Write no text after ${STATE_CLOSE}.`;
 
 // ── Transport ──────────────────────────────────────────
 
@@ -197,7 +201,7 @@ function cleanList(raw, maxItems = 3, maxLen = 30) {
 /** Pull the machine-readable tail out of a narration. */
 function parseState(text, names) {
     const start = text.indexOf(STATE_OPEN);
-    if (start < 0) return { prose: text.trim(), sheets: null, dead: [] };
+    if (start < 0) return { prose: text.trim(), sheets: null, dead: [], places: [] };
 
     const prose = text.slice(0, start).trim();
     let block = text.slice(start + STATE_OPEN.length);
@@ -206,11 +210,21 @@ function parseState(text, names) {
 
     const sheets = {};
     const dead = [];
+    const places = [];
     const known = new Map(names.map(n => [n.toLowerCase(), n]));
 
     for (const line of block.split('\n')) {
         const row = line.trim();
         if (!row) continue;
+
+        const worldMatch = /^WORLD\s*:\s*(.+)$/i.exec(row);
+        if (worldMatch) {
+            for (const raw of worldMatch[1].split(/[;,]/)) {
+                const p = clip(raw, 44);
+                if (p && !/^(none|-|nothing)$/i.test(p)) places.push(p);
+            }
+            continue;
+        }
 
         const deadMatch = /^DEAD\s*:\s*(.+)$/i.exec(row);
         if (deadMatch) {
@@ -231,6 +245,8 @@ function parseState(text, names) {
             if (!m) continue;
             const key = m[1].toLowerCase();
             if (key === 'is') sheet.character = clip(m[2], 110);
+            else if (key === 'at') sheet.where = /^-?$|^(none|nowhere|unknown)$/i.test(clip(m[2], 44))
+                ? '' : clip(m[2], 44);
             else if (key === 'hurt') sheet.wounds = cleanList(m[2]);
             else if (key === 'has') sheet.boons = cleanList(m[2]);
             else if (key === 'now') sheet.status = cleanList(m[2], 2);
@@ -243,7 +259,7 @@ function parseState(text, names) {
         if (Object.keys(sheet).length) sheets[name] = sheet;
     }
 
-    return { prose, sheets, dead };
+    return { prose, sheets, dead, places };
 }
 
 /** The compact CAST block that replaces an ever-growing transcript. */
@@ -251,6 +267,7 @@ function castBlock(players) {
     const lines = players.map(p => {
         const s = p.sheet || {};
         const bits = [`${p.name} | is: ${s.character || 'not yet declared'}`];
+        if (s.where) bits.push(`at: ${s.where}`);
         if (s.wounds?.length) bits.push(`hurt: ${s.wounds.join('; ')}`);
         if (s.boons?.length) bits.push(`has: ${s.boons.join('; ')}`);
         if (s.status?.length) bits.push(`now: ${s.status.join('; ')}`);
@@ -389,7 +406,7 @@ const TARGET_EXAMPLES = [
  * intelligible, who does it strike, and has it been tried already.
  * Runs on the small model; obvious answers never leave the process.
  */
-async function triage({ text, actor, others, previous, setup, existingCharacters, recent }) {
+async function triage({ text, actor, others, previous, setup, existingCharacters, recent, setting }) {
     if (looksLikeNoise(text)) {
         return { ok: false, reason: 'That came through as noise. Say it again in plain words.' };
     }
@@ -413,6 +430,19 @@ The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard
         for (const [q, a] of TARGET_EXAMPLES) {
             messages.push({ role: 'user', content: q });
             messages.push({ role: 'assistant', content: a });
+        }
+        // The world goes in AFTER the examples: the examples teach the
+        // targeting call, this decides whether the action can happen at
+        // all. Last read, most closely followed.
+        const bounds = world.worldConstraint(setting);
+        if (bounds) {
+            messages.push({ role: 'system', content:
+                `${bounds}\n\nAlso set ok=false when the action needs something this world does not `
+                + `contain — a car where there are no engines, a phone call where there is no `
+                + `electricity. Give reason as one line of plain fiction naming what is not there, `
+                + `never a rule ("There is no telephone in this century."). Be strict only about `
+                + `what is genuinely absent: unusual, difficult, reckless and far-fetched all pass, `
+                + `and going somewhere unlisted is fine — the story can grow a new room.` });
         }
     }
 
@@ -459,13 +489,81 @@ The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard
     }
 }
 
+// ── The world ──────────────────────────────────────────
+
+const asked = (qa) => (qa || []).map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n');
+
+/**
+ * What the Game Master still needs to know about the host's setting.
+ * Returns [] freely — an interview nobody wanted is worse than none.
+ */
+async function interviewWorld({ raw, qa }) {
+    if (OFFLINE) return [];
+    try {
+        const res = await call({
+            model: MODEL_NARRATE,
+            messages: [
+                { role: 'system', content: world.INTERVIEW_SYSTEM },
+                { role: 'user', content: `THE HOST WROTE:\n${clip(raw, 2000)}`
+                    + (qa?.length ? `\n\nALREADY ANSWERED:\n${asked(qa)}` : '') },
+            ],
+            temperature: 0.4,
+            max_tokens: 220,
+            response_format: { type: 'json_object' },
+            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
+        }, { tries: 2, timeout: 20000 });
+
+        const data = await res.json();
+        const parsed = JSON.parse(data.choices[0].message.content);
+        return (Array.isArray(parsed.questions) ? parsed.questions : [])
+            .map(q => clip(q, 160)).filter(Boolean).slice(0, 3);
+    } catch (err) {
+        // A failed interview must never block a game from starting.
+        console.warn('[ai] world interview failed, skipping it:', err.message);
+        return [];
+    }
+}
+
+/** Squeeze the setting into the reference card the narrator reads each turn. */
+async function compactWorld({ raw, qa }) {
+    const fallback = () => {
+        const w = world.blankWorld();
+        w.where = clip(raw, 220);
+        return w;
+    };
+    if (OFFLINE) return fallback();
+    try {
+        const res = await call({
+            model: MODEL_NARRATE,
+            messages: [
+                { role: 'system', content: world.COMPACT_SYSTEM },
+                { role: 'user', content: `THE HOST WROTE:\n${clip(raw, 2000)}`
+                    + (qa?.length ? `\n\nTHEY ALSO ANSWERED:\n${asked(qa)}` : '') },
+            ],
+            temperature: 0.5,
+            max_tokens: 400,
+            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
+        }, { tries: 2, timeout: 25000 });
+
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        const parsed = world.parseWorld(text);
+        // Whatever else it got wrong, the setting must survive.
+        if (!world.isReady(parsed)) return fallback();
+        return parsed;
+    } catch (err) {
+        console.warn('[ai] world compaction failed, keeping the raw setting:', err.message);
+        return fallback();
+    }
+}
+
 // ── Narration ──────────────────────────────────────────
 
 /**
  * Streams a passage. `onChunk` receives display-safe text only —
  * the state block is held back and never reaches a player's screen.
  */
-async function narrate({ players, history, directive, onChunk }) {
+async function narrate({ players, history, directive, onChunk, setting }) {
     const names = players.map(p => p.name);
 
     if (OFFLINE) {
@@ -477,8 +575,11 @@ async function narrate({ players, history, directive, onChunk }) {
         return { prose, sheets: null, dead: understudyDead(directive, names) };
     }
 
+    // The world before the cast: where they are shapes what they can do.
+    const stage = world.worldBlock(setting);
     const messages = [
         { role: 'system', content: GM_SYSTEM },
+        ...(stage ? [{ role: 'system', content: stage }] : []),
         { role: 'system', content: castBlock(players) },
         ...history.slice(-WINDOW),
         { role: 'user', content: directive },
@@ -693,7 +794,7 @@ function understudyDead(directive, names) {
 }
 
 module.exports = {
-    triage, narrate, epilogue,
+    triage, narrate, epilogue, interviewWorld, compactWorld,
     castBlock, parseState, looksLikeNoise, isRehash, namesIn, visibleFrom,
     GM_SYSTEM, TRIAGE_ACTION_SYSTEM, TARGET_EXAMPLES,
     OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,

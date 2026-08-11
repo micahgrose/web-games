@@ -203,7 +203,10 @@ h1, h2, h3, .display {
 }
 
 /* ── Controls ───────────────────────────────────────── */
-input[type="text"], select {
+/* textarea belongs in every one of these. Left out, it falls back to
+   the browser's own white box and system font, which looks like it
+   wandered in from another website. */
+input[type="text"], textarea, select {
     width: 100%;
     padding: 10px 13px;
     font-family: 'EB Garamond', Georgia, serif;
@@ -215,12 +218,15 @@ input[type="text"], select {
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
-input[type="text"]:focus, select:focus {
+textarea { line-height: 1.5; display: block; }
+input[type="text"]:focus, textarea:focus, select:focus {
     border-color: var(--brass-dim);
     box-shadow: 0 0 0 3px rgba(201,162,39,0.1);
 }
-input[type="text"]::placeholder { color: var(--parch-faint); font-style: italic; }
-input[type="text"]:disabled { opacity: 0.42; cursor: not-allowed; }
+input[type="text"]::placeholder, textarea::placeholder {
+    color: var(--parch-faint); font-style: italic;
+}
+input[type="text"]:disabled, textarea:disabled { opacity: 0.42; cursor: not-allowed; }
 
 .btn {
     font-family: 'Cinzel', serif;
@@ -984,6 +990,74 @@ input[type="checkbox"]:checked::after {
 @media (max-width: 560px) {
     .dock { left: 10px; right: 10px; bottom: 10px; width: auto; }
 }
+
+/* ── The setting, built in the waiting room ─────────── */
+.scene {
+    margin: 18px 0;
+    padding: 15px 16px 13px;
+    border: 1px solid var(--brass-ghost);
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.24);
+    text-align: left;
+}
+.scene-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; margin-bottom: 11px;
+}
+.scene-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--brass);
+}
+.scene-state { font-size: 0.76rem; font-style: italic; color: var(--parch-faint); }
+.scene-note { margin: 0 0 10px; font-size: 0.86rem; font-style: italic; color: var(--parch-dim); }
+.scene textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 62px;
+    margin-bottom: 10px;
+}
+.scene .dock-row { margin-top: 2px; }
+
+.scene-q { margin-bottom: 11px; }
+.scene-q label {
+    display: block;
+    font-size: 0.87rem;
+    color: var(--parchment);
+    margin-bottom: 5px;
+}
+.scene-q input { width: 100%; }
+
+.brief-where {
+    font-size: 0.95rem;
+    color: var(--parchment);
+    line-height: 1.45;
+    margin-bottom: 10px;
+}
+.brief-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.brief-row { font-size: 0.82rem; line-height: 1.4; }
+.brief-row .k {
+    font-family: 'Cinzel', serif;
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--brass-dim);
+    margin-right: 7px;
+}
+.brief-row .v { color: var(--parch-dim); }
+.brief-row.gone .v { color: #8a6a6a; }
+
+/* Where a character is standing, on their sheet */
+.sheet .whereat {
+    display: block;
+    font-size: 0.74rem;
+    letter-spacing: 0.04em;
+    color: var(--brass-dim);
+    margin-top: 3px;
+}
+.sheet .whereat::before { content: '⌖ '; opacity: 0.8; }
 
 /* ── Deal animation layer ───────────────────────────── */
 #animLayer { display: none; position: fixed; inset: 0; z-index: 1500; pointer-events: none; }
