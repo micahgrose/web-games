@@ -241,10 +241,11 @@ async function tell(room, directive, { historyLabel } = {}) {
 
     // Somewhere the story just put on the map is as real as the rest.
     if (result.places?.length && W.isReady(room.world.brief)) {
-        const before = room.world.brief.places.length;
+        const had = room.world.brief.places.length;
         W.addPlaces(room.world.brief, result.places);
-        if (room.world.brief.places.length !== before) {
+        if (room.world.brief.places.length !== had) {
             io.to(room.id).emit('world', { stage: 'ready', brief: room.world.brief, questions: [] });
+            L.write(room.id, 'world', `places now: ${room.world.brief.places.join('; ')}`);
         }
     }
 
@@ -254,7 +255,11 @@ async function tell(room, directive, { historyLabel } = {}) {
     room.history.push({ role: 'assistant', content: result.prose });
     while (room.history.length > ai.WINDOW) room.history.shift();
 
+    const before = L.snapshot(room.players);
     applySheets(room, result.sheets);
+    // Taken from the sheets as APPLIED, not from what the model claimed;
+    // those are not always the same thing.
+    L.write(room.id, 'tags', L.tagDelta(before, L.snapshot(room.players)));
     return result;
 }
 
@@ -362,6 +367,12 @@ async function handleSetup(room, player, text) {
         text, actor: player.name, others: others.map(p => p.name),
         previous: [], setup: true, existingCharacters: taken,
     });
+
+    L.write(room.id, 'becomes', `${player.name}: ${text}`);
+    L.write(room.id, 'triage', verdict.ok && !verdict.duplicate
+        ? 'accepted as a character'
+        : `REFUSED — ${verdict.duplicate ? 'duplicate character' : ''}`
+            + `${verdict.reason ? ` ${verdict.reason}` : ''}`);
 
     if (!verdict.ok || verdict.duplicate) {
         io.to(room.id).emit('said', { name: player.name, color: player.color, text });
@@ -932,6 +943,9 @@ io.on('connection', (socket) => {
         room.world.busy = true;
         io.to(room.id).emit('world', { ...worldState(room), stage: 'thinking' });
 
+        // The host's own words, before anything is done to them.
+        L.write(room.id, 'setting', raw);
+
         let questions = [];
         try {
             questions = await ai.interviewWorld({ raw, qa: [] });
@@ -944,9 +958,11 @@ io.on('connection', (socket) => {
             room.world.qa = questions.map(q => ({ q, a: '' }));
             room.world.stage = 'asking';
             room.world.busy = false;
+            L.write(room.id, 'asked', questions.map((q, i) => `${i + 1}. ${q}`).join('\n'));
             io.to(room.id).emit('world', worldState(room));
             return;
         }
+        L.write(room.id, 'asked', 'nothing — the setting was clear enough to play in');
         // Nothing worth asking: go straight to the reference card.
         await settleWorld(room);
     });
@@ -958,12 +974,15 @@ io.on('connection', (socket) => {
         room.world.qa = room.world.qa.map((x, i) => ({
             q: x.q, a: String(given[i] || '').trim().slice(0, 400) || 'whatever suits the story',
         }));
+        L.write(room.id, 'answered',
+            room.world.qa.map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n'));
         await settleWorld(room);
     });
 
     socket.on('world:clear', () => {
         const room = myRoom();
         if (!canShapeWorld(room)) return;
+        L.write(room.id, 'setting', 'the host threw the setting away and started over');
         room.world = { raw: '', qa: [], brief: W.blankWorld(), stage: 'blank', busy: false };
         io.to(room.id).emit('world', worldState(room));
     });
@@ -981,6 +1000,7 @@ io.on('connection', (socket) => {
         }
         room.world.stage = W.isReady(room.world.brief) ? 'ready' : 'blank';
         room.world.busy = false;
+        L.write(room.id, 'world', `compacted to:\n${JSON.stringify(room.world.brief, null, 2)}`);
         if (rooms.has(room.id)) io.to(room.id).emit('world', worldState(room));
     }
 
@@ -1061,6 +1081,8 @@ io.on('connection', (socket) => {
 
         p.answers.set(socket.id, body);
         const remaining = p.targetIds.filter(id => !p.answers.has(id)).length;
+
+        L.write(room.id, 'answers', `${player.name}: ${body}`);
 
         io.to(room.id).emit('counterIn', {
             name: player.name, color: player.color, text: body, remaining,

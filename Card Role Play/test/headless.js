@@ -535,6 +535,51 @@ head('A reasoning model\'s thinking never reaches the table');
     ok(ai.visibleFrom('<i>leaning</i> in') === 0, 'some other tag is shown, not swallowed');
 }
 
+head('The log records what changed on each sheet, and what it is now');
+{
+    const L = require('../lib/log');
+    const before = L.snapshot([{
+        name: 'Kira',
+        sheet: {
+            character: 'a sky-pirate', where: 'the bell tower',
+            wounds: ['shattered left leg'], boons: ['rope-gun', 'superb health'],
+            status: ['winded'],
+        },
+    }]);
+    const after = L.snapshot([{
+        name: 'Kira',
+        sheet: {
+            character: 'a sky-pirate', where: 'the flooded nave',
+            wounds: ['mending left leg', 'venom in the blood'], boons: [],
+            status: [],
+        },
+    }]);
+    const d = L.tagDelta(before, after);
+
+    ok(/~ at: the bell tower → the flooded nave/.test(d), 'a move is recorded as a move');
+    ok(/~ hurt: shattered left leg → mending left leg/.test(d),
+        'a rewritten injury reads as one change, not a loss and a gain');
+    ok(/\+ hurt: venom in the blood/.test(d), 'a new injury is an addition');
+    ok(/- has: rope-gun/.test(d) && /- has: superb health/.test(d),
+        'and what was taken away is named');
+    ok(/= at: the flooded nave \| hurt: mending left leg; venom in the blood \| has: - \| now: -/.test(d),
+        'with the whole sheet as it stands after the edits');
+
+    ok(L.tagDelta(before, before) === 'nothing on any sheet changed this turn',
+        'a turn that changed nothing says so plainly');
+
+    // A brand-new character is not reported as a pile of additions.
+    ok(/\+ joined the table/.test(L.tagDelta({}, after)), 'a first appearance is one line');
+
+    // Unrelated tags must not be paired up as a rewrite just because
+    // they share a positional word.
+    const armed = L.snapshot([{ name: 'K', sheet: { wounds: ['gashed left arm'] } }]);
+    const legged = L.snapshot([{ name: 'K', sheet: { wounds: ['mending left leg'] } }]);
+    const swap = L.tagDelta(armed, legged);
+    ok(/\+ hurt: mending left leg/.test(swap) && /- hurt: gashed left arm/.test(swap),
+        'a different injury entirely is not mistaken for a rewrite');
+}
+
 head('Tags can be changed and removed, not only added');
 {
     // The narrator is told tags are add/change/REMOVE. That instruction is

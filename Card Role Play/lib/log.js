@@ -60,21 +60,95 @@ function write(roomId, tag, body) {
     } catch { /* logging must never take the game down */ }
 }
 
+const LISTS = [['wounds', 'hurt'], ['boons', 'has'], ['status', 'now']];
+
+// Positional and filler words match everything and mean nothing: without
+// this, "gashed left arm" and "mending left leg" pair up as a rewrite.
+const DULL = new Set(['left', 'right', 'both', 'the', 'and', 'with', 'from', 'that',
+    'this', 'into', 'over', 'under', 'upper', 'lower', 'near', 'far', 'one', 'two',
+    'his', 'her', 'its', 'their', 'has', 'had', 'was', 'are', 'for', 'own']);
+
+const keywords = (s) => new Set(
+    (String(s).toLowerCase().match(/[a-z]{3,}/g) || []).filter(w => !DULL.has(w)));
+
+/** Every character's tags as they stand right now. */
+function snapshot(players) {
+    const out = {};
+    for (const p of players) {
+        const s = p.sheet || {};
+        out[p.name] = {
+            character: s.character || '', where: s.where || '',
+            wounds: [...(s.wounds || [])], boons: [...(s.boons || [])],
+            status: [...(s.status || [])],
+        };
+    }
+    return out;
+}
+
+/**
+ * What actually changed on the sheets, as applied — not what the model
+ * claimed. A rewritten tag arrives as one gone and one new; where a
+ * field loses exactly one and gains exactly one and they share a word,
+ * it is reported as the rewrite it almost certainly is.
+ */
+function tagDelta(before, after) {
+    const lines = [];
+    for (const name of Object.keys(after)) {
+        const a = after[name], b = before[name];
+        const rows = [];
+
+        if (!b) { rows.push(`  + joined the table`); }
+        else {
+            for (const [key, label] of [['character', 'is'], ['where', 'at']]) {
+                if ((b[key] || '') !== (a[key] || '')) {
+                    rows.push(b[key]
+                        ? `  ~ ${label}: ${b[key]} → ${a[key] || '-'}`
+                        : `  + ${label}: ${a[key]}`);
+                }
+            }
+            for (const [key, label] of LISTS) {
+                const had = b[key] || [], has = a[key] || [];
+                const gone = had.filter(t => !has.includes(t));
+                const fresh = has.filter(t => !had.includes(t));
+
+                // Pair what looks rewritten before reporting the rest. A
+                // turn commonly rewrites one tag AND adds another, so
+                // this has to match pairwise rather than only when the
+                // field lost exactly one thing and gained exactly one.
+                const left = [...gone], added = [...fresh];
+                for (const g of [...left]) {
+                    const shared = [...keywords(g)].filter(w => keywords(
+                        added.find(f => keywords(f).has(w)) || '').has(w));
+                    if (!shared.length) continue;
+                    const match = added.find(f => keywords(f).has(shared[0]));
+                    if (!match) continue;
+                    rows.push(`  ~ ${label}: ${g} → ${match}`);
+                    left.splice(left.indexOf(g), 1);
+                    added.splice(added.indexOf(match), 1);
+                }
+                for (const t of added) rows.push(`  + ${label}: ${t}`);
+                for (const t of left) rows.push(`  - ${label}: ${t}`);
+            }
+        }
+        if (!rows.length) continue;
+
+        const now = `at: ${a.where || '-'} | hurt: ${a.wounds.join('; ') || '-'}`
+            + ` | has: ${a.boons.join('; ') || '-'} | now: ${a.status.join('; ') || '-'}`;
+        lines.push(`${name}\n${rows.join('\n')}\n  = ${now}`);
+    }
+    return lines.length ? lines.join('\n') : 'nothing on any sheet changed this turn';
+}
+
 /** Everything worth keeping about a finished turn, in one entry. */
 function turn(roomId, { label, directive, prose, sheets, dead, places }) {
     if (!ENABLED) return;
     write(roomId, 'directive', `${label ? label + '\n' : ''}${directive}`);
     write(roomId, 'prose', prose);
-    if (sheets && Object.keys(sheets).length) {
-        write(roomId, 'sheets', Object.entries(sheets)
-            .map(([n, s]) => `${n} | at: ${s.where || '-'} | hurt: ${(s.wounds || []).join('; ') || '-'}`
-                + ` | has: ${(s.boons || []).join('; ') || '-'} | now: ${(s.status || []).join('; ') || '-'}`)
-            .join('\n'));
-    } else {
+    if (!sheets || !Object.keys(sheets).length) {
         write(roomId, 'sheets', 'NONE — the state block was missing or unparseable');
     }
     if (dead?.length) write(roomId, 'dead', dead.join(', '));
-    if (places?.length) write(roomId, 'places', places.join('; '));
+    if (places?.length) write(roomId, 'newplace', places.join('; '));
 }
 
 function close(roomId) {
@@ -83,4 +157,4 @@ function close(roomId) {
     streams.delete(roomId);
 }
 
-module.exports = { write, turn, close, ENABLED, DIR };
+module.exports = { write, turn, close, snapshot, tagDelta, ENABLED, DIR };
