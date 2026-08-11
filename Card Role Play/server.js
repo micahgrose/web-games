@@ -12,6 +12,7 @@ const { Deck, cardValue } = require('./lib/deck');
 const R = require('./lib/resolve');
 const W = require('./lib/world');
 const ai = require('./lib/ai');
+const L = require('./lib/log');
 
 const app = express();
 const server = http.createServer(app);
@@ -194,21 +195,49 @@ function onTurnExpired(room, playerId) {
 
 // ── Narration plumbing ─────────────────────────────────
 
+/**
+ * A narration that never finishes is worse than one that fails: the
+ * table has already been told the Game Master is speaking, the turn
+ * clock has been cleared, and room.busy blocks every recovery path. The
+ * stream has its own idle timeout; this is the backstop for everything
+ * else that could wedge, and it must always win eventually.
+ */
+const NARRATE_MAX_MS = Number(process.env.NARRATE_MAX_MS || 120000);
+
+function withDeadline(promise, ms, message) {
+    let timer;
+    const expired = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
 /** Push a narration to the table, streaming it as it is written. */
 async function tell(room, directive, { historyLabel } = {}) {
     io.to(room.id).emit('gmStart', {});
     let result;
     try {
-        result = await ai.narrate({
+        result = await withDeadline(ai.narrate({
             players: room.players.map(p => ({ ...p, sheet: p.sheet })),
             history: room.history,
             directive,
             setting: room.world.brief,
             onChunk: (chunk) => io.to(room.id).emit('gm', { chunk }),
-        });
+        }), NARRATE_MAX_MS, 'The Game Master never finished the sentence.');
+    } catch (err) {
+        // Logged here rather than only at failRoom, so the directive that
+        // provoked it sits directly above it in the file.
+        L.write(room.id, 'STUCK', `${err.message}\n--- it was asked ---\n${directive}`);
+        throw err;
     } finally {
         io.to(room.id).emit('gmEnd', {});
     }
+
+    L.turn(room.id, {
+        label: historyLabel, directive,
+        prose: result.prose, sheets: result.sheets,
+        dead: result.dead, places: result.places,
+    });
 
     // Somewhere the story just put on the map is as real as the rest.
     if (result.places?.length && W.isReady(room.world.brief)) {
@@ -392,6 +421,12 @@ async function handleAction(room, player, text) {
 
     io.to(room.id).emit('said', { name: player.name, color: player.color, text });
 
+    L.write(room.id, 'says', `${player.name}: ${text}`);
+    L.write(room.id, 'triage', verdict.ok
+        ? `targets: ${verdict.targets.join(', ') || 'nobody'}`
+            + `${verdict.everyone ? ' (everyone)' : ''}`
+        : `REFUSED — ${verdict.reason || '(no reason given)'}`);
+
     if (!verdict.ok) {
         io.to(player.id).emit('nope', {
             reason: verdict.reason || 'That did not come through. Try saying it another way.',
@@ -452,6 +487,9 @@ function openCounter(room, attacker, text, targets) {
         resolveCounter(room).catch(err => failRoom(room, err));
     });
 
+    L.write(room.id, 'counter',
+        `${attacker.name} moves against ${targets.map(t => t.name).join(' and ')} — they must answer`);
+
     io.to(room.id).emit('counter', {
         attackerName: attacker.name,
         attackerColor: attacker.color,
@@ -464,7 +502,14 @@ function openCounter(room, attacker, text, targets) {
 
 async function resolveCounter(room) {
     const p = room.pending;
-    if (!p || room.busy) return;
+    if (!p) return;
+    // Busy right now is a race, not a reason to abandon the exchange.
+    // Returning here used to strand the table for good: pending stayed
+    // set, the clock had already fired, and nothing would ever run again.
+    if (room.busy) {
+        setTimeout(() => resolveCounter(room).catch(err => failRoom(room, err)), 900);
+        return;
+    }
     room.busy = true;
     room.pending = null;
     clearClock(room);
@@ -531,6 +576,7 @@ async function resolveCounter(room) {
 
 function failRoom(room, err) {
     console.error('[room]', room.id, err);
+    L.write(room.id, 'FAILED', err?.stack || String(err));
     io.to(room.id).emit('error:gm', {
         message: 'The Game Master lost the thread. Try that again.',
         deadlineIn: TURN_MS,
@@ -696,6 +742,8 @@ function dropFromRoom(room, socket, { voluntary }) {
         clearClock(room);
         clearVote(room);
         rooms.delete(room.id);
+        L.write(room.id, 'end', 'the last player left; the table is cleared');
+        L.close(room.id);
         pushLobby();
         return;
     }
@@ -947,6 +995,13 @@ io.on('connection', (socket) => {
         }
         room.started = true;
         room.currentId = room.players[0].id;
+
+        L.write(room.id, 'start',
+            `${room.players.map(p => p.name).join(', ')}\n`
+            + `model: ${ai.MODEL_NARRATE}\n`
+            + (W.isReady(room.world.brief)
+                ? `world: ${JSON.stringify(room.world.brief, null, 2)}`
+                : 'world: none set'));
 
         io.to(room.id).emit('started', {
             players: publicPlayers(room),

@@ -703,6 +703,69 @@ async function until(fn, what, ms = 6000) {
 }
 
 async function main() {
+    head('A stream that goes silent does not freeze the table');
+    {
+        // The real failure, reproduced: Groq sends headers, streams a few
+        // words, then stops. The request timeout was cleared when the headers
+        // arrived, so reader.read() waited forever — no error, no recovery,
+        // room.busy stuck true, and the Game Master's name on screen with
+        // nothing under it. Every read now carries its own deadline.
+        // Both are read at module load, so they must be set BEFORE the
+        // re-require — otherwise it comes back offline and quietly
+        // answers with the understudy instead of touching the stream.
+        process.env.GROQ_STREAM_IDLE_MS = '350';
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const stalled = require('../lib/ai');
+    
+        const chunk = (s) => new TextEncoder().encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: s } }] })}\n\n`);
+    
+        // A body that yields one chunk and then never resolves again.
+        const body = {
+            getReader: () => ({
+                _sent: false,
+                async read() {
+                    if (!this._sent) { this._sent = true; return { done: false, value: chunk('The rope ') }; }
+                    return new Promise(() => {});     // silence, forever
+                },
+                cancel: async () => {},
+            }),
+        };
+    
+        const realFetch = global.fetch;
+        global.fetch = async () => ({ ok: true, status: 200, body, headers: new Map() });
+
+        const started = Date.now();
+        let threw = null, shown = '';
+        (async () => {
+            try {
+                await stalled.narrate({
+                    players: [{ name: 'Kira', sheet: {} }],
+                    history: [], directive: 'ACTOR: Kira', onChunk: (c) => { shown += c; },
+                });
+            } catch (err) { threw = err; }
+        })();
+    
+        // Give it long enough to trip the deadline, and no longer.
+        const until = Date.now() + 3000;
+        while (!threw && Date.now() < until) {
+            await new Promise(r => setTimeout(r, 50));
+        }
+    
+        global.fetch = realFetch;
+        delete process.env.GROQ_STREAM_IDLE_MS;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    
+        ok(!!threw, 'a stalled stream gives up instead of waiting forever');
+        ok(threw && /quiet mid-sentence/i.test(threw.message),
+            `and says what happened (${threw?.message})`);
+        ok(Date.now() - started < 2500, 'it gives up promptly, not after minutes');
+        ok(shown.length > 0 && 'The rope '.startsWith(shown),
+            `what arrived before the silence still reached the table ("${shown}")`);
+    }
+
     await new Promise(r => server.listen(0, r));
     const port = server.address().port;
     console.log(`\n(test server on ${port}, understudy narrator)`);

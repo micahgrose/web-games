@@ -145,6 +145,30 @@ Include the WORLD line only when this turn put a place on the map that was not t
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// Once response headers arrive the request timeout is cleared, and from
+// that moment a streaming body has no deadline of its own: if the stream
+// simply stops mid-sentence, reader.read() waits forever. Upstream never
+// closes it, no error is thrown, and the table freezes with the Game
+// Master's name on screen and nothing under it. Every read gets its own
+// deadline instead.
+const STREAM_IDLE_MS = Number(process.env.GROQ_STREAM_IDLE_MS || 30000);
+
+async function readOrGiveUp(reader, ms = STREAM_IDLE_MS) {
+    let timer;
+    const gaveUp = new Promise((_, reject) => {
+        timer = setTimeout(
+            () => reject(new Error('The Game Master went quiet mid-sentence.')), ms);
+    });
+    try {
+        return await Promise.race([reader.read(), gaveUp]);
+    } catch (err) {
+        reader.cancel().catch(() => {});
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /** Groq will occasionally rate-limit or wobble; ride it out. */
 async function call(body, { tries = 3, timeout = 45000 } = {}) {
     let lastErr;
@@ -625,7 +649,7 @@ async function narrate({ players, history, directive, onChunk, setting }) {
     };
 
     while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readOrGiveUp(reader);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
@@ -684,7 +708,7 @@ async function epilogue({ players, winner, history, onChunk }) {
         const decoder = new TextDecoder();
         let buffer = '', full = '', emitted = 0, start = -1;
         while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await readOrGiveUp(reader);
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
