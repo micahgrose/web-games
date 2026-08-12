@@ -39,11 +39,37 @@ const KEY = process.env.GROQ_API_KEY;
 const MODEL_NARRATE = process.env.GROQ_MODEL_NARRATE || 'openai/gpt-oss-120b';
 const MODEL_TRIAGE = process.env.GROQ_MODEL_TRIAGE || 'llama-3.1-8b-instant';
 
-// Reasoning models think before answering, which pushes the first
-// visible word well past the ~290ms it lands in now. Keep it small, and
-// only send the parameter to models that accept it.
-const REASONING_EFFORT = process.env.GROQ_REASONING_EFFORT || 'low';
+// Reasoning models think before answering, and that thinking happens
+// before the first visible word — so what it costs depends entirely on
+// who is waiting for it. Two budgets, because the two cases are nothing
+// alike:
+//
+//  · SETUP (the interview, the compaction) runs once, in the lobby,
+//    while people are still arriving and nobody is waiting on a turn.
+//    It is also the most reasoning-shaped work here: deciding whether an
+//    answer actually settled anything, and squeezing a paragraph into a
+//    reference card the narrator will obey every turn afterwards. Get it
+//    wrong and every turn of the game inherits it. Think hard.
+//
+//  · PLAY (narration, the epilogue) runs every turn with the whole
+//    table watching an empty bubble. Latency is the tax.
+//
+// Either may be overridden in .env: low | medium | high.
+//
+// One trap worth writing down: reasoning tokens are billed and counted as
+// COMPLETION tokens, so they come out of max_tokens. Every budget below
+// is therefore thinking-plus-answer, not answer — at 220 tokens the
+// interview would have spent its whole allowance thinking and returned an
+// empty string, which this code reads as "no questions" and shrugs at.
+// Raising effort means raising those ceilings, or the feature quietly
+// stops working. Same for the request timeouts on the two setup calls:
+// they do not stream, so the thinking happens inside the deadline.
+const EFFORT_SETUP = process.env.GROQ_REASONING_EFFORT_SETUP || 'high';
+const EFFORT_PLAY = process.env.GROQ_REASONING_EFFORT || 'medium';
 const thinks = (model) => /gpt-oss|deepseek-r1|qwen3/i.test(model);
+
+/** The parameter, but only for models that accept it. */
+const effort = (model, level) => (thinks(model) ? { reasoning_effort: level } : {});
 
 const OFFLINE = !KEY;
 if (OFFLINE) {
@@ -567,10 +593,10 @@ async function interviewWorld({ raw, qa, round = 1 }) {
                         : '') },
             ],
             temperature: 0.4,
-            max_tokens: 220,
+            max_tokens: 2000,
             response_format: { type: 'json_object' },
-            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
-        }, { tries: 2, timeout: 20000 });
+            ...effort(MODEL_NARRATE, EFFORT_SETUP),
+        }, { tries: 2, timeout: 45000 });
 
         const data = await res.json();
         const parsed = JSON.parse(data.choices[0].message.content);
@@ -600,9 +626,9 @@ async function compactWorld({ raw, qa }) {
                     + (qa?.length ? `\n\nTHEY ALSO ANSWERED:\n${asked(qa)}` : '') },
             ],
             temperature: 0.5,
-            max_tokens: 400,
-            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
-        }, { tries: 2, timeout: 25000 });
+            max_tokens: 2500,
+            ...effort(MODEL_NARRATE, EFFORT_SETUP),
+        }, { tries: 2, timeout: 50000 });
 
         const data = await res.json();
         const text = data.choices?.[0]?.message?.content || '';
@@ -648,9 +674,9 @@ async function narrate({ players, history, directive, onChunk, setting }) {
         model: MODEL_NARRATE,
         messages,
         temperature: 0.85,
-        max_tokens: 520,
+        max_tokens: 1500,
         stream: true,
-        ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
+        ...effort(MODEL_NARRATE, EFFORT_PLAY),
     });
 
     const reader = res.body.getReader();
@@ -732,9 +758,9 @@ async function epilogue({ players, winner, history, onChunk }) {
                     `and what ${winner} is left with now. Name ${winner}. Do not append a state block.` },
             ],
             temperature: 0.9,
-            max_tokens: 170,
+            max_tokens: 900,
             stream: true,
-            ...(thinks(MODEL_NARRATE) ? { reasoning_effort: REASONING_EFFORT } : {}),
+            ...effort(MODEL_NARRATE, EFFORT_PLAY),
         }, { tries: 2, timeout: 25000 });
 
         const reader = res.body.getReader();
