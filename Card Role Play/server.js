@@ -99,7 +99,10 @@ function publicPlayers(room) {
 const worldState = (room) => ({
     stage: room.world.stage,
     raw: room.world.raw,
+    // Answered ones stay on the record for the compaction; only what is
+    // still open is put to the host.
     questions: room.world.qa.filter(x => !x.a).map(x => x.q),
+    round: room.world.round || 0,
     brief: W.isReady(room.world.brief) ? room.world.brief : null,
 });
 
@@ -366,6 +369,10 @@ async function handleSetup(room, player, text) {
     const verdict = await ai.triage({
         text, actor: player.name, others: others.map(p => p.name),
         previous: [], setup: true, existingCharacters: taken,
+        // Without this the host's setting has no say over who walks in,
+        // and a dragon joins a world whose own brief says there are no
+        // fantasy creatures in it.
+        setting: room.world.brief,
     });
 
     L.write(room.id, 'becomes', `${player.name}: ${text}`);
@@ -842,7 +849,7 @@ io.on('connection', (socket) => {
             // The setting, built with the host while people are arriving.
             // stage: blank → asking → ready. Optional throughout; a room
             // that never sets one plays exactly as it always did.
-            world: { raw: '', qa: [], brief: W.blankWorld(), stage: 'blank', busy: false },
+            world: { raw: '', qa: [], round: 0, brief: W.blankWorld(), stage: 'blank', busy: false },
             history: [],
             clock: null,
             deadline: 0,
@@ -940,42 +947,57 @@ io.on('connection', (socket) => {
 
         room.world.raw = raw;
         room.world.qa = [];
+        room.world.round = 0;
         room.world.busy = true;
         io.to(room.id).emit('world', { ...worldState(room), stage: 'thinking' });
 
         // The host's own words, before anything is done to them.
         L.write(room.id, 'setting', raw);
 
+        await askOrSettle(room, 1);
+    });
+
+    /**
+     * Put a round of questions to the host, or give up and compact.
+     * A second round happens only if the Game Master asks for one after
+     * reading the first set of answers; two is the ceiling.
+     */
+    async function askOrSettle(room, round) {
         let questions = [];
         try {
-            questions = await ai.interviewWorld({ raw, qa: [] });
+            questions = await ai.interviewWorld({ raw: room.world.raw, qa: room.world.qa, round });
         } catch (err) {
             console.warn('[world] interview failed:', err.message);
         }
         if (!rooms.has(room.id) || room.started) return;
 
         if (questions.length) {
-            room.world.qa = questions.map(q => ({ q, a: '' }));
+            room.world.qa.push(...questions.map(q => ({ q, a: '' })));
+            room.world.round = round;
             room.world.stage = 'asking';
             room.world.busy = false;
-            L.write(room.id, 'asked', questions.map((q, i) => `${i + 1}. ${q}`).join('\n'));
+            L.write(room.id, `asked${round > 1 ? ' 2' : ''}`,
+                questions.map((q, i) => `${i + 1}. ${q}`).join('\n'));
             io.to(room.id).emit('world', worldState(room));
             return;
         }
-        L.write(room.id, 'asked', 'nothing — the setting was clear enough to play in');
-        // Nothing worth asking: go straight to the reference card.
+        L.write(room.id, `asked${round > 1 ? ' 2' : ''}`, round > 1
+            ? 'nothing further — the answers settled it'
+            : 'nothing — the setting was clear enough to play in');
         await settleWorld(room);
-    });
+    }
 
     socket.on('world:answers', async ({ answers } = {}) => {
         const room = myRoom();
         if (!canShapeWorld(room) || room.world.stage !== 'asking') return;
-        const given = Array.isArray(answers) ? answers : [];
-        room.world.qa = room.world.qa.map((x, i) => ({
-            q: x.q, a: String(given[i] || '').trim().slice(0, 400) || 'whatever suits the story',
-        }));
-        L.write(room.id, 'answered',
-            room.world.qa.map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n'));
+        const fresh = W.fillAnswers(room.world.qa, answers);
+        const round = room.world.round || 1;
+        L.write(room.id, `answered${round > 1 ? ' 2' : ''}`,
+            fresh.map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n'));
+
+        room.world.busy = true;
+        io.to(room.id).emit('world', { ...worldState(room), stage: 'thinking' });
+        if (round < 2) return askOrSettle(room, 2);
         await settleWorld(room);
     });
 
@@ -983,7 +1005,7 @@ io.on('connection', (socket) => {
         const room = myRoom();
         if (!canShapeWorld(room)) return;
         L.write(room.id, 'setting', 'the host threw the setting away and started over');
-        room.world = { raw: '', qa: [], brief: W.blankWorld(), stage: 'blank', busy: false };
+        room.world = { raw: '', qa: [], round: 0, brief: W.blankWorld(), stage: 'blank', busy: false };
         io.to(room.id).emit('world', worldState(room));
     });
 

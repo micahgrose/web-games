@@ -176,6 +176,16 @@ head('Becoming someone is dealt for too');
     ok(d.includes('TRIUMPH'), 'the arrival band is stated');
     ok(/state block/i.test(d), 'and what it grants is asked to be recorded');
     ok(!/OUTCOME:/.test(d), 'an arrival is not phrased as an action outcome');
+
+    // "Arrives fully as described" and "this world has no dragons" point
+    // opposite ways, and a dragon walked into a world whose own brief said
+    // there were no fantasy creatures in it. Screening catches these first,
+    // but it waves everything through when its call fails, so the last
+    // word has to say which instruction wins.
+    ok(/world outranks the description/i.test(d), 'the world outranks what the player claimed');
+    ok(/nearest thing it does contain/i.test(d), 'and they arrive as something the world holds');
+    ok(/write THAT on the "is:" line/.test(d), 'with the sheet corrected to match');
+    ok(/Do not remark on the difference/i.test(d), 'without arguing with the player about it');
 }
 
 head('Tags are named in the instructions, not just counted');
@@ -430,6 +440,29 @@ trailing junk`);
 
     // A malformed reply must not produce a half-world that claims to work.
     ok(!W.isReady(W.parseWorld('I could not think of anything.')), 'garbage is not a world');
+
+    // A second round of questions, if the first left a hole. It has to be
+    // reluctant: the host is being kept from starting a game.
+    const f = W.FOLLOWUP_SYSTEM;
+    ok(/should usually decline it/.test(f), 'the follow-up round is biased toward asking nothing');
+    ok(/empty array/.test(f), 'and has a way to say so');
+    ok(/at most two questions/i.test(f), 'it is capped at two');
+    ok(/Whatever suits the story" is a real answer/i.test(f),
+        'a host who hands the decision back is not asked again');
+    ok(/Never re-ask what has been answered/i.test(f), 'and nothing is asked twice');
+    ok(/could not tell a player their action is impossible/.test(f),
+        'the test for asking again is whether it could rule on an action');
+
+    // The host only sees what is still open, so answers land on those.
+    const qa = [{ q: 'what are they after?', a: 'the bells' }, { q: 'how far does it bend?', a: '' }];
+    const filled = W.fillAnswers(qa, ['ordinary people, no flight']);
+    eq(qa[0].a, 'the bells', 'a second round does not overwrite the first round\'s answers');
+    eq(qa[1].a, 'ordinary people, no flight', 'the new answer lands on the open question');
+    eq(filled.length, 1, 'and only the newly answered are handed to the log');
+
+    const blank = [{ q: 'and who else is here?', a: '' }];
+    W.fillAnswers(blank, ['']);
+    ok(/whatever suits the story/i.test(blank[0].a), 'a blank hands the decision back');
 }
 
 head('Characters stand somewhere, and it moves with them');
@@ -452,6 +485,14 @@ head('Characters stand somewhere, and it moves with them');
 
     ok(/never a location and never a place name; that is what "at:" is for/.test(ai.GM_SYSTEM),
         'locations are kept out of "now:" now that they have their own field');
+
+    // A player who has not declared yet is echoed back as "is: -", and a
+    // literal dash is truthy: it was landing on the sheet as their name.
+    const dash = ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: - | at: - | hurt: - | has: - | now: -\n>>>', names);
+    eq(dash.sheets.Kira.character, '', 'an empty "is:" does not become the character\'s name');
+    applySheets(room, dash.sheets);
+    eq(room.players[0].sheet.character, 'a diver', 'and it leaves whoever they already were');
 
     const cast = ai.castBlock([{ name: 'Kira', sheet: { character: 'a diver', where: 'the tide gate' } }]);
     ok(/at: the tide gate/.test(cast), 'and the narrator is reminded where everyone is');
@@ -732,6 +773,7 @@ function connect(port) {
         s.on('epilogue', (d) => { s.epilogue = (s.epilogue || '') + d.chunk; });
         s.on('nope', (d) => { s.nope = d; s.nopes = (s.nopes || 0) + 1; });
         s.on('rooms', (d) => { s.rooms = d; });
+        s.on('world', (d) => { s.world = d; });
     });
 }
 
@@ -811,6 +853,109 @@ async function main() {
             `what arrived before the silence still reached the table ("${shown}")`);
     }
 
+    head('The world screens who may walk into it');
+    {
+        // The bug: a host wrote "no fantasy creatures" into a modern-day
+        // world, and a player joined as a dragon. The setting was never
+        // handed to the gate that screens characters, and the gate's own
+        // prompt said any character, however strange, was fine.
+        // Offline the model is never called, so the only way to see what
+        // it would be told is to stub the transport and read the request.
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const live = require('../lib/ai');
+        const W = require('../lib/world');
+
+        const sent = [];
+        let answer = {};
+        const realFetch = global.fetch;
+        global.fetch = async (_url, init) => {
+            sent.push(JSON.parse(init.body));
+            return {
+                ok: true, status: 200, headers: new Map(),
+                json: async () => ({ choices: [{ message: { content: JSON.stringify(answer) } }] }),
+            };
+        };
+        const systemsOf = (req) =>
+            req.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+
+        const w = W.parseWorld(`<<<WORLD
+where: A present-day city given over to a killing game.
+goal: Outlive everyone else.
+power: Ordinary people, realistic physics, no powers of any kind.
+tone: gritty, paranoid
+places: the warehouse; the subway station; the rooftop
+holds: firearms are legal; police patrol
+absent: magic; fantasy creatures; superhuman powers
+>>>`);
+
+        const becomes = (setting) => live.triage({
+            text: 'I am a dragon', actor: 'Buggle', others: ['Scrapper'],
+            previous: [], setup: true, existingCharacters: [], setting,
+        });
+
+        answer = { ok: true, reason: '', duplicate: false };
+        await becomes(w);
+        const gate = systemsOf(sent.at(-1));
+        ok(/fantasy creatures/.test(gate), 'the setting now reaches the character gate at all');
+        ok(/KIND OF BEING this world does not contain/.test(gate),
+            'and it is told to judge the kind of being');
+        ok(/a dragon or a sorcerer where there is no magic/.test(gate),
+            'by the example that actually got through');
+        ok(!/however strange, is fine/.test(gate),
+            'the blanket "anything goes" is withdrawn once there is a world');
+        ok(/any person of any trade, temper, history or strangeness passes/.test(gate),
+            'but an odd person is still an odd person, not a refusal');
+        ok(/never a rule/.test(gate), 'and a refusal is fiction, not a rules citation');
+
+        // A table that set no scene is exactly as it was.
+        sent.length = 0;
+        await becomes(W.blankWorld());
+        const bare = systemsOf(sent.at(-1));
+        ok(/however strange, is fine/.test(bare), 'with no setting, any character is still fine');
+        ok(!/KIND OF BEING/.test(bare), 'and there is nothing to screen against');
+
+        // The refusal has to survive back out to the player.
+        answer = { ok: false, duplicate: false, reason: 'Nothing in this city has scales.' };
+        const no = await becomes(w);
+        ok(no.ok === false, 'a character this world cannot hold is refused');
+        eq(no.reason, 'Nothing in this city has scales.', 'and the host\'s world says why');
+
+        // ── The second round of questions ──────────────
+        sent.length = 0;
+        answer = { questions: ['what are they here for?', 'how far does it bend?', 'who else is about?'] };
+        const first = await live.interviewWorld({ raw: 'A drowned cathedral city.', qa: [] });
+        eq(first.length, 3, 'the first round may ask three');
+        ok(/WHAT THE PLAYERS ARE HERE TO DO/.test(systemsOf(sent.at(-1))),
+            'and it is the round that asks the two that matter most');
+
+        answer = { questions: ['a', 'b', 'c'] };
+        const second = await live.interviewWorld({
+            raw: 'A drowned cathedral city.',
+            qa: [{ q: 'how far does it bend?', a: 'dunno' }],
+            round: 2,
+        });
+        eq(second.length, 2, 'a second round is capped at two questions');
+        const again = systemsOf(sent.at(-1));
+        ok(/should usually decline it/.test(again), 'and it is a different, reluctant brief');
+        ok(!/WHAT THE PLAYERS ARE HERE TO DO/.test(again), 'not the opening interview again');
+        ok(/YOU ASKED, AND THEY ANSWERED/.test(
+            sent.at(-1).messages.find(m => m.role === 'user').content),
+            'it reads the answers it is judging');
+
+        // Two is the ceiling. The flow that enforces it lives inside a
+        // socket handler and never fires offline (the understudy asks
+        // nothing), so the guard itself is what gets checked: without it,
+        // answering questions asks more questions forever.
+        const src = require('fs').readFileSync(require.resolve('../server'), 'utf8');
+        ok(/if \(round < 2\) return askOrSettle\(room, 2\)/.test(src),
+            'a second round is asked for only after the first, and never a third');
+
+        global.fetch = realFetch;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    }
+
     await new Promise(r => server.listen(0, r));
     const port = server.address().port;
     console.log(`\n(test server on ${port}, understudy narrator)`);
@@ -868,7 +1013,24 @@ async function main() {
 
     await until(() => A.rooms?.some(r => r.id === A.room), 'the table is listed publicly');
 
+    head('The host sets the scene, and it reaches the table');
+    A.emit('world:draft', { text: 'A drowned cathedral city, ruled by whoever holds the bells.' });
+    await until(() => A.world?.stage === 'ready', 'the setting settles into a brief');
+    ok(/drowned cathedral/i.test(A.world.brief?.where || ''), 'and everyone is told where they are');
+    ok(/drowned cathedral/i.test(C.world?.brief?.where || ''),
+        'including the players who did not write it');
+
     head('Opening turns are for becoming someone');
+
+    // The bug this guards: a dragon walked into a world whose own brief
+    // said there were no fantasy creatures in it, because the server
+    // never handed the setting to the gate that screens characters. The
+    // gate is the small model and says nothing offline, so what matters
+    // here is that the room's world arrives at its door at all.
+    const realTriage = ai.triage;
+    const screened = [];
+    ai.triage = (args) => { screened.push(args); return realTriage(args); };
+
     A.emit('game:start');
     await until(() => A.currentId, 'the first turn arrives');
     eq(A.currentId, A.me, 'the dealer goes first');
@@ -876,6 +1038,12 @@ async function main() {
 
     const before = A.draws || 0;
     A.emit('act', { text: 'I am a sky-pirate with a rope-gun and a bad temper' });
+    await until(() => screened.length, 'the declaration is screened');
+    ok(screened[0]?.setup === true, 'a declaration is screened as a character');
+    ok(/drowned cathedral/i.test(screened[0]?.setting?.where || ''),
+        'and the gate is given the world it has to fit into');
+    ai.triage = realTriage;
+
     await until(() => A.currentId === B.me, 'the turn passes to Bram');
     ok((A.draws || 0) > before, 'a card decides how well the character arrives');
     ok(!!A.lastDraw?.card, 'and it is a real card');

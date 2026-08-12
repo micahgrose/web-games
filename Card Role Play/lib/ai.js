@@ -268,7 +268,13 @@ function parseState(text, names) {
             const m = /^\s*([a-z]+)\s*:\s*(.*)$/i.exec(seg);
             if (!m) continue;
             const key = m[1].toLowerCase();
-            if (key === 'is') sheet.character = clip(m[2], 110);
+            // A player who has not declared yet is echoed back as "is: -",
+            // and a literal dash is truthy: it was landing on the sheet and
+            // showing up as the character's name.
+            if (key === 'is') {
+                const v = clip(m[2], 110);
+                sheet.character = /^-?$|^(none|unknown|not yet declared)$/i.test(v) ? '' : v;
+            }
             else if (key === 'at') sheet.where = /^-?$|^(none|nowhere|unknown)$/i.test(clip(m[2], 44))
                 ? '' : clip(m[2], 44);
             else if (key === 'hurt') sheet.wounds = cleanList(m[2]);
@@ -442,13 +448,32 @@ async function triage({ text, actor, others, previous, setup, existingCharacters
         return { ok: true, targets: setup ? [] : namesIn(text, others) };
     }
 
+    const bounds = world.worldConstraint(setting);
+
+    // With no world set, anything goes — that was the whole rule before
+    // there were worlds, and a table that skipped the setting still
+    // wants it. With a world, the KIND of being is the thing to screen:
+    // a host who says "no fantasy creatures" has already ruled on the
+    // dragon, and letting it in makes a liar of every later refusal.
     const system = setup
         ? `You screen inputs for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"duplicate":boolean}.
-The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard mashing or is not intelligible English — any character, however strange, is fine. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters?.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
+The player is describing WHO THEY ARE. Set ok=false if the text is keyboard mashing or is not intelligible English${bounds ? '' : ' — any character, however strange, is fine'}. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters?.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
 
         : TRIAGE_ACTION_SYSTEM;
 
     const messages = [{ role: 'system', content: system }];
+
+    if (setup && bounds) {
+        messages.push({ role: 'system', content:
+            `${bounds}\n\nThis character has to be someone who could exist HERE. Set ok=false when `
+            + `what they say they are is a KIND OF BEING this world does not contain — a dragon or a `
+            + `sorcerer where there is no magic and no fantasy creatures, a machine where the `
+            + `technology does not reach that far, a ghost where the dead stay dead. Judge nothing `
+            + `else: any person of any trade, temper, history or strangeness passes, and so does `
+            + `anything this world's own powers plainly allow. reason is one plain line of fiction `
+            + `naming what this world has no room for and inviting something else ("Nothing in this `
+            + `city has scales — be someone who could walk its streets."), never a rule.` });
+    }
 
     if (!setup) {
         for (const [q, a] of TARGET_EXAMPLES) {
@@ -458,7 +483,6 @@ The player is describing WHO THEY ARE. Set ok=false only if the text is keyboard
         // The world goes in AFTER the examples: the examples teach the
         // targeting call, this decides whether the action can happen at
         // all. Last read, most closely followed.
-        const bounds = world.worldConstraint(setting);
         if (bounds) {
             messages.push({ role: 'system', content:
                 `${bounds}\n\nAlso set ok=false when the action needs something this world does not `
@@ -522,16 +546,25 @@ const asked = (qa) => (qa || []).map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n'
 /**
  * What the Game Master still needs to know about the host's setting.
  * Returns [] freely — an interview nobody wanted is worse than none.
+ *
+ * Round 2 exists because one pass sometimes answers nothing: a host can
+ * reply to "how far does this world bend" with three words that settle
+ * none of it. Whether it happens at all is the model's call, under a
+ * prompt written to make silence the easy answer — and it is capped at
+ * two rounds, because a third would be an interrogation.
  */
-async function interviewWorld({ raw, qa }) {
+async function interviewWorld({ raw, qa, round = 1 }) {
     if (OFFLINE) return [];
+    const again = round >= 2;
     try {
         const res = await call({
             model: MODEL_NARRATE,
             messages: [
-                { role: 'system', content: world.INTERVIEW_SYSTEM },
+                { role: 'system', content: again ? world.FOLLOWUP_SYSTEM : world.INTERVIEW_SYSTEM },
                 { role: 'user', content: `THE HOST WROTE:\n${clip(raw, 2000)}`
-                    + (qa?.length ? `\n\nALREADY ANSWERED:\n${asked(qa)}` : '') },
+                    + (qa?.length
+                        ? `\n\n${again ? 'YOU ASKED, AND THEY ANSWERED' : 'ALREADY ANSWERED'}:\n${asked(qa)}`
+                        : '') },
             ],
             temperature: 0.4,
             max_tokens: 220,
@@ -542,7 +575,7 @@ async function interviewWorld({ raw, qa }) {
         const data = await res.json();
         const parsed = JSON.parse(data.choices[0].message.content);
         return (Array.isArray(parsed.questions) ? parsed.questions : [])
-            .map(q => clip(q, 160)).filter(Boolean).slice(0, 3);
+            .map(q => clip(q, 160)).filter(Boolean).slice(0, again ? 2 : 3);
     } catch (err) {
         // A failed interview must never block a game from starting.
         console.warn('[ai] world interview failed, skipping it:', err.message);

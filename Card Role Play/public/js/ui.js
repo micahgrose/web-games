@@ -53,6 +53,7 @@ export const el = {
     sceneSetBtn: $('sceneSetBtn'),
     sceneSkipBtn: $('sceneSkipBtn'),
     sceneAsk: $('sceneAsk'),
+    sceneNote: $('sceneNote'),
     sceneQuestions: $('sceneQuestions'),
     sceneAnswerBtn: $('sceneAnswerBtn'),
     sceneRedoBtn: $('sceneRedoBtn'),

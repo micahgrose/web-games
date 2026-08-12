@@ -193,6 +193,13 @@ function setupDirective(name, text, r) {
             + `world already has and record it as "at:" — do not invent a location the tale has `
             + `not established. Whatever this arrival grants or costs ${name}, write it `
             + `into the state block as an advantage or an injury — it is real from now on.`,
+        // "As described" and "the world forbids it" can point opposite ways.
+        // Screening catches most of these before they reach here, but it
+        // runs on the small model and waves everything through when the
+        // call fails, so the last word has to say which one wins.
+        `The world outranks the description. If what ${name} claims to be is a kind of being this `
+            + `world does not contain, ${name} arrives instead as the nearest thing it does contain `
+            + `— and you write THAT on the "is:" line. Do not remark on the difference.`,
     ].join('\n');
 }
 

@@ -51,6 +51,25 @@ The third, if you ask one, is whatever else would genuinely change a resolution:
 
 Reply with JSON only: {"questions":["...","..."]}. Each question one plain sentence, under twenty words, answerable in a few words. Empty array if you have enough.`;
 
+// One more round, if the first one left a hole — the Game Master's own
+// call, because it is the only thing here that knows whether it can
+// actually rule on an action yet. Biased hard toward asking nothing: a
+// host who has already answered three questions is being kept from
+// starting a game, and two rounds of interrogation over a sentence about
+// a drowned city is worse than one imperfect brief.
+const FOLLOWUP_SYSTEM =
+`You are the Game Master of a card-driven role-playing game. You have already asked the host what you needed about their setting, and they have answered. This is your one chance to ask again, and you should usually decline it.
+
+Ask nothing — return an empty array — unless an answer genuinely failed to settle what it was asked, and the hole it left will change how actions resolve at the table. That means one of:
+
+- an answer that dodged the question or said nothing of substance. "Whatever suits the story" is a real answer: it means the host wants you to decide, so decide, and never ask that again.
+- an answer that contradicts the setting, or another answer.
+- a limit left so vague that you could not tell a player their action is impossible here.
+
+At most two questions, and one is better than two. Never re-ask what has been answered, never ask for a detail you could invent yourself without contradicting anything, and never ask the host to confirm something they plainly told you. If the two things that decide the most — what the players are here for, and how far this world bends — are settled well enough to rule on, you have enough. Say so by asking nothing.
+
+Reply with JSON only: {"questions":["..."]}. Each question one plain sentence, under twenty words, answerable in a few words, and each must point at the one thing that was left open.`;
+
 const COMPACT_SYSTEM =
 `You are compacting a role-playing game's setting into the short brief its Game Master will read every single turn. Be ruthless: this is a reference card, not a description. Prose is wasted here.
 
@@ -89,6 +108,27 @@ function parseWorld(text) {
         else if (key === 'absent') w.absent = list(m[2], 6);
     }
     return w;
+}
+
+/**
+ * Write the host's answers onto the questions still open.
+ *
+ * The host is only ever shown unanswered questions, so a reply lines up
+ * with those and not with the whole list — filling a second round by
+ * index across everything would overwrite the first round's answers with
+ * the second round's text. Returns just the ones filled, for the log.
+ */
+function fillAnswers(qa, given) {
+    const answers = Array.isArray(given) ? given : [];
+    const filled = [];
+    let i = 0;
+    for (const x of qa || []) {
+        if (x.a) continue;
+        // A blank is an answer too: it hands the decision back.
+        x.a = clip(answers[i++], 400) || 'whatever suits the story';
+        filled.push(x);
+    }
+    return filled;
 }
 
 /** Places the story establishes as it goes are as real as the first ones. */
@@ -152,6 +192,6 @@ function worldConstraint(world) {
 }
 
 module.exports = {
-    OPEN, CLOSE, blankWorld, isReady, parseWorld, addPlaces,
-    worldBlock, worldConstraint, INTERVIEW_SYSTEM, COMPACT_SYSTEM,
+    OPEN, CLOSE, blankWorld, isReady, parseWorld, addPlaces, fillAnswers,
+    worldBlock, worldConstraint, INTERVIEW_SYSTEM, FOLLOWUP_SYSTEM, COMPACT_SYSTEM,
 };

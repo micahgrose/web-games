@@ -379,6 +379,11 @@ function paintScene(w) {
     }
 
     if (showAsk) {
+        // The Game Master may come back once more if the first answers
+        // left a hole; say so, or it reads like the same panel again.
+        el.sceneNote.textContent = (w.round || 1) > 1
+            ? 'One or two things those answers left open.'
+            : 'A few things worth settling first.';
         el.sceneQuestions.innerHTML = '';
         (w.questions || []).forEach((q, i) => {
             const row = document.createElement('div');
