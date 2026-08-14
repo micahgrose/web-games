@@ -140,9 +140,12 @@ function tagDelta(before, after) {
 }
 
 /** Everything worth keeping about a finished turn, in one entry. */
-function turn(roomId, { label, directive, prose, sheets, dead, places }) {
+function turn(roomId, { label, directive, prose, sheets, dead, places, retried }) {
     if (!ENABLED) return;
     write(roomId, 'directive', `${label ? label + '\n' : ''}${directive}`);
+    // A turn that came back blank the first time still ends up looking
+    // ordinary in here. It should say so.
+    if (retried) write(roomId, 'RETRIED', retried);
     write(roomId, 'prose', prose);
     if (!sheets || !Object.keys(sheets).length) {
         write(roomId, 'sheets', 'NONE — the state block was missing or unparseable');

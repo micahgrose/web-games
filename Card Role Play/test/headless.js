@@ -853,6 +853,103 @@ async function main() {
             `what arrived before the silence still reached the table ("${shown}")`);
     }
 
+    head('A narration that comes back blank is not passed off as a turn');
+    {
+        // The real failure, from the log: reasoning tokens are drawn from
+        // max_tokens and only delta.content is prose, so a model that
+        // thinks up to the ceiling finishes on "length" having written
+        // nothing. Nothing noticed — empty bubble, empty PROSE line in
+        // the log, play moved on. That is what a dead narrator looks like.
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const live = require('../lib/ai');
+
+        const frame = (obj) => new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
+        const bodyOf = (frames) => ({
+            getReader: () => ({
+                i: 0,
+                async read() {
+                    if (this.i >= frames.length) return { done: true };
+                    return { done: false, value: frames[this.i++] };
+                },
+                cancel: async () => {},
+            }),
+        });
+
+        // All thinking, no prose, stopped at the ceiling.
+        const blank = [
+            frame({ choices: [{ delta: { reasoning: 'weighing the wound against the card…' } }] }),
+            frame({ choices: [{ delta: {}, finish_reason: 'length' }] }),
+        ];
+        const good = [
+            frame({ choices: [{ delta: { content: 'The blade turns on the splint. ' } }] }),
+            frame({ choices: [{ delta: { content: '<<<STATE\nKira | is: a diver | hurt: gashed arm\n>>>' } }] }),
+            frame({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+        ];
+
+        const realFetch = global.fetch;
+        let attempts = [];
+        global.fetch = async (_u, init) => {
+            attempts.push(JSON.parse(init.body));
+            return {
+                ok: true, status: 200, headers: new Map(),
+                body: bodyOf(attempts.length === 1 ? blank : good),
+            };
+        };
+
+        let shown = '';
+        const out = await live.narrate({
+            players: [{ name: 'Kira', sheet: { character: 'a diver' } }],
+            history: [], directive: 'ACTOR: Kira', onChunk: (c) => { shown += c; },
+        });
+
+        eq(attempts.length, 2, 'a blank answer is asked again rather than shown as a turn');
+        eq(attempts[1]?.reasoning_effort, 'low',
+            'and asked with the thinking turned down, since thinking is what ate it');
+        ok(attempts[1]?.max_tokens > attempts[0]?.max_tokens, 'with more room to answer in');
+        ok(/blade turns on the splint/.test(out.prose), 'the second attempt is what the table gets');
+        ok(!/<<</.test(shown), 'and no state machinery reaches the players');
+        ok(/thinking 3[0-9] characters|stopped on "length"/.test(out.retried || ''),
+            `the log is told why it had to ask twice ("${out.retried}")`);
+        ok(!!out.sheets?.Kira, 'the retry\'s state block still lands on the sheets');
+
+        // Twice blank is a visible failure, not a silent one: failRoom
+        // tells the table and hands the turn back.
+        attempts = [];
+        global.fetch = async (_u, init) => {
+            attempts.push(JSON.parse(init.body));
+            return { ok: true, status: 200, headers: new Map(), body: bodyOf(blank) };
+        };
+        let threw = null;
+        try {
+            await live.narrate({
+                players: [{ name: 'Kira', sheet: {} }], history: [], directive: 'ACTOR: Kira',
+            });
+        } catch (err) { threw = err; }
+        eq(attempts.length, 2, 'it does not keep asking forever');
+        ok(!!threw, 'a narrator that says nothing twice is an error');
+        ok(/said nothing/i.test(threw?.message || ''),
+            `and the message says what happened (${threw?.message})`);
+
+        // The WORLD line was parsed and then dropped on the floor here, so
+        // a room the story invented never reached the world's places.
+        attempts = [];
+        global.fetch = async () => ({
+            ok: true, status: 200, headers: new Map(),
+            body: bodyOf([frame({ choices: [{ delta: { content:
+                'She shoulders into the dark.\n<<<STATE\nKira | is: a diver\nWORLD: the drowned crypt\n>>>' } }] })]),
+        });
+        const grew = await live.narrate({
+            players: [{ name: 'Kira', sheet: {} }], history: [], directive: 'ACTOR: Kira',
+        });
+        ok(grew.places?.includes('the drowned crypt'),
+            'a place the story establishes comes back out of the narrator');
+
+        global.fetch = realFetch;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    }
+
     head('The world screens who may walk into it');
     {
         // The bug: a host wrote "no fantasy creatures" into a modern-day

@@ -670,14 +670,53 @@ async function narrate({ players, history, directive, onChunk, setting }) {
         { role: 'user', content: directive },
     ];
 
+    // Attempt once as configured. If nothing visible came back, attempt
+    // again with the thinking turned down — see stream() for why.
+    let r = await stream(messages, { effort: EFFORT_PLAY, maxTokens: 1500, onChunk });
+    let retried = '';
+    if (!r.full.trim()) {
+        retried = `stopped on "${r.finishReason}" after thinking ${r.reasonChars} characters`
+            + ' and writing nothing; asked again with less thinking';
+        console.warn(`[ai] ${retried}`);
+        r = await stream(messages, { effort: 'low', maxTokens: 2000, onChunk });
+        if (!r.full.trim()) {
+            // Better a visible failure the table can retry than a bubble
+            // with nothing in it and a turn that quietly moves on.
+            throw new Error('The Game Master thought about it and said nothing'
+                + ` (finish: ${r.finishReason}).`);
+        }
+    }
+    // `places` has to come back out too: the WORLD line was parsed all
+    // along and then dropped here, so a room the story put on the map
+    // never reached the world's own list of places.
+    const { prose, sheets, dead, places } = parseState(r.full.slice(r.visible), names);
+    return { prose: prose || r.full.trim(), sheets, dead, places, retried };
+}
+
+/**
+ * One streamed attempt. Returns the raw text plus the two things that
+ * explain an empty answer, neither of which was being recorded when a
+ * turn came back blank: why the model stopped, and how much of its
+ * budget went on thinking.
+ *
+ * The blank turn: reasoning tokens are drawn from max_tokens, and only
+ * `delta.content` is prose — so a model that thinks right up to the
+ * ceiling finishes with `length` and never writes a word. Nothing here
+ * noticed. The table saw the Game Master's name over an empty bubble and
+ * play moved on, which is exactly what a dead narrator looks like.
+ */
+async function stream(messages, { effort: level, maxTokens, onChunk }) {
     const res = await call({
         model: MODEL_NARRATE,
         messages,
         temperature: 0.85,
-        max_tokens: 1500,
+        max_tokens: maxTokens,
         stream: true,
-        ...effort(MODEL_NARRATE, EFFORT_PLAY),
+        ...effort(MODEL_NARRATE, level),
     });
+
+    let finishReason = '';
+    let reasonChars = 0;
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -720,8 +759,14 @@ async function narrate({ players, history, directive, onChunk, setting }) {
             const payload = t.slice(5).trim();
             if (payload === '[DONE]') continue;
             try {
-                const piece = JSON.parse(payload).choices?.[0]?.delta?.content;
+                const choice = JSON.parse(payload).choices?.[0];
+                const piece = choice?.delta?.content;
                 if (piece) full += piece;
+                // Never shown — counted, so an empty answer can be told
+                // apart from a model that never thought at all.
+                const thought = choice?.delta?.reasoning;
+                if (thought) reasonChars += String(thought).length;
+                if (choice?.finish_reason) finishReason = choice.finish_reason;
             } catch { /* keep-alive or partial frame */ }
         }
         flush();
@@ -733,9 +778,7 @@ async function narrate({ players, history, directive, onChunk, setting }) {
         onChunk?.(full.slice(Math.max(emitted, start)));
         emitted = full.length;
     }
-
-    const { prose, sheets, dead } = parseState(full.slice(start), names);
-    return { prose: prose || full.trim(), sheets, dead };
+    return { full, visible: start, finishReason, reasonChars };
 }
 
 /** A short legend for whoever is left standing. */
@@ -791,7 +834,12 @@ async function epilogue({ players, winner, history, onChunk }) {
         }
         if (start < 0) start = Math.max(0, visibleFrom(full));
         if (full.length > emitted) onChunk?.(full.slice(Math.max(emitted, start)));
-        return full.slice(start).trim();
+        const text = full.slice(start).trim();
+        // An ending that came back blank — all budget spent thinking —
+        // must still close the tale, not leave the winner staring at a
+        // gap where the epilogue was.
+        if (!text) throw new Error('no closing came back');
+        return text;
     } catch {
         const line = `${winner} is the last one standing.`;
         onChunk?.(line);

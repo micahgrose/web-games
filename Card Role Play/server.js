@@ -239,7 +239,7 @@ async function tell(room, directive, { historyLabel } = {}) {
     L.turn(room.id, {
         label: historyLabel, directive,
         prose: result.prose, sheets: result.sheets,
-        dead: result.dead, places: result.places,
+        dead: result.dead, places: result.places, retried: result.retried,
     });
 
     // Somewhere the story just put on the map is as real as the rest.
