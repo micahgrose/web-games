@@ -537,6 +537,132 @@ head('Only characters who must DEFEND become targets');
     }).length;
     ok(withTargets >= ex.length - withTargets - 2,
         `the examples stay balanced (${withTargets} of ${ex.length} target someone)`);
+
+    // Every example has to answer in the shape the schema asks for, or it
+    // teaches the model to leave the new field out.
+    for (const [q, a] of ex) {
+        const p = JSON.parse(a);
+        ok('kind' in p, `every example fills "kind" (${q.slice(-28)})`);
+        ok(p.ok === true ? p.kind === '' : p.kind.length > 0,
+            'and only a refusal names a kind');
+    }
+}
+
+head('A question is not a move');
+{
+    // The turn that broke it: a sword attack was refused, the player typed
+    // "really?", and that came back as a valid action — so the narrator
+    // performed the very attack that had just been refused. The next
+    // player typed "why am i not dead" and was healed for saying it.
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/NOT THE CHARACTER DOING SOMETHING/.test(sys),
+        'an action has to be the character doing something');
+    ok(/argument about the rules|complaint about what just happened/.test(sys),
+        'complaints and rules arguments are named');
+    ok(/Never guess at what the player probably meant/.test(sys),
+        'and it is told not to guess at what they meant');
+    ok(/never resolve the thing they were complaining about/.test(sys),
+        'nor to resolve the thing being complained about');
+    ok(/however badly spelled/.test(sys), 'while a badly written action still stands');
+
+    const ex = ai.TARGET_EXAMPLES;
+    const byText = (needle) => ex.find(([q]) => q.includes(needle));
+    for (const [needle, why] of [
+        ['"really?"', 'the exact turn that broke it is taught by example'],
+        ['why am i not dead', 'so is the one that healed a dying player'],
+        ["that shouldn't have worked", 'and arguing with the cards'],
+    ]) {
+        const e = byText(needle);
+        const p = e && JSON.parse(e[1]);
+        ok(p && p.ok === false && p.kind === 'meta', `${why}`);
+        ok(p && !p.targets.length, `and ${needle} strikes nobody`);
+    }
+
+    // The other half of the lesson, or it learns to refuse sloppy typing.
+    const rough = byText('i wanna stab bram wit the knife');
+    const rp = rough && JSON.parse(rough[1]);
+    ok(rp && rp.ok === true, 'a badly spelled attack is still an attack');
+    eq(rp && rp.targets[0], 'Bram', 'and it still finds its target');
+}
+
+head('An invented limit does not get to refuse a legal action');
+{
+    // "No swords in this world" — in 12th-century Europe, in a world whose
+    // absent list read firearms, gunpowder, electricity, modern medicine,
+    // magic, telecommunication. The 8B model made the rule up, and the
+    // player argued with it, which is what produced the turn above.
+    const W = require('../lib/world');
+    const medieval = W.parseWorld(`<<<WORLD
+where: 12th-century Europe, a patchwork of medieval cities.
+goal: Outlive every rival.
+power: Only mundane skills and weapons; travel by foot, horseback, or wagon.
+tone: grim, brutal
+places: Bruges market square; Aachen tavern
+holds: feudal lords command armies
+absent: firearms; gunpowder; electricity; modern medicine; magic
+>>>`);
+
+    ok(!ai.citationHolds('no swords', medieval),
+        'a limit the setting never mentions does not hold');
+    ok(!ai.citationHolds('', medieval), 'and neither does citing nothing at all');
+    ok(ai.citationHolds('gunpowder', medieval), 'but something it lists as absent does');
+    ok(ai.citationHolds('no firearms in this age', medieval),
+        'however the citation is worded around it');
+    ok(ai.citationHolds('Only mundane skills', medieval),
+        'and so does the ceiling on the possible');
+    ok(!ai.citationHolds('firearms', W.blankWorld()),
+        'with no world set there are no world refusals to make');
+
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/cite —/.test(sys), 'the screening is asked to cite what rules an action out');
+
+    // The instruction the over-refusal needed: the lists are short, not
+    // complete, and everything ordinary is present whether listed or not.
+    const bounds = ai.boundsMessage(medieval);
+    ok(/NOT AN INVENTORY/.test(bounds), 'the lists are not an inventory of the world');
+    ok(/A sword in a medieval city/.test(bounds), 'said with the example that got it wrong');
+    ok(/When you are unsure, allow it/.test(bounds), 'and doubt resolves toward allowing');
+    ok(/copied as they are written/.test(bounds), 'a refusal has to quote the setting');
+}
+
+head('A tag is never cut in the middle of a word');
+{
+    // Both of these were carried, as written, for a whole game: a wound
+    // reading "bandaged puncture wound to sid" and a world that held
+    // "political intrigue can turn allies into enem".
+    const W = require('../lib/world');
+    // Whatever survives has to be whole words off the front of the original.
+    const wholeWords = (original, trimmed) => {
+        const a = original.split(' '), b = trimmed.split(' ');
+        return b.length <= a.length && b.every((w, i) => w === a[i]);
+    };
+
+    const wound = (t) => ai.parseState(
+        `Prose.\n<<<STATE\nKira | is: a diver | hurt: ${t}\n>>>`, ['Kira']).sheets.Kira.wounds[0];
+
+    const fits = 'bandaged puncture wound to side';
+    eq(wound(fits), fits, 'a tag that fits is left exactly alone');
+
+    // Longer than the allowance, so something must go — but not half a word.
+    const over = 'a deep bandaged puncture wound to the left side and ribs';
+    const cut = wound(over);
+    ok(cut.length < over.length, `an overlong tag is shortened (${cut.length} chars)`);
+    ok(wholeWords(over, cut), `and only ever at a word ("${cut}")`);
+
+    const w = W.parseWorld(`<<<WORLD
+where: A city.
+holds: political intrigue can turn allies into enemies overnight and then some
+>>>`);
+    ok(!/\benem$/.test(w.holds[0]), `nor is a world field ("${w.holds[0]}")`);
+    ok(/\ball allies into enemies\b|enemies/.test(w.holds[0]) || w.holds[0].endsWith('into'),
+        'it ends on a whole word');
+    ok(w.holds[0].length <= 44, 'while still fitting the reference card');
+
+    // A single word longer than the whole allowance still has to be cut,
+    // or the limit means nothing.
+    const huge = ai.parseState(
+        `Prose.\n<<<STATE\nKira | is: a diver | hurt: ${'x'.repeat(80)}\n>>>`, ['Kira']);
+    ok(huge.sheets.Kira.wounds[0].length <= 38, 'one impossible word is still trimmed');
 }
 
 head('A forced consequence cannot invent unrelated damage');

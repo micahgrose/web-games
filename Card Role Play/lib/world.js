@@ -18,12 +18,22 @@ const CLOSE = '>>>';
 
 const clip = (s, n) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, n);
 
+// The brief is read by the narrator every turn and shown to every player,
+// so a field cut mid-word stays cut: one game carried "political intrigue
+// can turn allies into enem" for the whole of its length. Trim at a word.
+function trimWords(s, n) {
+    const t = clip(s, 4 * n);
+    if (t.length <= n) return t;
+    const cut = t.lastIndexOf(' ', n);
+    return cut > 0 ? t.slice(0, cut) : t.slice(0, n);
+}
+
 function list(raw, maxItems, maxLen = 44) {
     if (!raw) return [];
     const t = String(raw).trim();
     if (!t || t === '-' || /^(none|nothing|n\/a|unknown)$/i.test(t)) return [];
     return t.split(/[;,]/)
-        .map(s => clip(s, maxLen))
+        .map(s => trimWords(s, maxLen))
         .filter(s => s && !/^(none|-|nothing)$/i.test(s))
         .slice(0, maxItems);
 }
@@ -136,7 +146,7 @@ function addPlaces(world, names) {
     if (!world || !names?.length) return world;
     const have = new Set(world.places.map(p => p.toLowerCase()));
     for (const raw of names) {
-        const p = clip(raw, 44);
+        const p = trimWords(raw, 44);
         if (p && !have.has(p.toLowerCase())) { world.places.push(p); have.add(p.toLowerCase()); }
     }
     // The list is a reference card. Oldest anchor the setting, newest are

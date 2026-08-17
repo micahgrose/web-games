@@ -443,11 +443,18 @@ async function handleAction(room, player, text) {
     L.write(room.id, 'triage', verdict.ok
         ? `targets: ${verdict.targets.join(', ') || 'nobody'}`
             + `${verdict.everyone ? ' (everyone)' : ''}`
-        : `REFUSED — ${verdict.reason || '(no reason given)'}`);
+        : `REFUSED (${verdict.kind || 'unstated'}) — ${verdict.reason || '(no reason given)'}`);
 
     if (!verdict.ok) {
+        // A player who typed a question rather than an action needs to be
+        // told which of the two they did, not "that did not come through".
+        const FALLBACK = {
+            meta: 'That is a question, not a move. Say what you do.',
+            noise: 'That came through as noise. Say it again in plain words.',
+        };
         io.to(player.id).emit('nope', {
-            reason: verdict.reason || 'That did not come through. Try saying it another way.',
+            reason: verdict.reason || FALLBACK[verdict.kind]
+                || 'That did not come through. Try saying it another way.',
             deadlineIn: TURN_MS,
         });
         setClock(room, TURN_MS, () => onTurnExpired(room, player.id));

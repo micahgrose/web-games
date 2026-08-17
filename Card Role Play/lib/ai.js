@@ -238,12 +238,27 @@ async function call(body, { tries = 3, timeout = 45000 } = {}) {
 
 const clip = (s, n) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, n);
 
-function cleanList(raw, maxItems = 3, maxLen = 30) {
+/**
+ * A tag has to fit, but it is also read aloud by the narrator every turn
+ * and shown to the players on their sheet, so it cannot be cut mid-word:
+ * "bandaged puncture wound to side" came back as "…to sid" and then went
+ * on being handed to the model like that, turn after turn. Trim at the
+ * last word that fits instead, and only chop a word if the very first
+ * one is longer than the whole allowance.
+ */
+function trimWords(s, n) {
+    const t = clip(s, 4 * n);
+    if (t.length <= n) return t;
+    const cut = t.lastIndexOf(' ', n);
+    return cut > 0 ? t.slice(0, cut) : t.slice(0, n);
+}
+
+function cleanList(raw, maxItems = 3, maxLen = 38) {
     if (!raw) return [];
     const t = String(raw).trim();
     if (!t || t === '-' || /^(none|nothing|n\/a)$/i.test(t)) return [];
     return t.split(/[;,]/)
-        .map(s => clip(s, maxLen))
+        .map(s => trimWords(s, maxLen))
         .filter(s => s && !/^(none|-|nothing)$/i.test(s))
         .slice(0, maxItems);
 }
@@ -270,7 +285,7 @@ function parseState(text, names) {
         const worldMatch = /^WORLD\s*:\s*(.+)$/i.exec(row);
         if (worldMatch) {
             for (const raw of worldMatch[1].split(/[;,]/)) {
-                const p = clip(raw, 44);
+                const p = trimWords(raw, 44);
                 if (p && !/^(none|-|nothing)$/i.test(p)) places.push(p);
             }
             continue;
@@ -302,7 +317,7 @@ function parseState(text, names) {
                 sheet.character = /^-?$|^(none|unknown|not yet declared)$/i.test(v) ? '' : v;
             }
             else if (key === 'at') sheet.where = /^-?$|^(none|nowhere|unknown)$/i.test(clip(m[2], 44))
-                ? '' : clip(m[2], 44);
+                ? '' : trimWords(m[2], 44);
             else if (key === 'hurt') sheet.wounds = cleanList(m[2]);
             else if (key === 'has') sheet.boons = cleanList(m[2]);
             else if (key === 'now') sheet.status = cleanList(m[2], 2);
@@ -397,7 +412,7 @@ function namesIn(text, candidates) {
 // named here is committed to defending, whatever they actually wanted to
 // do. Over-including is not the safe direction it looks like.
 const TRIAGE_ACTION_SYSTEM =
-`You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"targets":string[],"everyone":boolean}.
+`You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"kind":string,"targets":string[],"everyone":boolean}.
 
 Your one important job is deciding who must DEFEND THEMSELVES this instant.
 
@@ -407,55 +422,132 @@ An action the actor performs on their own body, position, belongings or visibili
 When a genuine attack is a close call, include them: a missed target is struck with no chance to answer.
 everyone — true when the action strikes at other characters WITHOUT naming them: an area effect, a blast, a collapse, a spell over the whole room, or "whoever is nearest". Leave targets empty in that case.
 Neither — an action on the actor alone, on the surroundings, or a friendly or conversational exchange that nobody would need to defend against.
-ok — false ONLY for keyboard mashing or text that is not intelligible English. Anything understandable, however fantastical, is valid.
-reason — one short sentence, only when ok=false.`;
+ok — false for keyboard mashing, for text that is not intelligible English, and for anything that is NOT THE CHARACTER DOING SOMETHING.
+That last one matters. A turn is a thing the character does or says inside the story. It is not a question put to you, an argument about the rules, a complaint about what just happened, a comment on their own situation, or thinking out loud. "really?", "why am i not dead", "that shouldn't have worked", "wait what", "how much health do I have" — none of these are actions, and none of them may be turned into one. Never guess at what the player probably meant and never resolve the thing they were complaining about; refuse, and ask them to say what their character does.
+Anything the character actually does is valid, however fantastical, however badly spelled, and whether or not it is likely to work.
+kind — when ok=false, say which: "noise" for mashing or nonsense, "meta" for anything that is not the character acting, "impossible" for an action this world cannot contain. Empty string when ok=true.
+reason — one short sentence, only when ok=false.
+cite — only for kind "impossible": copy the words from the setting that rule this action out. Empty otherwise.`;
 
 // Worked examples beat prose rules on a small model, and getting
 // targeting wrong is the worst failure this game has: a missed target
 // means somebody is struck without ever being allowed to answer.
 const TARGET_EXAMPLES = [
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I shove Bram off the ledge"',
-     '{"ok":true,"reason":"","targets":["Bram"],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I climb the mast and look out to sea"',
-     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I bring the whole ceiling down on top of everyone"',
-     '{"ok":true,"reason":"","targets":[],"everyone":true}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":true}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I snatch the key out of Vex\'s hand and run"',
-     '{"ok":true,"reason":"","targets":["Vex"],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":["Vex"],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I ask Bram what he saw in the hold"',
-     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: Bram has Kira pinned against the rail with one stone hand.\nKira writes: "I twist free and drive my knee up"',
-     '{"ok":true,"reason":"","targets":["Bram"],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I swing at whoever is closest to me"',
-     '{"ok":true,"reason":"","targets":[],"everyone":true}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":true}'],
 
     // Done to their own person, however much it invites an answer. The
     // one that broke the game: this was read as an attack on Vex, so Vex
     // was asked to DEFEND, answered by attacking, won the exchange — and
     // the engine turned that win into "Vex was not possessed".
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I show myself to Vex, leaving myself open to whatever Vex tries"',
-     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I taunt Bram, daring Bram to come at me"',
-     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I hide from Vex behind the crates"',
-     '{"ok":true,"reason":"","targets":[],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
 
     // The near miss: same character named, same room, but this one is
     // done TO Vex and Vex must be allowed to answer it.
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I grab Vex by the arm and haul Vex into the light"',
-     '{"ok":true,"reason":"","targets":["Vex"],"everyone":false}'],
+     '{"ok":true,"reason":"","kind":"","targets":["Vex"],"everyone":false}'],
 
     ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "asdkjh a;lskdjf"',
-     '{"ok":false,"reason":"That came through as noise.","targets":[],"everyone":false}'],
+     '{"ok":false,"reason":"That came through as noise.","kind":"noise","targets":[],"everyone":false}'],
+
+    // Not actions. The game that produced these: an attack was refused,
+    // the player typed "really?", and it came back as a valid SUCCESS —
+    // so the narrator performed the very attack that had just been
+    // refused. The next player typed "why am i not dead" and was healed
+    // for it. Neither is a thing a character does.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Bram drives the blade home and Kira folds over it.\nKira writes: "really?"',
+     '{"ok":false,"reason":"Say what you do about it.","kind":"meta","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Kira lies bleeding on the stones.\nKira writes: "why am i not dead"',
+     '{"ok":false,"reason":"Still breathing. Say what you do with the breath.","kind":"meta","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "that shouldn\'t have worked"',
+     '{"ok":false,"reason":"Argue with it in the fiction — what does Kira do?","kind":"meta","targets":[],"everyone":false}'],
+
+    // Badly written but unmistakably an action: this must NOT be refused.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "i wanna stab bram wit the knife"',
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
 ];
+
+const bare = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\b(no|not|none|nothing|any|the|a|an)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Does a refusal on world grounds actually rest on the world?
+ *
+ * The model is made to CITE what rules the action out — an entry from the
+ * setting's absent list, or the words of its ceiling on the possible.
+ * This checks the citation is really there. Asking for one does most of
+ * the work on its own: a model that has to name the rule it is applying
+ * is much less willing to invent the rule.
+ *
+ * Leniency is deliberate. Narrating an action the world should not allow
+ * is a bad passage; refusing an action the world does allow is a player
+ * told no by a machine that is simply wrong, which is worse.
+ */
+function citationHolds(cite, setting) {
+    if (!world.isReady(setting)) return false;      // no world, no world refusals
+    const claim = bare(cite);
+    if (claim.length < 3) return false;            // cited nothing at all
+    const grounds = [...(setting.absent || []), setting.power || ''].map(bare).filter(Boolean);
+    return grounds.some(g => g.includes(claim) || claim.includes(g)
+        // Or any single word of the citation is one the world itself used.
+        || claim.split(' ').some(w => w.length > 3 && g.split(' ').includes(w)));
+}
+
+/** What triage is told about the world it screens actions against. */
+function boundsMessage(setting) {
+    const bounds = world.worldConstraint(setting);
+    if (!bounds) return '';
+    return `${bounds}\n\nSet ok=false with kind "impossible" ONLY when the action needs `
+        + `something named above as absent — a car where there are no engines, a phone call `
+        + `where there is no electricity — or a power beyond what this world plainly bends to, `
+        + `like flying or crossing a continent in a breath where people simply cannot. Give `
+        + `reason as one line of plain fiction naming what is not there, never a rule ("There `
+        + `is no telephone in this century.").\n`
+        // The refusal that made this necessary: a sword, in 12th-century
+        // Europe, in a world whose absent list read firearms / gunpowder /
+        // electricity / modern medicine / magic / telecommunication.
+        // Nothing about swords. The player was told "No swords in this
+        // world", argued with it, and the argument got resolved as an
+        // attack — the very attack that had just been refused.
+        + `THE LISTS ABOVE ARE NOT AN INVENTORY. They are the few things worth writing down; `
+        + `everything ordinary for a world like this is present whether it is listed or not. A `
+        + `sword in a medieval city, a rope on a ship, a knife in a kitchen, a horse on a road `
+        + `— all there, none of them your business. If what the action needs is not named as `
+        + `absent and is not a power the world rules out, it is available: say ok=true. `
+        + `Unusual, difficult, reckless, far-fetched and rude all pass, and going somewhere `
+        + `unlisted is fine — the story can grow a new room. When you are unsure, allow it.\n`
+        + `To refuse on these grounds you must fill "cite" with the words above that rule the `
+        + `action out, copied as they are written — an entry from DOES NOT EXIST HERE, or the `
+        + `part of HOW FAR IT BENDS that forbids it. If you cannot point at anything above, `
+        + `there is nothing stopping the action: set ok=true.`;
+}
 
 /**
  * Decides three things before any expensive call: is the message
@@ -509,17 +601,8 @@ The player is describing WHO THEY ARE. Set ok=false if the text is keyboard mash
         // The world goes in AFTER the examples: the examples teach the
         // targeting call, this decides whether the action can happen at
         // all. Last read, most closely followed.
-        if (bounds) {
-            messages.push({ role: 'system', content:
-                `${bounds}\n\nAlso set ok=false when the action needs something this world does not `
-                + `contain — a car where there are no engines, a phone call where there is no `
-                + `electricity — or a power beyond what this world bends to, like flying or `
-                + `crossing a continent in a breath where people simply cannot. Give reason as one `
-                + `line of plain fiction naming what is not there, never a rule ("There is no `
-                + `telephone in this century."). Be strict only about what is genuinely out of `
-                + `reach: unusual, difficult, reckless and far-fetched all pass, and going `
-                + `somewhere unlisted is fine — the story can grow a new room.` });
-        }
+        const bm = boundsMessage(setting);
+        if (bm) messages.push({ role: 'system', content: bm });
     }
 
     // What just happened matters: "I twist free" only has a target if
@@ -551,10 +634,27 @@ The player is describing WHO THEY ARE. Set ok=false if the text is keyboard mash
 
         if (parsed.everyone === true) targets = others.slice();
 
+        let ok = parsed.ok !== false;
+        let reason = clip(parsed.reason, 160);
+        const kind = clip(parsed.kind, 20).toLowerCase();
+
+        // An 8B model told a player there were no swords in 12th-century
+        // Europe. The prompt says the lists are not an inventory, but a
+        // hallucinated limit is worse than a permitted long shot, so the
+        // refusal has to point at something the world actually lacks —
+        // and this checks that rather than trusting it.
+        if (!ok && kind === 'impossible' && !citationHolds(parsed.cite, setting)) {
+            console.warn(`[ai] overruling an invented limit: "${reason}"`
+                + ` (cited "${clip(parsed.cite, 60) || 'nothing'}")`);
+            ok = true;
+            reason = '';
+        }
+
         return {
-            ok: parsed.ok !== false,
+            ok,
             duplicate: !!parsed.duplicate,
-            reason: clip(parsed.reason, 160),
+            reason,
+            kind,
             everyone: parsed.everyone === true,
             targets,
         };
@@ -929,6 +1029,7 @@ function understudyDead(directive, names) {
 module.exports = {
     triage, narrate, epilogue, interviewWorld, compactWorld,
     castBlock, parseState, looksLikeNoise, isRehash, namesIn, visibleFrom,
+    boundsMessage, citationHolds, trimWords,
     GM_SYSTEM, TRIAGE_ACTION_SYSTEM, TARGET_EXAMPLES,
     OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,
 };
