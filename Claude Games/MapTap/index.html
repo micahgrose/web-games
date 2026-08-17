@@ -69,6 +69,10 @@
     padding:9px 18px; font-size:12px;}
   #zoomHint{position:fixed; right:14px; bottom:14px; font-size:11px; color:var(--faint);
     letter-spacing:.08em; pointer-events:none;}
+  #detailChip{position:fixed; right:14px; bottom:34px; font-size:10px; letter-spacing:.20em;
+    text-transform:uppercase; color:var(--sky); opacity:.75; pointer-events:none;
+    transition:opacity .25s ease; z-index:11;}
+  #detailChip.hidden{opacity:0;}
 
   /* -------------------------------------------------------------- reveal */
   #reveal{top:14px; left:14px; width:min(420px,50vw); max-height:calc(100vh - 120px); overflow-y:auto;
@@ -199,6 +203,7 @@
   </div>
 </div>
 <div id="zoomHint" class="hidden">+ / − to zoom</div>
+<div id="detailChip" class="hidden">sharpening</div>
 
 <!-- --------------------------------------------------------------- menu -->
 <div id="menu" class="screen">
@@ -214,6 +219,7 @@
     <button class="btn ghost" id="statsBtn">Stats</button>
     <button class="btn ghost" id="howBtn">How it works</button>
     <button class="btn ghost" id="muteBtn2">Sound: on</button>
+    <button class="btn ghost" id="detailBtn">Detail: streaming</button>
   </div>
   <div class="note" id="menuNote">Five places a round. Score is 0–100 by distance, with the last three questions worth double and triple. A perfect round is 1000.</div>
 </div>
@@ -274,6 +280,7 @@
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>
 <script src="js/earth-texture.js"></script>
+<script src="js/tiles.js"></script>
 <script src="js/render-gl.js"></script>
 <script>
 (function () {
@@ -771,6 +778,71 @@
   }
   $('muteBtn').addEventListener('click', toggleMute);
   $('muteBtn2').addEventListener('click', toggleMute);
+
+  /* ------------------------------------------------------- streamed detail */
+
+  // The embedded texture is ~9.8 km per pixel; zoomed in, sharper tiles of the
+  // same imagery are pulled from NASA GIBS. Entirely optional — off, offline or
+  // failing, the embedded texture just stays on screen.
+  var DETAIL_KEY = 'maptap.detail.v1';
+  var stream = null, settleMs = 0, lastCamSig = '';
+
+  function detailPref() {
+    try { return localStorage.getItem(DETAIL_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setDetailPref(on) {
+    try { localStorage.setItem(DETAIL_KEY, on ? '1' : '0'); } catch (e) {}
+  }
+  function refreshDetailBtn() {
+    var on = stream ? stream.enabled : detailPref();
+    $('detailBtn').textContent = 'Detail: ' + (on ? 'streaming' : 'embedded only');
+  }
+  $('detailBtn').addEventListener('click', function () {
+    sfx('ui');
+    var on = !(stream ? stream.enabled : detailPref());
+    setDetailPref(on);
+    if (stream) {
+      stream.setEnabled(on);
+      stream.disabledByFailure = false;
+      stream.failures = 0;
+      lastCamSig = '';
+    }
+    refreshDetailBtn();
+    toast(on ? 'Streaming sharper imagery when you zoom' : 'Using embedded imagery only');
+  });
+
+  function startStream() {
+    if (!window.Tiles || !globe.setDetail) return;
+    stream = new window.Tiles.TileStream({
+      enabled: detailPref(),
+      onchange: function (s) {
+        if (globe.setDetail) globe.setDetail(s.canvas, s.rect, s.version);
+      },
+      onstatus: function (st) {
+        var chip = $('detailChip');
+        if (st.unavailable) {
+          chip.classList.add('hidden');
+          toast('Detail streaming unavailable — using embedded imagery');
+        } else if (st.loading) chip.classList.remove('hidden');
+        else chip.classList.add('hidden');
+      }
+    });
+    refreshDetailBtn();
+  }
+
+  // Only ask for tiles once the view has stopped moving, so dragging and
+  // zooming do not fire off a request per frame.
+  function pumpStream(dt) {
+    if (!stream) return;
+    var sig = globe.cam.lon.toFixed(3) + ',' + globe.cam.lat.toFixed(3) + ',' + globe.cam.scale.toFixed(1);
+    if (sig !== lastCamSig) { lastCamSig = sig; settleMs = 0; return; }
+    if (settleMs < 0) return;                  // already handled this position
+    settleMs += dt;
+    if (settleMs >= 200) {
+      settleMs = -1;
+      stream.update(globe.cam, globe.w, globe.h);
+    }
+  }
   $('copyBtn').addEventListener('click', function () {
     var text = Game.summaryText(S.weak ? 'explorer' : S.tier, S.results, S.total);
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -809,6 +881,8 @@
       }
     }
 
+    pumpStream(dt);
+
     if (globe.arc && globe.arc.t < 1) globe.arc.t = Math.min(1, globe.arc.t + dt / 520);
     if (globe.markers.length && S.phase === 'aiming') {
       S.pulse = (S.pulse + dt / 900) % 1;
@@ -839,8 +913,10 @@
       globe = gl;
       globe.resize();
       globe.clampCamera();
+      startStream();
     });
   }
+  refreshDetailBtn();
 
   requestAnimationFrame(frame);
 })();

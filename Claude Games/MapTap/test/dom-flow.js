@@ -46,6 +46,7 @@ function recordingContext() {
     setLineDash() { bump('setLineDash'); },
     fillText() { bump('fillText'); },
     measureText(t) { bump('measureText'); return { width: String(t).length * 7 }; },
+    drawImage() { bump('drawImage'); },
     createRadialGradient() { bump('createRadialGradient'); return grad; },
     createLinearGradient() { bump('createLinearGradient'); return grad; }
   };
@@ -167,17 +168,25 @@ const storage = (() => {
 // vector globe to the satellite one is exercised as the async handoff it is.
 const pendingImages = [];
 class ImageStub {
-  constructor() { this.onload = null; this.onerror = null; this._src = ''; }
+  constructor() { this.onload = null; this.onerror = null; this._src = ''; this.crossOrigin = null; }
   get src() { return this._src; }
   set src(v) {
     this._src = v;
+    ImageStub.srcLog.push(v);
     const self = this;
+    // Embedded data URIs and GIBS tiles both "load"; anything else fails, which
+    // is how the offline path gets exercised.
     pendingImages.push(function () {
-      if (/^data:image\//.test(v)) { if (self.onload) self.onload(); }
+      const good = /^data:image\//.test(v) ||
+        (/^https:\/\/gibs\.earthdata\.nasa\.gov\//.test(v) && !ImageStub.failTiles);
+      if (good) { if (self.onload) self.onload(); }
       else if (self.onerror) self.onerror();
     });
   }
 }
+ImageStub.srcLog = [];
+ImageStub.failTiles = false;
+const gibsRequests = () => ImageStub.srcLog.filter(u => u.indexOf('gibs.earthdata') !== -1).length;
 function flushImages() {
   const q = pendingImages.splice(0, pendingImages.length);
   q.forEach(fn => fn());
@@ -239,6 +248,7 @@ setGlobal('requestAnimationFrame', cb => windowStub.requestAnimationFrame(cb));
 setGlobal('setTimeout', windowStub.setTimeout);
 setGlobal('clearTimeout', windowStub.clearTimeout);
 setGlobal('devicePixelRatio', 2);
+windowStub.document = documentStub;   // a real window has one; tiles.js uses it
 setGlobal('Image', ImageStub);
 setGlobal('AudioContext', function () { return audioCtx; });
 windowStub.Image = ImageStub;
@@ -261,6 +271,8 @@ require(path.join(ROOT, 'js/render.js'));   // defines window.Globe
 global.Globe = windowStub.Globe;
 const EARTH_TEXTURE = require(path.join(ROOT, 'js/earth-texture.js'));
 global.EARTH_TEXTURE = EARTH_TEXTURE; windowStub.EARTH_TEXTURE = EARTH_TEXTURE;
+const Tiles = require(path.join(ROOT, 'js/tiles.js'));
+global.Tiles = Tiles; windowStub.Tiles = Tiles;
 require(path.join(ROOT, 'js/render-gl.js'));   // defines window.GlobeGL
 global.GlobeGL = windowStub.GlobeGL;
 
@@ -374,6 +386,7 @@ function fakeGL() {
     getUniformLocation(p, n) { gl._uniforms.push(n); return { n: n }; },
     uniform1i() {}, uniform1f() { bump('uniform1f'); },
     uniform2f() { bump('uniform2f'); }, uniform3f() { bump('uniform3f'); },
+    uniform4f() { bump('uniform4f'); },
     viewport() { bump('viewport'); }, drawArrays() { bump('drawArrays'); }
   };
   return gl;
@@ -399,7 +412,9 @@ function fakeGL() {
 
   // Every uniform the renderer looks up must be declared in the shader.
   const frag = gl._sources[1];
-  eq(gl._uniforms.length, 7, 'seven uniforms are located');
+  eq(gl._uniforms.length, 10, 'ten uniforms are located');
+  ['uTex', 'uDetail', 'uDetailRect', 'uHasDetail'].forEach(n =>
+    ok(gl._uniforms.indexOf(n) !== -1, n + ' is located'));
   gl._uniforms.forEach(n => ok(frag.indexOf('uniform') !== -1 && frag.indexOf(n) !== -1,
     'uniform ' + n + ' is declared in the shader'));
 
@@ -686,6 +701,102 @@ section('weak spots unlock');
   ok(saved.misses.some(m => m.name === first) || LOCATIONS.some(L => L.n === first),
     'weak spot round opens on a real place');
   elements.quitBtn.dispatch('click');
+}
+
+/* -------------------------------------------------------- streamed detail */
+section('streamed detail');
+{
+  // Streaming only kicks in on a still, zoomed-in view during a round, so:
+  // start one, zoom deep, and let the camera settle past the debounce.
+  tierButtons[1].dispatch('click');
+  runFrames(40, 30);                       // let the opening fly-to finish
+
+  const beforeZoom = gibsRequests();
+  eq(beforeZoom, 0, 'a world view has requested no tiles');
+  ok(pageGL._calls.texImage2D === 1, 'only the embedded texture is uploaded so far');
+
+  for (let i = 0; i < 14; i++) windowStub.dispatch('keydown', { key: '+' });
+  runFrames(20, 30);                       // camera holds still past the 200ms settle
+  ok(gibsRequests() > beforeZoom, 'zooming in requests tiles (' + gibsRequests() + ')');
+
+  const urls = ImageStub.srcLog.filter(u => u.indexOf('gibs.earthdata') !== -1);
+  ok(urls.every(u => /\/500m\/\d+\/\d+\/\d+\.jpeg$/.test(u)), 'every tile URL is well formed');
+  ok(urls.length <= Tiles.MAX_TILES, 'the tile budget was respected (' + urls.length + ')');
+  ok(!elements.detailChip.hasClass('hidden'), 'the sharpening indicator is showing');
+
+  flushImages();
+  runFrames(3);
+  ok(pageGL._calls.texImage2D > 1, 'the composited detail was uploaded as a second texture');
+  ok(pageGL._calls.uniform4f > 0, 'the detail rectangle was sent to the shader');
+  ok(elements.detailChip.hasClass('hidden'), 'the indicator clears once loaded');
+
+  // Sitting still must not keep hammering the service.
+  const settled = gibsRequests();
+  runFrames(30, 30);
+  eq(gibsRequests(), settled, 'a still view makes no further requests');
+
+  // Zooming back out drops detail and returns to the embedded texture.
+  for (let i = 0; i < 14; i++) windowStub.dispatch('keydown', { key: '-' });
+  runFrames(20, 30);
+  ok(gibsRequests() === settled, 'zooming out requests nothing new');
+  elements.quitBtn.dispatch('click');
+  runFrames(3);
+}
+
+section('detail toggle');
+{
+  eq(elements.detailBtn.textContent, 'Detail: streaming', 'the toggle starts on');
+  elements.detailBtn.dispatch('click');
+  eq(elements.detailBtn.textContent, 'Detail: embedded only', 'clicking turns streaming off');
+  eq(storage.getItem('maptap.detail.v1'), '0', 'the choice is persisted');
+
+  // With it off, no amount of zooming may touch the network.
+  const before = gibsRequests();
+  tierButtons[1].dispatch('click');
+  runFrames(30, 30);
+  for (let i = 0; i < 14; i++) windowStub.dispatch('keydown', { key: '+' });
+  runFrames(30, 30);
+  eq(gibsRequests(), before, 'streaming off means no requests at all');
+  elements.quitBtn.dispatch('click');
+
+  elements.detailBtn.dispatch('click');
+  eq(elements.detailBtn.textContent, 'Detail: streaming', 'and it can be turned back on');
+  eq(storage.getItem('maptap.detail.v1'), '1', 'stored again');
+}
+
+section('detail when offline');
+{
+  ImageStub.failTiles = true;
+  const before = gibsRequests();
+  tierButtons[1].dispatch('click');
+  runFrames(30, 30);
+  let threw = null;
+  try {
+    for (let round = 0; round < 8; round++) {
+      for (let i = 0; i < 14; i++) windowStub.dispatch('keydown', { key: '+' });
+      runFrames(12, 30);
+      flushImages();
+      runFrames(2);
+      windowStub.dispatch('keydown', { key: '-' });
+      runFrames(12, 30);
+    }
+  } catch (e) { threw = e; }
+  eq(threw, null, 'failing tiles never break the page' + (threw ? ': ' + threw.message : ''));
+  ok(gibsRequests() > before, 'it did try');
+  ok(elements.detailChip.hasClass('hidden'), 'the indicator is not left spinning');
+
+  // After repeated failures it should give up rather than retry forever.
+  const afterGivingUp = gibsRequests();
+  for (let i = 0; i < 14; i++) windowStub.dispatch('keydown', { key: '+' });
+  runFrames(20, 30);
+  eq(gibsRequests(), afterGivingUp, 'it stops trying once the service looks unreachable');
+
+  // The globe must still be rendering perfectly well on the embedded texture.
+  const drawsBefore = pageGL._calls.drawArrays;
+  runFrames(5);
+  ok(pageGL._calls.drawArrays > drawsBefore, 'the globe keeps rendering regardless');
+  elements.quitBtn.dispatch('click');
+  ImageStub.failTiles = false;
 }
 
 /* ------------------------------------------------------------------ sound */

@@ -31,6 +31,9 @@
     'uniform vec3 uNorth;',
     'uniform vec3 uView;',
     'uniform sampler2D uTex;',
+    'uniform sampler2D uDetail;',
+    'uniform vec4 uDetailRect;',   // lonMin, latMax, lonSpan, latSpan (degrees)
+    'uniform float uHasDetail;',
     'out vec4 outColor;',
     '',
     'const float PI = 3.141592653589793;',
@@ -74,6 +77,23 @@
     '    if (abs(ddx.x) > 0.5) ddx.x -= sign(ddx.x);',
     '    if (abs(ddy.x) > 0.5) ddy.x -= sign(ddy.x);',
     '    vec3 earth = textureGrad(uTex, uv, ddx, ddy).rgb;',
+    '',
+    // Streamed detail covers a lon/lat rectangle. Inside it, sample the sharper
+    // imagery instead, feathered at the border so the join cannot be picked out.
+    '    if (uHasDetail > 0.5) {',
+    '      float lonDeg = lon * 180.0 / PI;',
+    '      float latDeg = lat * 180.0 / PI;',
+    '      float rel = mod(lonDeg - uDetailRect.x + 720.0, 360.0);',
+    '      vec2 duv = vec2(rel / uDetailRect.z, (uDetailRect.y - latDeg) / uDetailRect.w);',
+    '      if (duv.x >= 0.0 && duv.x <= 1.0 && duv.y >= 0.0 && duv.y <= 1.0) {',
+    // Reuse the seam-corrected derivatives, rescaled to the detail rectangle.
+    '        vec2 dscale = vec2(360.0 / uDetailRect.z, 180.0 / uDetailRect.w);',
+    '        vec3 sharp = textureGrad(uDetail, duv, ddx * dscale, ddy * dscale).rgb;',
+    '        vec2 edge = min(duv, 1.0 - duv);',
+    '        float fade = smoothstep(0.0, 0.03, min(edge.x, edge.y));',
+    '        earth = mix(earth, sharp, fade);',
+    '      }',
+    '    }',
     '',
     // Sunlight from the upper left, plus gentle limb darkening.
     '    vec3 n = vec3(d.x, d.y, w);',
@@ -159,12 +179,46 @@
       east: gl.getUniformLocation(prog, 'uEast'),
       north: gl.getUniformLocation(prog, 'uNorth'),
       view: gl.getUniformLocation(prog, 'uView'),
-      tex: gl.getUniformLocation(prog, 'uTex')
+      tex: gl.getUniformLocation(prog, 'uTex'),
+      detail: gl.getUniformLocation(prog, 'uDetail'),
+      detailRect: gl.getUniformLocation(prog, 'uDetailRect'),
+      hasDetail: gl.getUniformLocation(prog, 'uHasDetail')
     };
     gl.uniform1i(this.u.tex, 0);
+    gl.uniform1i(this.u.detail, 1);
+    gl.uniform1f(this.u.hasDetail, 0);
+
+    this.detailTex = null;
+    this.detailRect = null;
+    this.detailVersion = -1;
 
     this.resize();
   }
+
+  /* Hand over a composited detail canvas covering [lonMin, latMax, lonSpan,
+   * latSpan]. Pass a null canvas to go back to the embedded texture alone. */
+  GlobeGL.prototype.setDetail = function (canvas, rect, version) {
+    var gl = this.gl;
+    if (!canvas || !rect) {
+      this.detailRect = null;
+      this.detailVersion = version === undefined ? -1 : version;
+      return;
+    }
+    if (version !== undefined && version === this.detailVersion) return;
+    this.detailVersion = version === undefined ? this.detailVersion : version;
+
+    if (!this.detailTex) this.detailTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.detailTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, canvas);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.activeTexture(gl.TEXTURE0);
+    this.detailRect = rect;
+  };
 
   // Geometry, camera limits and hit testing are identical to the vector globe.
   ['fitScale', 'clampCamera', 'zoomFactor', 'toScreen', 'toGeo',
@@ -202,6 +256,18 @@
     gl.uniform3f(this.u.east, b.east[0], b.east[1], b.east[2]);
     gl.uniform3f(this.u.north, b.north[0], b.north[1], b.north[2]);
     gl.uniform3f(this.u.view, b.view[0], b.view[1], b.view[2]);
+
+    if (this.detailRect && this.detailTex) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.detailTex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform4f(this.u.detailRect, this.detailRect[0], this.detailRect[1],
+        this.detailRect[2], this.detailRect[3]);
+      gl.uniform1f(this.u.hasDetail, 1);
+    } else {
+      gl.uniform1f(this.u.hasDetail, 0);
+    }
+
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     var ctx = this.ctx;

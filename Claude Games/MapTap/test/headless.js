@@ -540,6 +540,229 @@ section('shader agrees with hit testing');
   ok(worst < 0.01, 'what you see and what you tap agree to within ' + worst.toExponential(2) + ' km');
 }
 
+/* ------------------------------------------------------- streaming detail */
+section('tile maths');
+{
+  const Tiles = require(path.join(ROOT, 'js/tiles.js'));
+
+  // The level table must match the GIBS EPSG:4326 "500m" matrix set exactly, or
+  // every tile request is off by a factor of two and the globe goes wrong.
+  eq(Tiles.LEVELS.length, 5, 'five usable levels');
+  eq(Tiles.TILE_PX, 512, 'GIBS 4326 tiles are 512 px');
+  const expected = [[3, 10, 5], [4, 20, 10], [5, 40, 20], [6, 80, 40], [7, 160, 80]];
+  Tiles.LEVELS.forEach((L, i) => {
+    eq(L.z, expected[i][0], 'level ' + i + ' z');
+    eq(L.cols, expected[i][1], 'level ' + i + ' matrix width');
+    eq(L.rows, expected[i][2], 'level ' + i + ' matrix height');
+    eq(L.cols * L.span, 360, 'level ' + L.z + ' tiles wrap the globe exactly');
+    eq(L.rows * L.span, 180, 'level ' + L.z + ' tiles cover pole to pole exactly');
+  });
+  near(Tiles.LEVELS[4].degPerPx * 111319, 489, 2, 'finest level is ~489 m per pixel');
+  ok(Tiles.LEVELS[0].degPerPx < Tiles.BASE_DEG_PER_PX,
+    'the coarsest streamed level still beats the embedded texture');
+
+  // The URL has to be exactly the template GIBS advertises.
+  eq(Tiles.tileUrl(7, 12, 34),
+    'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/BlueMarble_NextGeneration/default/500m/7/12/34.jpeg',
+    'tile URL matches the WMTS ResourceURL template');
+
+  // Level selection: coarse views must not stream at all, close views must.
+  eq(Tiles.pickLevel(Tiles.BASE_DEG_PER_PX * 2), null, 'a world view streams nothing');
+  eq(Tiles.pickLevel(Tiles.BASE_DEG_PER_PX), null, 'matching the embedded texture streams nothing');
+  ok(Tiles.pickLevel(Tiles.BASE_DEG_PER_PX * 0.9) !== null, 'just past it, streaming starts');
+  eq(Tiles.pickLevel(0.0000001).z, 7, 'extreme zoom asks for the finest level');
+  for (const L of Tiles.LEVELS) {
+    const picked = Tiles.pickLevel(L.degPerPx);
+    ok(picked.degPerPx <= L.degPerPx, 'level for ' + L.z + ' is at least as sharp as asked');
+  }
+
+  // Resolution maths against the real camera, at the zoom limits the game uses.
+  {
+    const minDim = 800, fit = minDim * 0.42;
+    const wide = Tiles.degreesPerPixel(fit, minDim);
+    const deep = Tiles.degreesPerPixel(fit * 34, minDim);
+    ok(wide > Tiles.BASE_DEG_PER_PX, 'at fit zoom the embedded texture is enough');
+    ok(deep < Tiles.LEVELS[4].degPerPx * 1.6, 'at max zoom the finest level is roughly matched');
+    eq(Tiles.pickLevel(deep).z, 7, 'max zoom selects the finest level');
+    ok(Tiles.degreesPerPixel(fit * 2, minDim) < wide, 'zooming in lowers degrees per pixel');
+  }
+
+  // Coverage: never more than the tile budget, and always actually covering the view.
+  {
+    let worstTiles = 0, checked = 0;
+    for (const zoom of [1.5, 2, 3, 5, 8, 13, 21, 34]) {
+      for (const lat of [0, 35, -52, 78, -85]) {
+        for (const lon of [0, 179.4, -176, 63]) {
+          const cam = { lon, lat, scale: 800 * 0.42 * zoom };
+          const dpp = Tiles.degreesPerPixel(cam.scale, 800);
+          const level = Tiles.pickLevel(dpp);
+          if (!level) continue;
+          const rect = Tiles.viewRect(cam, 1000, 800);
+          const cov = Tiles.coverage(rect, level);
+          ok(cov, 'coverage exists at zoom ' + zoom + ' lat ' + lat);
+          ok(cov.tiles.length <= Tiles.MAX_TILES,
+            'tile budget respected (' + cov.tiles.length + ') at zoom ' + zoom + ' lat ' + lat);
+          worstTiles = Math.max(worstTiles, cov.tiles.length);
+          checked++;
+          // Rows must be inside the matrix, columns wrapped into it.
+          cov.tiles.forEach(t => {
+            ok(t.row >= 0 && t.row < cov.level.rows, 'row ' + t.row + ' is inside the matrix');
+            ok(t.col >= 0 && t.col < cov.level.cols, 'col ' + t.col + ' is inside the matrix');
+          });
+          // The composite must actually contain the point being looked at.
+          const relLon = ((cam.lon - cov.lonMin) % 360 + 360) % 360;
+          ok(relLon <= cov.lonSpan + 1e-9, 'the camera longitude falls inside the composite');
+          const clampedLat = Math.max(-90, Math.min(90, cam.lat));
+          ok(clampedLat <= cov.latMax + 1e-9 && clampedLat >= cov.latMax - cov.latSpan - 1e-9,
+            'the camera latitude falls inside the composite');
+        }
+      }
+    }
+    ok(checked > 40, 'checked ' + checked + ' camera positions');
+    ok(worstTiles <= 16, 'worst case was ' + worstTiles + ' tiles');
+  }
+
+  // A view straddling the antimeridian must stay one contiguous grid.
+  {
+    const cam = { lon: 179.6, lat: 4, scale: 800 * 0.42 * 12 };
+    const cov = Tiles.coverage(Tiles.viewRect(cam, 1000, 800), Tiles.pickLevel(Tiles.degreesPerPixel(cam.scale, 800)));
+    ok(cov.tiles.length > 1, 'the seam view needs several tiles');
+    const cols = [...new Set(cov.tiles.map(t => t.col))];
+    ok(cols.some(c => c > cov.level.cols - 3) && cols.some(c => c < 3),
+      'tiles are taken from both sides of the antimeridian');
+    cov.tiles.forEach(t => ok(t.col >= 0 && t.col < cov.level.cols, 'wrapped column stays valid'));
+  }
+
+  // Polar views must not ask for rows that do not exist.
+  {
+    for (const lat of [89.9, -89.9]) {
+      const cam = { lon: 0, lat, scale: 800 * 0.42 * 9 };
+      const cov = Tiles.coverage(Tiles.viewRect(cam, 1000, 800), Tiles.pickLevel(Tiles.degreesPerPixel(cam.scale, 800)));
+      cov.tiles.forEach(t => ok(t.row >= 0 && t.row < cov.level.rows, 'polar row ' + t.row + ' is valid'));
+    }
+  }
+}
+
+section('tile streaming');
+{
+  const Tiles = require(path.join(ROOT, 'js/tiles.js'));
+
+  // Fake Image + canvas so the stream can be driven without a network or a DOM.
+  const loads = [];
+  class FakeImage {
+    constructor() { this.onload = null; this.onerror = null; this.crossOrigin = null; }
+    set src(v) { this._src = v; loads.push(this); }
+    get src() { return this._src; }
+  }
+  const drawn = [];
+  globalThis.Image = FakeImage;
+  globalThis.document = {
+    createElement: () => ({
+      width: 0, height: 0,
+      getContext: () => ({ clearRect() {}, drawImage(...a) { drawn.push(a.length); } })
+    })
+  };
+
+  function settle(ok) {
+    const batch = loads.splice(0, loads.length);
+    batch.forEach(img => { if (ok) { if (img.onload) img.onload(); } else if (img.onerror) img.onerror(); });
+    return batch.length;
+  }
+
+  const cam = { lon: 12, lat: 45, scale: 800 * 0.42 * 10 };
+  {
+    let changes = 0, statuses = [];
+    const s = new Tiles.TileStream({
+      onchange: () => changes++,
+      onstatus: st => statuses.push(st)
+    });
+
+    eq(s.update({ lon: 0, lat: 0, scale: 800 * 0.42 }, 1000, 800), false, 'a world view requests nothing');
+    eq(s.requests, 0, 'and issues no network requests at all');
+
+    ok(s.update(cam, 1000, 800), 'a zoomed view requests tiles');
+    ok(s.requests > 0, 'tiles were actually requested (' + s.requests + ')');
+    ok(statuses.some(st => st.loading), 'loading status was reported');
+    ok(loads.every(i => i.crossOrigin === 'anonymous'), 'every request is CORS-enabled for WebGL');
+    ok(loads.every(i => i.src.indexOf('https://gibs.earthdata.nasa.gov/') === 0), 'every request goes to GIBS');
+
+    const n = settle(true);
+    eq(changes, 1, 'one composite was produced from ' + n + ' tiles');
+    ok(s.rect && s.rect.length === 4, 'the composite reports its lon/lat rectangle');
+    ok(s.rect[2] > 0 && s.rect[3] > 0, 'the rectangle has positive extent');
+    ok(drawn.length >= n, 'every tile was drawn into the canvas');
+    eq(s.version, 1, 'version bumped once');
+
+    // Asking again from the same place must not re-request anything.
+    const before = s.requests;
+    eq(s.update(cam, 1000, 800), false, 'the same view is not re-fetched');
+    eq(s.requests, before, 'no extra requests');
+
+    // A nearby view reusing the same tiles must hit the cache.
+    s.update({ lon: cam.lon + 0.05, lat: cam.lat, scale: cam.scale }, 1000, 800);
+    eq(s.requests, before, 'cached tiles are reused rather than re-fetched');
+
+    // Zooming back out drops the detail so the base texture shows through.
+    const versionBefore = s.version;
+    s.update({ lon: 0, lat: 0, scale: 800 * 0.42 }, 1000, 800);
+    eq(s.rect, null, 'zooming out clears the detail rectangle');
+    ok(s.version > versionBefore, 'and tells the renderer to update');
+  }
+
+  // Being offline must degrade quietly, then stop trying.
+  {
+    let changes = 0, unavailable = false;
+    const s = new Tiles.TileStream({
+      onchange: () => changes++,
+      onstatus: st => { if (st.unavailable) unavailable = true; }
+    });
+    for (let i = 0; i < 4 && !unavailable; i++) {
+      s.update({ lon: i * 30, lat: 10, scale: 800 * 0.42 * (9 + i) }, 1000, 800);
+      settle(false);
+    }
+    eq(changes, 0, 'failed tiles never produce a composite');
+    ok(unavailable, 'the stream reports itself unavailable after repeated failures');
+    ok(s.disabledByFailure, 'and stops trying');
+    const before = s.requests;
+    s.update({ lon: 100, lat: 0, scale: 800 * 0.42 * 20 }, 1000, 800);
+    eq(s.requests, before, 'no further requests once disabled');
+  }
+
+  // A partial grid must be discarded rather than composited with black holes.
+  {
+    let changes = 0;
+    const s = new Tiles.TileStream({ onchange: () => changes++ });
+    s.update(cam, 1000, 800);
+    const batch = loads.splice(0, loads.length);
+    batch.forEach((img, i) => { if (i === 0) { if (img.onerror) img.onerror(); } else if (img.onload) img.onload(); });
+    eq(changes, 0, 'a grid with a missing tile is thrown away');
+    ok(s.currentKey === null, 'and will be retried rather than remembered');
+  }
+
+  // Switching it off must silence the network entirely.
+  {
+    const s = new Tiles.TileStream({ enabled: false });
+    eq(s.update(cam, 1000, 800), false, 'a disabled stream does nothing');
+    eq(s.requests, 0, 'and makes no requests');
+    s.setEnabled(true);
+    ok(s.update(cam, 1000, 800), 're-enabling brings it back');
+  }
+
+  // The cache must not grow without bound over a long session.
+  {
+    const s = new Tiles.TileStream({ cacheMax: 8 });
+    for (let i = 0; i < 40; i++) s._remember('u' + i, { i });
+    ok(s.cacheOrder.length <= 8, 'cache order list is capped');
+    eq(Object.keys(s.cache).length, 8, 'cache itself is capped');
+    ok(!s.cache['u0'], 'the oldest entry was evicted');
+    ok(!!s.cache['u39'], 'the newest entry is kept');
+  }
+
+  delete globalThis.Image;
+  delete globalThis.document;
+  loads.length = 0;
+}
+
 /* ------------------------------------------------------------------ audio */
 section('audio');
 
@@ -661,7 +884,8 @@ section('ui wiring');
 
   // Every script the page loads must exist on disk.
   const srcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
-  eq(srcs.length, 8, 'eight script files are loaded');
+  eq(srcs.length, 9, 'nine script files are loaded');
+  eq(srcs.indexOf('js/tiles.js') !== -1, true, 'the tile streamer is loaded');
   for (const s of srcs) ok(fs.existsSync(path.join(ROOT, s)), 'script exists: ' + s);
   // ...and in an order where each file's dependencies are already defined.
   eq(srcs.indexOf('js/world-data.js') < srcs.indexOf('js/geo.js'), true, 'world data loads before geo');
