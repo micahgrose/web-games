@@ -16,16 +16,22 @@
     font-family:'Segoe UI',system-ui,-apple-system,Helvetica,Arial,sans-serif;
     font-variant-numeric:tabular-nums;}
   canvas{display:block; position:fixed; inset:0; width:100vw; height:100vh; touch-action:none;}
+  /* The satellite sphere is drawn by WebGL underneath; pins, the arc and the
+     label go on a 2D canvas above it, which must not eat pointer events. */
+  #overlay{pointer-events:none; z-index:2;}
+  #globe{z-index:1;}
 
   .hidden{display:none !important;}
   button{font:inherit; color:inherit; cursor:pointer; border:none; background:none;}
 
-  /* ---------------------------------------------------------------- chrome */
-  #hud{position:fixed; inset:0; pointer-events:none; z-index:10; display:flex;
-    flex-direction:column; justify-content:space-between; padding:14px;}
-  #hud > *{pointer-events:auto;}
+  /* ---------------------------------------------------------------- chrome
+     Everything the player reads lives in the corners: the middle of the screen
+     belongs to the globe, because that is the thing being aimed at. */
+  #hud{position:fixed; inset:0; pointer-events:none; z-index:10;}
+  #hud > *{pointer-events:auto; position:absolute;}
 
-  #topbar{display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap;}
+  #topbar{top:14px; right:14px; max-width:64vw;
+    display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;}
   .chip{background:var(--panel); border:1px solid var(--edge); border-radius:999px;
     padding:6px 14px; font-size:12px; letter-spacing:.14em; text-transform:uppercase;
     color:var(--dim); backdrop-filter:blur(6px);}
@@ -37,16 +43,17 @@
   .pip.now{background:var(--gold); box-shadow:0 0 8px rgba(255,200,87,.8);}
 
   /* --------------------------------------------------------------- prompt */
-  #promptCard{align-self:center; max-width:min(560px,92vw); background:var(--panel);
-    border:1px solid var(--edge); border-radius:14px; padding:14px 18px 16px;
-    backdrop-filter:blur(8px); text-align:center; box-shadow:0 18px 50px rgba(0,0,0,.5);}
-  #promptKicker{font-size:10px; letter-spacing:.34em; text-transform:uppercase; color:var(--faint);}
-  #promptName{font-size:clamp(21px,4.6vw,30px); font-weight:700; letter-spacing:.01em; margin:5px 0 7px;
+  #promptCard{top:14px; left:14px; width:min(360px,44vw); background:var(--panel);
+    border:1px solid var(--edge); border-radius:14px; padding:13px 16px 15px;
+    backdrop-filter:blur(8px); text-align:left; box-shadow:0 18px 50px rgba(0,0,0,.5);}
+  #promptKicker{font-size:10px; letter-spacing:.30em; text-transform:uppercase; color:var(--faint);}
+  #promptName{font-size:clamp(19px,2.4vw,25px); font-weight:700; letter-spacing:.01em; margin:5px 0 7px;
     line-height:1.15;}
-  #promptHook{font-size:14px; line-height:1.5; color:var(--dim);}
+  #promptHook{font-size:13.5px; line-height:1.5; color:var(--dim);}
 
   /* -------------------------------------------------------------- bottom */
-  #bottom{display:flex; flex-direction:column; align-items:center; gap:10px;}
+  #bottom{left:50%; bottom:16px; transform:translateX(-50%);
+    display:flex; flex-direction:column; align-items:center; gap:10px;}
   #hintline{font-size:12px; color:var(--faint); letter-spacing:.06em; height:16px;}
   .btn{background:linear-gradient(180deg,rgba(122,190,255,.22),rgba(122,190,255,.10));
     border:1px solid rgba(122,190,255,.42); border-radius:11px; padding:12px 30px;
@@ -64,8 +71,8 @@
     letter-spacing:.08em; pointer-events:none;}
 
   /* -------------------------------------------------------------- reveal */
-  #reveal{align-self:center; width:min(600px,94vw); background:var(--panel);
-    border:1px solid var(--edge); border-radius:16px; padding:16px 20px 18px;
+  #reveal{top:14px; left:14px; width:min(420px,50vw); max-height:calc(100vh - 120px); overflow-y:auto;
+    background:var(--panel); border:1px solid var(--edge); border-radius:16px; padding:15px 18px 17px;
     backdrop-filter:blur(10px); box-shadow:0 22px 60px rgba(0,0,0,.6);}
   #revealTop{display:flex; align-items:baseline; justify-content:space-between; gap:14px;
     flex-wrap:wrap; margin-bottom:10px;}
@@ -142,16 +149,24 @@
     transition:opacity .2s ease, transform .2s ease; pointer-events:none;}
   #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 
+  /* Narrow screens have no corners to spare: stack the panels full width. */
+  @media (max-width:780px){
+    #topbar{left:10px; right:10px; max-width:none; justify-content:center;}
+    #promptCard, #reveal{top:56px; left:10px; right:10px; width:auto;}
+    #reveal{max-height:calc(100vh - 170px);}
+  }
   @media (max-width:560px){
     #promptCard{padding:11px 14px 13px;}
     #reveal{padding:13px 15px 15px;}
     #revealPts{font-size:25px;}
     .btn{padding:11px 22px; font-size:14px;}
+    #promptHook{font-size:13px;}
   }
 </style>
 </head>
 <body>
 <canvas id="globe"></canvas>
+<canvas id="overlay"></canvas>
 
 <!-- ------------------------------------------------------------------ HUD -->
 <div id="hud" class="hidden">
@@ -159,6 +174,7 @@
     <div class="chip"><b id="tierName">Explorer</b></div>
     <div class="chip"><span id="pips"></span></div>
     <div class="chip score">Score <b id="runScore">0</b></div>
+    <button class="btn ghost" id="muteBtn" title="Mute (M)">♪</button>
     <button class="btn ghost" id="quitBtn">Quit</button>
   </div>
 
@@ -197,6 +213,7 @@
   <div class="row">
     <button class="btn ghost" id="statsBtn">Stats</button>
     <button class="btn ghost" id="howBtn">How it works</button>
+    <button class="btn ghost" id="muteBtn2">Sound: on</button>
   </div>
   <div class="note" id="menuNote">Five places a round. Score is 0–100 by distance, with the last three questions worth double and triple. A perfect round is 1000.</div>
 </div>
@@ -254,14 +271,24 @@
 <script src="js/geo.js"></script>
 <script src="js/locations.js"></script>
 <script src="js/game.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/render.js"></script>
+<script src="js/earth-texture.js"></script>
+<script src="js/render-gl.js"></script>
 <script>
 (function () {
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var globe = new Globe($('globe'));
+
+  // The vector globe starts immediately on the overlay canvas so the page is
+  // never blank; if WebGL2 and the Blue Marble texture both come up, the
+  // satellite globe takes over #globe and the overlay keeps the pins.
+  var globe = new Globe($('overlay'));
+  var input = $('globe');          // event surface, sits under the overlay
   var stats = Game.loadStats();
+
+  function sfx(name, arg) { if (window.Sfx) window.Sfx.play(name, arg); }
 
   var S = {
     phase: 'menu',      // menu | aiming | revealed | results | stats | how
@@ -298,19 +325,19 @@
   var drag = null, spinV = { lon: 0, lat: 0 }, idleSpin = true;
 
   function pointerPos(e) {
-    var r = globe.canvas.getBoundingClientRect();
+    var r = input.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  globe.canvas.addEventListener('pointerdown', function (e) {
-    globe.canvas.setPointerCapture(e.pointerId);
+  input.addEventListener('pointerdown', function (e) {
+    input.setPointerCapture(e.pointerId);
     var p = pointerPos(e);
     drag = { x: p.x, y: p.y, moved: 0, startX: p.x, startY: p.y };
     camAnim = null;
     spinV.lon = spinV.lat = 0;
   });
 
-  globe.canvas.addEventListener('pointermove', function (e) {
+  input.addEventListener('pointermove', function (e) {
     if (!drag) return;
     var p = pointerPos(e);
     var dx = p.x - drag.x, dy = p.y - drag.y;
@@ -332,7 +359,7 @@
     spinV.lat = (dy / globe.cam.scale) * (180 / Math.PI);
   }
 
-  globe.canvas.addEventListener('pointerup', function (e) {
+  input.addEventListener('pointerup', function (e) {
     if (!drag) return;
     var wasTap = drag.moved < 6;
     drag = null;
@@ -340,11 +367,12 @@
       var p = pointerPos(e);
       var g = globe.toGeo(p.x, p.y);
       if (g) placeGuess(g.lon, g.lat);
+      else sfx('deny');
     }
   });
-  globe.canvas.addEventListener('pointercancel', function () { drag = null; });
+  input.addEventListener('pointercancel', function () { drag = null; });
 
-  globe.canvas.addEventListener('wheel', function (e) {
+  input.addEventListener('wheel', function (e) {
     e.preventDefault();
     zoomAt(pointerPos(e), Math.exp(-e.deltaY * 0.0016));
   }, { passive: false });
@@ -365,22 +393,22 @@
 
   // Two-finger pinch.
   var touches = {};
-  globe.canvas.addEventListener('touchstart', function (e) {
+  input.addEventListener('touchstart', function (e) {
     if (e.touches.length === 2) {
       touches.d = touchDist(e);
       drag = null;
     }
   }, { passive: true });
-  globe.canvas.addEventListener('touchmove', function (e) {
+  input.addEventListener('touchmove', function (e) {
     if (e.touches.length === 2 && touches.d) {
       e.preventDefault();
-      var d = touchDist(e), r = globe.canvas.getBoundingClientRect();
+      var d = touchDist(e), r = input.getBoundingClientRect();
       zoomAt({ x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left,
                y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top }, d / touches.d);
       touches.d = d;
     }
   }, { passive: false });
-  globe.canvas.addEventListener('touchend', function (e) {
+  input.addEventListener('touchend', function (e) {
     if (e.touches.length < 2) touches.d = 0;
   }, { passive: true });
   function touchDist(e) {
@@ -396,6 +424,7 @@
     if (e.key === '+' || e.key === '=') zoomAt({ x: globe.cx, y: globe.cy }, 1.22);
     if (e.key === '-' || e.key === '_') zoomAt({ x: globe.cx, y: globe.cy }, 1 / 1.22);
     if (e.key === 'Escape' && (S.phase === 'aiming' || S.phase === 'revealed')) toMenu();
+    if (e.key === 'm' || e.key === 'M') toggleMute();
   });
 
   window.addEventListener('resize', function () { globe.resize(); });
@@ -443,6 +472,7 @@
   }
 
   function placeGuess(lon, lat) {
+    sfx('tap');
     S.guess = { lon: lon, lat: lat };
     S.pulse = 0;
     globe.markers = [{ lon: lon, lat: lat, kind: 'guess', pulse: 0 }];
@@ -469,6 +499,16 @@
     ];
     globe.arc = { from: [S.guess.lon, S.guess.lat], to: [loc.lon, loc.lat], t: 0 };
     globe.label = { lon: loc.lon, lat: loc.lat, text: loc.n };
+
+    // Commit, then the line races out, then the verdict lands with it.
+    sfx('lock');
+    sfx('sweep');
+    setTimeout(function () {
+      if (res.perfect) sfx('bullseye');
+      else if (res.countryHit) sfx('bonus');
+      else if (res.unit < 40) sfx('miss');
+      else sfx('land');
+    }, 430);
 
     frameBoth(S.guess, loc);
     showReveal(res);
@@ -515,6 +555,7 @@
 
   function nextQuestion() {
     if (S.index >= S.round.length - 1) return finishRound();
+    sfx('next');
     S.index++;
     showQuestion();
   }
@@ -522,6 +563,7 @@
   function finishRound() {
     Game.recordRound(stats, S.weak ? 'weak' : S.tier, S.results);
     Game.saveStats(stats);
+    sfx('finish', S.total);
     S.phase = 'results';
     $('hud').classList.add('hidden');
     $('zoomHint').classList.add('hidden');
@@ -682,29 +724,53 @@
   /* ---------------------------------------------------------------- buttons */
 
   Array.prototype.forEach.call(document.querySelectorAll('.tier[data-tier]'), function (b) {
-    b.addEventListener('click', function () { startRound(b.getAttribute('data-tier'), false); });
+    b.addEventListener('click', function () {
+      sfx('start');
+      startRound(b.getAttribute('data-tier'), false);
+    });
   });
   $('weakBtn').addEventListener('click', function () {
     if (!Game.weakSpotReady(stats.misses)) return;
+    sfx('start');
     startRound('explorer', true);
   });
   $('actionBtn').addEventListener('click', function () {
     if (S.phase === 'aiming') lockGuess();
     else if (S.phase === 'revealed') nextQuestion();
   });
-  $('quitBtn').addEventListener('click', toMenu);
-  $('againBtn').addEventListener('click', function () { startRound(S.tier, S.weak); });
-  $('menuBtn').addEventListener('click', toMenu);
-  $('statsBtn').addEventListener('click', showStats);
-  $('statsBack').addEventListener('click', toMenu);
-  $('howBtn').addEventListener('click', function () { hideScreens(); $('how').classList.remove('hidden'); });
-  $('howBack').addEventListener('click', toMenu);
+  $('quitBtn').addEventListener('click', function () { sfx('ui'); toMenu(); });
+  $('againBtn').addEventListener('click', function () { sfx('start'); startRound(S.tier, S.weak); });
+  $('menuBtn').addEventListener('click', function () { sfx('ui'); toMenu(); });
+  $('statsBtn').addEventListener('click', function () { sfx('ui'); showStats(); });
+  $('statsBack').addEventListener('click', function () { sfx('ui'); toMenu(); });
+  $('howBtn').addEventListener('click', function () {
+    sfx('ui'); hideScreens(); $('how').classList.remove('hidden');
+  });
+  $('howBack').addEventListener('click', function () { sfx('ui'); toMenu(); });
   $('resetBtn').addEventListener('click', function () {
+    sfx('ui');
     stats = Game.blankStats();
     Game.saveStats(stats);
     showStats();
     toast('Stats cleared');
   });
+
+  // Sound toggle: a note glyph in the play HUD, a worded button on the menu.
+  function refreshMute() {
+    var m = window.Sfx ? window.Sfx.muted : true;
+    $('muteBtn').textContent = m ? '♪̸' : '♪';
+    $('muteBtn').style.opacity = m ? '.45' : '1';
+    $('muteBtn2').textContent = 'Sound: ' + (m ? 'off' : 'on');
+  }
+  function toggleMute() {
+    if (!window.Sfx) return;
+    window.Sfx.toggle();
+    refreshMute();
+    if (!window.Sfx.muted) sfx('ui');
+    toast(window.Sfx.muted ? 'Sound off' : 'Sound on');
+  }
+  $('muteBtn').addEventListener('click', toggleMute);
+  $('muteBtn2').addEventListener('click', toggleMute);
   $('copyBtn').addEventListener('click', function () {
     var text = Game.summaryText(S.weak ? 'explorer' : S.tier, S.results, S.total);
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -755,6 +821,27 @@
 
   globe.cam.scale = globe.fitScale();
   updateWeakButton();
+  if (window.Sfx) window.Sfx.loadPref();
+  refreshMute();
+
+  // Hand over to the satellite globe once WebGL2 and the texture are both ready.
+  // If either is missing we simply keep the vector globe, which needs neither.
+  if (window.GlobeGL) {
+    window.GlobeGL.create($('globe'), $('overlay'), function (gl, err) {
+      if (!gl) {
+        if (window.console) console.info('MapTap: vector globe (' + err + ')');
+        return;
+      }
+      gl.cam = globe.cam;
+      gl.markers = globe.markers;
+      gl.arc = globe.arc;
+      gl.label = globe.label;
+      globe = gl;
+      globe.resize();
+      globe.clampCamera();
+    });
+  }
+
   requestAnimationFrame(frame);
 })();
 </script>

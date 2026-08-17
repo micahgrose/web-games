@@ -96,7 +96,20 @@ class El {
   }
   handlerCount(type) { return (this._handlers[type] || []).length; }
   getBoundingClientRect() { return { left: 0, top: 0, width: 1000, height: 700, right: 1000, bottom: 700 }; }
-  getContext() { this._ctx = this._ctx || recordingContext(); return this._ctx; }
+  // A canvas hands out exactly one kind of context. Unless a test installs a GL
+  // factory, asking for 'webgl2' gets nothing — which is precisely the situation
+  // the vector fallback exists for.
+  getContext(type) {
+    if (type === undefined || type === '2d') {
+      this._ctx = this._ctx || recordingContext();
+      return this._ctx;
+    }
+    if (type === 'webgl2' && this._glFactory) {
+      this._gl = this._gl || this._glFactory();
+      return this._gl;
+    }
+    return null;
+  }
   setPointerCapture() {}
   releasePointerCapture() {}
   appendChild(c) { this.children.push(c); return c; }
@@ -150,6 +163,47 @@ const storage = (() => {
   };
 })();
 
+// Images resolve on the next frame rather than instantly, so the swap from the
+// vector globe to the satellite one is exercised as the async handoff it is.
+const pendingImages = [];
+class ImageStub {
+  constructor() { this.onload = null; this.onerror = null; this._src = ''; }
+  get src() { return this._src; }
+  set src(v) {
+    this._src = v;
+    const self = this;
+    pendingImages.push(function () {
+      if (/^data:image\//.test(v)) { if (self.onload) self.onload(); }
+      else if (self.onerror) self.onerror();
+    });
+  }
+}
+function flushImages() {
+  const q = pendingImages.splice(0, pendingImages.length);
+  q.forEach(fn => fn());
+}
+
+// Minimal WebAudio: enough for js/audio.js to build its graph against.
+function fakeAudioContext() {
+  function Param(v) { this.value = v; this.calls = []; }
+  Param.prototype.setValueAtTime = function () { return this; };
+  Param.prototype.exponentialRampToValueAtTime = function () { return this; };
+  Param.prototype.setTargetAtTime = function () { return this; };
+  const made = { osc: 0, src: 0 };
+  const ctx = {
+    _made: made,
+    currentTime: 0, sampleRate: 48000, state: 'running', destination: {},
+    createOscillator() { made.osc++; return { type: 's', frequency: new Param(1), connect() {}, start() {}, stop() {} }; },
+    createGain() { return { gain: new Param(1), connect() {} }; },
+    createBiquadFilter() { return { type: 'l', frequency: new Param(1), Q: {}, connect() {} }; },
+    createBuffer(c, len) { return { getChannelData: () => new Float32Array(len) }; },
+    createBufferSource() { made.src++; return { buffer: null, connect() {}, start() {}, stop() {} }; },
+    resume() {}
+  };
+  return ctx;
+}
+const audioCtx = fakeAudioContext();
+
 let clock = 0;
 const rafQueue = [];
 const windowStub = {
@@ -185,6 +239,12 @@ setGlobal('requestAnimationFrame', cb => windowStub.requestAnimationFrame(cb));
 setGlobal('setTimeout', windowStub.setTimeout);
 setGlobal('clearTimeout', windowStub.clearTimeout);
 setGlobal('devicePixelRatio', 2);
+setGlobal('Image', ImageStub);
+setGlobal('AudioContext', function () { return audioCtx; });
+windowStub.Image = ImageStub;
+windowStub.AudioContext = global.AudioContext;
+windowStub.localStorage = storage;
+windowStub.console = { info() {}, warn() {}, log() {} };
 
 // Load the game's scripts in the same order the page does.
 const WORLD_TOPO = require(path.join(ROOT, 'js/world-data.js'));
@@ -195,8 +255,14 @@ const LOCATIONS = require(path.join(ROOT, 'js/locations.js'));
 global.LOCATIONS = LOCATIONS; windowStub.LOCATIONS = LOCATIONS;
 const Game = require(path.join(ROOT, 'js/game.js'));
 global.Game = Game; windowStub.Game = Game;
+const Sfx = require(path.join(ROOT, 'js/audio.js'));
+global.Sfx = Sfx; windowStub.Sfx = Sfx;
 require(path.join(ROOT, 'js/render.js'));   // defines window.Globe
 global.Globe = windowStub.Globe;
+const EARTH_TEXTURE = require(path.join(ROOT, 'js/earth-texture.js'));
+global.EARTH_TEXTURE = EARTH_TEXTURE; windowStub.EARTH_TEXTURE = EARTH_TEXTURE;
+require(path.join(ROOT, 'js/render-gl.js'));   // defines window.GlobeGL
+global.GlobeGL = windowStub.GlobeGL;
 
 function runFrames(n, stepMs) {
   for (let i = 0; i < n; i++) {
@@ -272,6 +338,125 @@ section('globe rendering');
   ok(globe.cam.lon >= -180 && globe.cam.lon <= 180, 'longitude wraps into range');
 }
 
+/* ----------------------------------------------------------- satellite globe */
+section('satellite globe');
+
+// A recording WebGL2 context: enough surface for the renderer to build its
+// program, upload the texture and draw, while remembering what it was asked.
+function fakeGL() {
+  const calls = {}, bump = k => { calls[k] = (calls[k] || 0) + 1; };
+  const gl = {
+    _calls: calls, _sources: [], _uniforms: [], _params: [],
+    VERTEX_SHADER: 1, FRAGMENT_SHADER: 2, COMPILE_STATUS: 3, LINK_STATUS: 4,
+    ARRAY_BUFFER: 5, STATIC_DRAW: 6, FLOAT: 7, TEXTURE_2D: 8, RGB: 9, UNSIGNED_BYTE: 10,
+    TEXTURE_WRAP_S: 11, TEXTURE_WRAP_T: 12, REPEAT: 13, CLAMP_TO_EDGE: 14,
+    TEXTURE_MIN_FILTER: 15, TEXTURE_MAG_FILTER: 16, LINEAR_MIPMAP_LINEAR: 17, LINEAR: 18,
+    TEXTURE0: 19, TRIANGLES: 20, UNPACK_FLIP_Y_WEBGL: 21,
+    _compileOk: true, _linkOk: true,
+    createShader: () => ({}),
+    shaderSource(s, src) { gl._sources.push(src); },
+    compileShader() { bump('compileShader'); },
+    getShaderParameter: () => gl._compileOk,
+    getShaderInfoLog: () => 'compile failed',
+    deleteShader() {},
+    createProgram: () => ({}), attachShader() {}, linkProgram() { bump('linkProgram'); },
+    getProgramParameter: () => gl._linkOk, getProgramInfoLog: () => 'link failed',
+    useProgram() { bump('useProgram'); },
+    createBuffer: () => ({}), bindBuffer() {}, bufferData() { bump('bufferData'); },
+    getAttribLocation: () => 0, enableVertexAttribArray() {}, vertexAttribPointer() {},
+    createTexture: () => ({}), bindTexture() { bump('bindTexture'); }, pixelStorei() {},
+    activeTexture() {},
+    texImage2D() { bump('texImage2D'); },
+    texParameteri(t, p) { gl._params.push(p); bump('texParameteri'); },
+    texParameterf() { bump('texParameterf'); },
+    generateMipmap() { bump('generateMipmap'); },
+    getExtension: () => null, getParameter: () => 16,
+    getUniformLocation(p, n) { gl._uniforms.push(n); return { n: n }; },
+    uniform1i() {}, uniform1f() { bump('uniform1f'); },
+    uniform2f() { bump('uniform2f'); }, uniform3f() { bump('uniform3f'); },
+    viewport() { bump('viewport'); }, drawArrays() { bump('drawArrays'); }
+  };
+  return gl;
+}
+
+{
+  const glCanvas = new El('glCanvas', 'canvas');
+  const glOverlay = new El('glOverlay', 'canvas');
+  const gl = fakeGL();
+  glCanvas._glFactory = () => gl;
+
+  let made = null, err = null;
+  global.GlobeGL.create(glCanvas, glOverlay, (g, e) => { made = g; err = e; });
+  eq(made, null, 'creation waits for the texture to decode');
+  flushImages();
+  ok(made, 'satellite globe was created' + (err ? ' (' + err + ')' : ''));
+
+  // Shaders must be real GLSL ES 3.00 and use the seam-safe sampling path.
+  eq(gl._sources.length, 2, 'a vertex and a fragment shader were compiled');
+  ok(gl._sources.every(s => s.indexOf('#version 300 es') === 0), 'both shaders are GLSL ES 3.00');
+  ok(gl._sources[1].indexOf('textureGrad') !== -1, 'the fragment shader samples with textureGrad');
+  ok(/ddx\.x -= sign\(ddx\.x\)/.test(gl._sources[1]), 'the antimeridian seam is corrected');
+
+  // Every uniform the renderer looks up must be declared in the shader.
+  const frag = gl._sources[1];
+  eq(gl._uniforms.length, 7, 'seven uniforms are located');
+  gl._uniforms.forEach(n => ok(frag.indexOf('uniform') !== -1 && frag.indexOf(n) !== -1,
+    'uniform ' + n + ' is declared in the shader'));
+
+  ok(gl._calls.generateMipmap > 0, 'mipmaps are generated for minified views');
+  ok(gl._params.indexOf(gl.TEXTURE_WRAP_S) !== -1, 'longitude wrap mode is set');
+  ok(gl._calls.texImage2D === 1, 'the texture is uploaded once');
+
+  let drawThrew = null;
+  try { made.draw(); } catch (e) { drawThrew = e; }
+  eq(drawThrew, null, 'the satellite globe draws' + (drawThrew ? ': ' + drawThrew.message : ''));
+  ok(gl._calls.drawArrays > 0, 'a frame was actually issued');
+  ok(gl._calls.uniform3f >= 3, 'the camera basis is uploaded each frame');
+
+  // Overlay work: pins and label go through the same code as the vector globe.
+  made.markers = [{ lon: 0, lat: 0, kind: 'guess', pulse: 0.2 }, { lon: 30, lat: 20, kind: 'answer' }];
+  made.arc = { from: [0, 0], to: [30, 20], t: 1 };
+  made.label = { lon: 30, lat: 20, text: 'Somewhere' };
+  drawThrew = null;
+  try { made.draw(); } catch (e) { drawThrew = e; }
+  eq(drawThrew, null, 'overlay drawing on the satellite globe works' + (drawThrew ? ': ' + drawThrew.message : ''));
+  ok(glOverlay._ctx._calls.fillText > 0, 'the label is drawn on the overlay, not in GL');
+
+  // Coastlines only come out when the imagery has gone soft from zooming.
+  const strokesBefore = glOverlay._ctx._calls.stroke || 0;
+  made.cam.scale = made.fitScale();
+  made.draw();
+  const wide = (glOverlay._ctx._calls.moveTo || 0);
+  made.cam.scale = made.fitScale() * 8;
+  made.clampCamera();
+  made.draw();
+  ok((glOverlay._ctx._calls.moveTo || 0) > wide, 'zoomed in, coastlines are traced over the imagery');
+  ok(strokesBefore >= 0, 'overlay stroking is recorded');
+
+  // Failure modes must all degrade to the vector globe rather than throwing.
+  let r1 = 'unset';
+  global.GlobeGL.create(new El('plain', 'canvas'), glOverlay, (g, e) => { r1 = [g, e]; });
+  eq(r1[0], null, 'no WebGL2 gives no instance');
+  eq(r1[1], 'no webgl2', 'and says why');
+
+  const savedTex = windowStub.EARTH_TEXTURE;
+  windowStub.EARTH_TEXTURE = undefined;
+  let r2 = 'unset';
+  const c2 = new El('c2', 'canvas'); c2._glFactory = () => fakeGL();
+  global.GlobeGL.create(c2, glOverlay, (g, e) => { r2 = [g, e]; });
+  eq(r2[1], 'no texture data', 'a missing texture is reported, not thrown');
+  windowStub.EARTH_TEXTURE = savedTex;
+
+  const badGl = fakeGL();
+  badGl._compileOk = false;
+  const c3 = new El('c3', 'canvas'); c3._glFactory = () => badGl;
+  let r3 = 'unset';
+  global.GlobeGL.create(c3, glOverlay, (g, e) => { r3 = [g, e]; });
+  flushImages();
+  eq(r3[0], null, 'a shader that will not compile yields no instance');
+  ok(/compile failed/.test(r3[1]), 'and the compile log is passed back');
+}
+
 /* --------------------------------------------------- the page's own script */
 section('page script boots');
 
@@ -282,6 +467,11 @@ const scriptBody = (() => {
 })();
 ok(scriptBody.length > 3000, 'inline page script extracted (' + scriptBody.length + ' chars)');
 
+// Give the page a working WebGL2 context so the rest of this file plays the
+// game the way a real browser will: on the satellite globe.
+const pageGL = fakeGL();
+elements.globe._glFactory = () => pageGL;
+
 let bootError = null;
 try {
   // eslint-disable-next-line no-new-func
@@ -290,8 +480,16 @@ try {
 eq(bootError, null, 'page script runs without throwing' + (bootError ? ': ' + bootError.message : ''));
 ok(rafQueue.length > 0, 'the render loop scheduled its first frame');
 
+// Before the texture decodes, the vector globe carries the page.
+runFrames(2);
+eq(pageGL._calls.drawArrays, undefined, 'nothing is drawn in GL until the texture is ready');
+ok((elements.overlay._ctx._calls.moveTo || 0) > 100, 'the vector globe renders in the meantime');
+
+flushImages();
 runFrames(3);
+ok(pageGL._calls.drawArrays > 0, 'the page hands over to the satellite globe once ready');
 ok(rafQueue.length > 0, 'the render loop keeps rescheduling itself');
+eq(pageGL._calls.viewport > 0, true, 'the GL viewport was sized');
 
 /* ------------------------------------------------------------- menu state */
 section('menu');
@@ -330,10 +528,12 @@ function tapGlobe(x, y) {
   tapGlobe(20, 20);
   eq(elements.actionBtn.disabled, true, 'a tap off the globe is ignored');
 
-  // A tap on the globe places a guess.
+  // A tap on the globe places a guess — and makes a sound.
+  const soundsBefore = audioCtx._made.osc + audioCtx._made.src;
   tapGlobe(500, 350);
   eq(elements.actionBtn.disabled, false, 'a tap on the globe arms the button');
   ok(elements.hintline.textContent.indexOf('lock it in') !== -1, 'hint updates after placing');
+  ok(audioCtx._made.osc + audioCtx._made.src > soundsBefore, 'placing a pin makes a sound');
 
   // Dragging must rotate rather than register as a tap.
   const before = elements.actionBtn.textContent;
@@ -348,7 +548,9 @@ function tapGlobe(x, y) {
   runFrames(2);
 
   // Lock it in: the reveal should appear, fully populated.
+  const lockSounds = audioCtx._made.osc + audioCtx._made.src;
   elements.actionBtn.dispatch('click');
+  ok(audioCtx._made.osc + audioCtx._made.src > lockSounds, 'locking in plays the commit and sweep');
   ok(!elements.reveal.hasClass('hidden'), 'reveal panel opens');
   ok(elements.promptCard.hasClass('hidden'), 'prompt card hides');
   ok(elements.revealPlace.innerHTML.length > 0, 'reveal names the place');
@@ -484,6 +686,34 @@ section('weak spots unlock');
   ok(saved.misses.some(m => m.name === first) || LOCATIONS.some(L => L.n === first),
     'weak spot round opens on a real place');
   elements.quitBtn.dispatch('click');
+}
+
+/* ------------------------------------------------------------------ sound */
+section('sound control');
+{
+  eq(Sfx.muted, false, 'sound is on by default');
+  ok(elements.muteBtn2.textContent.indexOf('on') !== -1, 'the menu button says so');
+
+  elements.muteBtn2.dispatch('click');
+  eq(Sfx.muted, true, 'the menu toggle mutes');
+  ok(elements.muteBtn2.textContent.indexOf('off') !== -1, 'and the label follows');
+  eq(storage.getItem('maptap.muted.v1'), '1', 'the preference is persisted');
+
+  const quiet = audioCtx._made.osc + audioCtx._made.src;
+  tierButtons[0].dispatch('click');
+  tapGlobe(500, 350);
+  elements.actionBtn.dispatch('click');
+  eq(audioCtx._made.osc + audioCtx._made.src, quiet, 'muted play makes no sound at all');
+  elements.quitBtn.dispatch('click');
+
+  elements.muteBtn.dispatch('click');
+  eq(Sfx.muted, false, 'the in-game toggle unmutes');
+  ok(elements.muteBtn2.textContent.indexOf('on') !== -1, 'both buttons stay in sync');
+
+  windowStub.dispatch('keydown', { key: 'm' });
+  eq(Sfx.muted, true, 'M toggles sound');
+  windowStub.dispatch('keydown', { key: 'M' });
+  eq(Sfx.muted, false, 'and shift-M toggles it back');
 }
 
 /* -------------------------------------------------------------- keyboard */

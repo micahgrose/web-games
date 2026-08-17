@@ -11,7 +11,7 @@ You are told a place and a piece of its history. Spin the globe, tap where you t
 - **Scroll / pinch / + −** — zoom, centred on the cursor
 - **Tap the globe** — place your guess; tap again to move it
 - **Enter / Space** — lock in, then advance
-- **Esc** — leave the round
+- **M** — sound on/off · **Esc** — leave the round
 
 ## Scoring
 - **0–100 per place, by distance.** Within **25 km** is a perfect 100. It decays from there — about **85** at 250 km, **50** at 1,000 km, **12** at 3,000 km, nothing at all across the world.
@@ -31,7 +31,13 @@ Difficulty is about how well you can **place** a location, not whether you have 
 ## What's in it
 **356 hand-written locations** across eight regions, each with real history attached — a hook before you guess, the full story after. Every coordinate is checked against the actual country polygon by the test suite, so a typo or a flipped sign cannot ship.
 
-The globe is a **true orthographic sphere** built from Natural Earth 1:50m vector data (public domain): real coastlines, real point-in-polygon country detection for the bonus, deep zoom. **No country borders, no labels, no city dots** — land, ocean, and what you know, the way the original plays it.
+The globe is **real satellite imagery on a true sphere** — NASA Blue Marble (August 2004, topography and bathymetry, public domain), ray-cast per pixel in a WebGL2 fragment shader so it stays sharp at any zoom. Sunlight from the upper left, limb darkening, atmospheric rim. Country detection for the bonus is genuine point-in-polygon against Natural Earth 1:50m vectors, and once you zoom past ~2× the coastline is traced faintly over the imagery, which goes soft long before the zoom limit does.
+
+**No country borders, no labels, no city dots** — terrain, ocean, and what you know.
+
+Browsers without WebGL2 fall back to a vector globe drawn in canvas 2D: same projection, same controls, painted coastlines instead of imagery.
+
+**Sound** is synthesised on the fly with WebAudio — no files. A pin drop, the line racing out, a four-note sparkle for a bullseye, and an end-of-round chord that turns major above 62% and adds an octave above 85%. Toggle with **M**.
 
 Stats, score history, per-region accuracy and your weak-spot list are kept in local storage. Nothing leaves the machine.
 
@@ -39,18 +45,23 @@ Stats, score history, per-region accuracy and your weak-spot list are kept in lo
 Open `index.html`. No build step, no server, no libraries, no network.
 
 ```
-node test/headless.js    # 208 checks: geometry, scoring, rounds, stats, data integrity
-node test/dom-flow.js    # 135 checks: drives the real page script through full rounds
+node test/headless.js    # 657 checks: geometry, scoring, rounds, stats, data, audio, shader math
+node test/dom-flow.js    # 180 checks: drives the real page script through full rounds
 ```
 
-`dom-flow.js` exists because I cannot see the screen: it builds a DOM stub, boots the page's own script, and plays rounds through synthetic pointer and keyboard events to catch the dead-button class of bug that logic tests never reach.
+`dom-flow.js` exists because I cannot see the screen: it builds a DOM stub *and* a recording WebGL2 context, boots the page's own script, and plays rounds through synthetic pointer and keyboard events — catching the dead-button class of bug that logic tests never reach, on both the satellite and fallback renderers.
+
+One check worth naming: the fragment shader unprojects pixels to sample the texture, and `geo.js` unprojects the same pixels to decide what you clicked. If those ever disagreed, the globe you see would not be the globe you are tapping. The suite replicates the shader's arithmetic — y-flip included — and compares thousands of pixels against the hit test.
 
 ## Files
 | | |
 |---|---|
 | `index.html` | screens, input, round flow |
 | `js/geo.js` | TopoJSON decode, globe projection, geodesy, country lookup |
-| `js/render.js` | the globe |
+| `js/render-gl.js` | the satellite globe (WebGL2) |
+| `js/render.js` | the vector globe (canvas 2D fallback, plus the shared overlay drawing) |
+| `js/audio.js` | the synth |
 | `js/game.js` | scoring, round construction, stats |
 | `js/locations.js` | the 356 places |
 | `js/world-data.js` | Natural Earth 1:50m geometry |
+| `js/earth-texture.js` | NASA Blue Marble, 4096×2048, embedded as a data URI |

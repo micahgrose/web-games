@@ -456,6 +456,204 @@ section('summary text');
   eq(Game.formatKm(1234.5), '1,235 km', 'long distances are rounded and grouped');
 }
 
+/* ---------------------------------------------------------- earth texture */
+section('earth texture');
+{
+  const tex = require(path.join(ROOT, 'js/earth-texture.js'));
+  eq(typeof tex, 'string', 'the texture is a string');
+  ok(tex.indexOf('data:image/jpeg;base64,') === 0, 'it is a base64 JPEG data URI');
+  const bytes = Buffer.from(tex.split(',')[1], 'base64');
+  ok(bytes.length > 400000, 'the payload is a real image (' + Math.round(bytes.length / 1024) + ' KB)');
+  // A truncated embed would still parse as JS and still look like a data URI —
+  // only the end-of-image marker proves the whole file made it in.
+  eq(bytes[0], 0xff, 'JPEG start marker byte 1');
+  eq(bytes[1], 0xd8, 'JPEG start marker byte 2');
+  eq(bytes[bytes.length - 2], 0xff, 'JPEG end marker byte 1');
+  eq(bytes[bytes.length - 1], 0xd9, 'JPEG end marker byte 2');
+
+  // Dimensions must be equirectangular 2:1, or the sphere mapping is wrong.
+  let w = 0, h = 0;
+  for (let i = 2; i < bytes.length - 9;) {
+    if (bytes[i] !== 0xff) { i++; continue; }
+    const marker = bytes[i + 1];
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      h = bytes.readUInt16BE(i + 5);
+      w = bytes.readUInt16BE(i + 7);
+      break;
+    }
+    i += 2 + bytes.readUInt16BE(i + 2);
+  }
+  eq(w, 4096, 'texture width');
+  eq(h, 2048, 'texture height');
+  eq(w / h, 2, 'the texture is 2:1 equirectangular');
+}
+
+/* ----------------------------------------------------------- shader math */
+section('shader agrees with hit testing');
+{
+  // The fragment shader unprojects pixels to sample the texture; geo.js
+  // unprojects the same pixels to decide what you clicked on. If those two ever
+  // disagree the globe you see is not the globe you are tapping — and nothing
+  // else in this suite would notice. So: replicate the shader's arithmetic
+  // exactly, including the y-flip, and compare.
+  const glsrc = fs.readFileSync(path.join(ROOT, 'js/render-gl.js'), 'utf8');
+  ok(/this\.u\.center,\s*this\.cx \* dpr,\s*this\.canvas\.height - this\.cy \* dpr/.test(glsrc),
+    'the GL centre uniform still flips y for gl_FragCoord');
+  ok(/this\.u\.radius,\s*this\.cam\.scale \* dpr/.test(glsrc), 'the GL radius uniform is in device pixels');
+
+  function shaderSample(sx, sy, cam, cx, cy, dpr, canvasH) {
+    // gl_FragCoord: device pixels, origin bottom-left.
+    const px = sx * dpr, py = canvasH - sy * dpr;
+    const ux = (px - cx * dpr) / (cam.scale * dpr);
+    const uy = (py - (canvasH - cy * dpr)) / (cam.scale * dpr);
+    if (ux * ux + uy * uy > 1) return null;
+    const w = Math.sqrt(Math.max(0, 1 - ux * ux - uy * uy));
+    const b = Geo.basis(cam);
+    const x = b.east[0] * ux + b.north[0] * uy + b.view[0] * w;
+    const y = b.east[1] * ux + b.north[1] * uy + b.view[1] * w;
+    const z = b.east[2] * ux + b.north[2] * uy + b.view[2] * w;
+    const len = Math.hypot(x, y, z);
+    return {
+      lon: Math.atan2(y / len, x / len) * 180 / Math.PI,
+      lat: Math.asin(Math.max(-1, Math.min(1, z / len))) * 180 / Math.PI
+    };
+  }
+
+  let worst = 0, compared = 0;
+  const rng = Game.makeRng(8675309);   // fixed, so the check count never drifts
+  for (const dpr of [1, 2, 2.5]) {
+    for (const cam of [{ lon: 0, lat: 0, scale: 300 }, { lon: 137, lat: -48, scale: 1100 },
+                       { lon: -22, lat: 71, scale: 4000 }]) {
+      const cssW = 1000, cssH = 700, cx = cssW / 2, cy = cssH / 2;
+      const canvasH = Math.round(cssH * dpr);
+      for (let i = 0; i < 200; i++) {
+        const sx = rng() * cssW, sy = rng() * cssH;
+        const mine = Geo.unproject(sx, sy, cam, cx, cy);
+        const theirs = shaderSample(sx, sy, cam, cx, cy, dpr, canvasH);
+        if (!mine || !theirs) { ok(!mine === !theirs, 'both agree the pixel misses the globe'); continue; }
+        worst = Math.max(worst, Geo.distanceKm(mine.lon, mine.lat, theirs.lon, theirs.lat));
+        compared++;
+      }
+    }
+  }
+  ok(compared > 1000, 'compared ' + compared + ' pixels between shader and hit test');
+  ok(worst < 0.01, 'what you see and what you tap agree to within ' + worst.toExponential(2) + ' km');
+}
+
+/* ------------------------------------------------------------------ audio */
+section('audio');
+
+// A recording stand-in for WebAudio: every node type the synth reaches for,
+// remembering what was scheduled on it.
+function fakeAudio() {
+  const made = { osc: [], gain: [], filter: [], buffer: [], source: [] };
+  function Param(v) { this.value = v; this.calls = []; }
+  Param.prototype.setValueAtTime = function (v, t) { this.calls.push(['set', v, t]); return this; };
+  Param.prototype.exponentialRampToValueAtTime = function (v, t) { this.calls.push(['exp', v, t]); return this; };
+  Param.prototype.linearRampToValueAtTime = function (v, t) { this.calls.push(['lin', v, t]); return this; };
+  Param.prototype.setTargetAtTime = function (v, t, c) { this.calls.push(['target', v, t, c]); return this; };
+
+  const ctx = {
+    currentTime: 0, sampleRate: 48000, state: 'running', destination: {},
+    createOscillator() {
+      const o = { type: 'sine', frequency: new Param(440), connect() {}, start(t) { o.started = t; }, stop(t) { o.stopped = t; } };
+      made.osc.push(o); return o;
+    },
+    createGain() { const g = { gain: new Param(1), connect() {} }; made.gain.push(g); return g; },
+    createBiquadFilter() {
+      const f = { type: 'lowpass', frequency: new Param(1000), Q: { value: 1 }, connect() {} };
+      made.filter.push(f); return f;
+    },
+    createBuffer(ch, len) {
+      const b = { length: len, numberOfChannels: ch, getChannelData: () => new Float32Array(len) };
+      made.buffer.push(b); return b;
+    },
+    createBufferSource() {
+      const s = { buffer: null, connect() {}, start(t) { s.started = t; }, stop(t) { s.stopped = t; } };
+      made.source.push(s); return s;
+    },
+    resume() { ctx.state = 'running'; }
+  };
+  return { ctx, made };
+}
+
+{
+  const audio = fakeAudio();
+  const memStore = (() => {
+    const m = {};
+    return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, _m: m };
+  })();
+  globalThis.AudioContext = function () { return audio.ctx; };
+  globalThis.localStorage = memStore;
+
+  const Sfx = require(path.join(ROOT, 'js/audio.js'));
+
+  eq(Sfx.loadPref(), false, 'sound starts on');
+  ok(!!Sfx.init(), 'audio context is created');
+  eq(Sfx.init(), audio.ctx, 'init is idempotent');
+
+  // Every voice must actually synthesise something, and none may throw.
+  const names = Sfx.voiceNames();
+  ok(names.length >= 10, 'there are ' + names.length + ' voices');
+  for (const name of names) {
+    const before = audio.made.osc.length + audio.made.source.length;
+    let threw = null;
+    try { Sfx.play(name, 880); } catch (e) { threw = e; }
+    eq(threw, null, 'voice "' + name + '" plays without throwing' + (threw ? ': ' + threw.message : ''));
+    ok(audio.made.osc.length + audio.made.source.length > before, 'voice "' + name + '" makes sound');
+  }
+  eq(Sfx.play('no-such-sound'), false, 'an unknown voice is refused, not crashed on');
+  eq(Sfx.has('bullseye'), true, 'has() finds a real voice');
+  eq(Sfx.has('nonsense'), false, 'has() rejects a fake one');
+
+  // Everything must start and stop; a note that never stops is a stuck drone.
+  ok(audio.made.osc.every(o => o.started !== undefined), 'every oscillator was started');
+  ok(audio.made.osc.every(o => o.stopped !== undefined && o.stopped > o.started), 'every oscillator was scheduled to stop');
+  ok(audio.made.source.every(s => s.stopped !== undefined), 'every noise burst was scheduled to stop');
+
+  // Nothing should be loud enough to hurt: peaks stay well under unity.
+  let loudest = 0;
+  audio.made.gain.forEach(g => g.gain.calls.forEach(c => {
+    if (c[0] === 'exp' || c[0] === 'set') loudest = Math.max(loudest, c[1]);
+  }));
+  ok(loudest <= 0.3, 'no envelope peaks above 0.3 (loudest ' + loudest.toFixed(3) + ')');
+  // Exponential ramps to exactly zero are a silent WebAudio no-op; guard against it.
+  let zeroRamp = 0;
+  audio.made.gain.forEach(g => g.gain.calls.forEach(c => { if (c[0] === 'exp' && c[1] <= 0) zeroRamp++; }));
+  eq(zeroRamp, 0, 'no exponential ramp targets zero');
+
+  // A good round should sound richer than a bad one.
+  const countBefore = audio.made.osc.length;
+  Sfx.play('finish', 380);
+  const poor = audio.made.osc.length - countBefore;
+  const midCount = audio.made.osc.length;
+  Sfx.play('finish', 980);
+  const great = audio.made.osc.length - midCount;
+  ok(great > poor, 'a great round plays a fuller chord than a poor one (' + great + ' vs ' + poor + ')');
+
+  // Muting must be total, and must persist.
+  Sfx.setMuted(true);
+  const silentFrom = audio.made.osc.length + audio.made.source.length;
+  eq(Sfx.play('tap'), false, 'muted play is refused');
+  Sfx.play('bullseye');
+  Sfx.play('finish', 900);
+  eq(audio.made.osc.length + audio.made.source.length, silentFrom, 'muted really means silent');
+  eq(memStore.getItem('maptap.muted.v1'), '1', 'mute preference is stored');
+  eq(Sfx.toggle(), false, 'toggle turns it back on');
+  eq(memStore.getItem('maptap.muted.v1'), '0', 'and stores that too');
+  ok(Sfx.play('tap'), 'sound works again after unmuting');
+
+  // Every sound the page asks for must exist in the synth.
+  const pageHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const used = [...pageHtml.matchAll(/sfx\('([a-z]+)'/g)].map(m => m[1]);
+  ok(used.length >= 8, 'the page triggers ' + used.length + ' sounds');
+  [...new Set(used)].forEach(n => ok(Sfx.has(n), 'page sound "' + n + '" exists in the synth'));
+  // ...and the important moments must actually be wired.
+  for (const n of ['tap', 'lock', 'sweep', 'bullseye', 'finish', 'ui', 'deny']) {
+    ok(used.indexOf(n) !== -1, 'the page plays "' + n + '"');
+  }
+}
+
 /* --------------------------------------------------- UI wiring (static) */
 section('ui wiring');
 {
@@ -463,12 +661,20 @@ section('ui wiring');
 
   // Every script the page loads must exist on disk.
   const srcs = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
-  ok(srcs.length === 5, 'five script files are loaded');
+  eq(srcs.length, 8, 'eight script files are loaded');
   for (const s of srcs) ok(fs.existsSync(path.join(ROOT, s)), 'script exists: ' + s);
   // ...and in an order where each file's dependencies are already defined.
   eq(srcs.indexOf('js/world-data.js') < srcs.indexOf('js/geo.js'), true, 'world data loads before geo');
   eq(srcs.indexOf('js/geo.js') < srcs.indexOf('js/game.js'), true, 'geo loads before game');
   eq(srcs.indexOf('js/geo.js') < srcs.indexOf('js/render.js'), true, 'geo loads before render');
+  // render-gl borrows methods off Globe.prototype at load time, so order matters.
+  eq(srcs.indexOf('js/render.js') < srcs.indexOf('js/render-gl.js'), true, 'vector renderer loads before the GL one');
+  eq(srcs.indexOf('js/earth-texture.js') < srcs.indexOf('js/render-gl.js'), true, 'texture loads before the GL renderer');
+
+  // Both canvases must exist: WebGL cannot share a canvas with a 2D context.
+  ok(/<canvas id="globe">/.test(html), 'the GL canvas is in the page');
+  ok(/<canvas id="overlay">/.test(html), 'the 2D overlay canvas is in the page');
+  ok(/#overlay\{[^}]*pointer-events:none/.test(html), 'the overlay does not swallow pointer events');
 
   // Every id the script reaches for must exist in the markup. This is the class of
   // bug a headless run would otherwise never see.
@@ -480,7 +686,7 @@ section('ui wiring');
 
   // Buttons that must be wired, or the player gets stuck on a screen.
   for (const id of ['actionBtn', 'quitBtn', 'againBtn', 'menuBtn', 'statsBtn', 'statsBack',
-                    'howBtn', 'howBack', 'copyBtn', 'resetBtn', 'weakBtn']) {
+                    'howBtn', 'howBack', 'copyBtn', 'resetBtn', 'weakBtn', 'muteBtn', 'muteBtn2']) {
     ok(new RegExp('\\$\\(\'' + id + '\'\\)\\.addEventListener').test(html), id + ' has a click handler');
   }
   // Every tier button in the markup must carry a tier the game knows.
