@@ -107,11 +107,12 @@ function loadSlot(i){
   try { return F.deserialize(s.data); } catch (e){ return null; }
 }
 UI.save = function(){
-  if (!UI.S || R.cine || UI.S.testWorld || UI.slot == null) return;   // test worlds never touch a slot
+  if (!UI.S || R.cine || UI.slot == null) return false;
   try {
     localStorage.setItem(SAVE_KEYS[UI.slot],
       JSON.stringify({ name: UI.slotName || 'Foundry', save: F.serialize(UI.S) }));
-  } catch (e){}
+    return true;
+  } catch (e){ return false; }
 };
 
 /* ==================================================================== */
@@ -234,21 +235,6 @@ function quitToTitle(){
   startTitleFx();
 }
 
-/* dev/test sandbox: everything unlocked, deep pockets, never saved */
-function startTestWorld(){
-  const S = F.newGame();
-  S.testWorld = true;
-  UI.slot = null;   // sandbox is never written to a slot
-  for (const k in F.BUILDINGS) S.unlocked[k] = true;
-  for (const k in F.RECIPES) S.unlocked['r:' + k] = true;
-  for (const k in F.ITEMS) S.inv[k] = 1000;
-  for (const id in F.TECHS) S.research.done[id] = true;   // tree fully researched
-  S.msIndex = F.MILESTONES.length - 1;   // sit at Ignition with all prior tiers done
-  S.flags.welcomed = true;
-  startGame(S);
-  toast('<b>Test world</b> — every tier unlocked, 1000 of each item. Progress here is <b>not saved</b>.', 'warn', 10000);
-}
-
 function startGame(S){
   UI.S = S;
   R.particles.length = 0;
@@ -274,6 +260,9 @@ function startGame(S){
     S.flags.welcomed = true;
     toast('The Core is dark. Hold <b>left-click</b> on an ore deposit to mine by hand.', 'tip', 9000);
   }
+  // a win that was never acknowledged (closed the tab, or the win event was
+  // dropped) opens the ending again, with Keep Building already available
+  if (S.won && !S.freeplay) startWin({ resumed: true });
 }
 
 /* ==================================================================== */
@@ -295,7 +284,7 @@ function bindPointer(){
     P.lastTile = tileUnder(e.clientX, e.clientY);
     P.panning = (e.button === 1);
     if (e.button === 0){
-      if (UI.mode === 'decon' || UI.mode === 'copy'){ beginMarquee(P.lastTile); P.marqueeing = true; }
+      if (UI.mode === 'decon' || UI.mode === 'copy'){ if (beginMarquee(P.lastTile)) P.marqueeing = true; }
       else if (UI.mode === 'stamp'){ stampBlueprint(P.lastTile); }
       else if (UI.tool) placeAt(P.lastTile, true);
       // selection / mining resolved on up (if not dragged) or per-frame (mining)
@@ -591,7 +580,11 @@ function boxOf(m){
            x1: Math.max(m.sx, m.ex), y1: Math.max(m.sy, m.ey) };
 }
 
-function beginMarquee(t){ UI.marquee = { sx: t[0], sy: t[1], ex: t[0], ey: t[1] }; }
+function beginMarquee(t){
+  if (!t) return false;
+  UI.marquee = { sx: t[0], sy: t[1], ex: t[0], ey: t[1] };
+  return true;
+}
 function updateMarquee(t){ if (UI.marquee){ UI.marquee.ex = t[0]; UI.marquee.ey = t[1]; } }
 function finishMarquee(){
   const m = UI.marquee; UI.marquee = null;
@@ -610,35 +603,59 @@ function entsInBox(b){
   return out;
 }
 
+function platformsInBox(b){
+  const S = UI.S, out = [];
+  for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++){
+    if (!F.inMap(S, x, y)) continue;
+    if (S.platform[F.tileIdx(S, x, y)]) out.push({ x, y });
+  }
+  return out;
+}
+
 function applyDecon(b){
   const list = entsInBox(b);
-  if (!list.length){ A.sfx.error(); return; }
+  const plats = platformsInBox(b);
+  if (!list.length && !plats.length){ A.sfx.error(); return; }
   let wrecks = 0, saved = 0;
   for (const e of list){
     if (UI.selection === e) select(null);
     const r = F.remove(UI.S, e.x, e.y);
     if (r && r.broken){ wrecks++; saved += r._salvaged || 0; }
   }
+  // buildings first, so a deck under something in the box can lift once it's clear
+  let decks = 0;
+  for (const p of plats) if (F.removePlatform(UI.S, p.x, p.y)) decks++;
+  if (!list.length && !decks){ A.sfx.error(); return; }
   A.sfx.remove();
   buildBarAfford();
-  toast(`Deconstructed ${list.length} building${list.length > 1 ? 's' : ''} (refunded)` +
+  const bits = [];
+  if (list.length) bits.push(`${list.length} building${list.length > 1 ? 's' : ''}`);
+  if (decks) bits.push(`${decks} platform${decks > 1 ? 's' : ''}`);
+  toast(`Deconstructed ${bits.join(' and ')} (refunded)` +
     (wrecks ? ` — ${wrecks} wreck${wrecks > 1 ? 's' : ''} scrapped for nothing${
       saved ? ` (${saved} module${saved > 1 ? 's' : ''} salvaged)` : ''}.` : '.'), '', 2600);
 }
 
 function captureBlueprint(b){
   const list = entsInBox(b);
-  if (!list.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
+  const plats = platformsInBox(b);
+  if (!list.length && !plats.length){ A.sfx.error(); toast('Nothing to copy in that area.', 'warn', 2000); return; }
   const parts = list.map(e => ({ key: e.key, dx: e.x - b.x0, dy: e.y - b.y0, dir: e.dir,
     recipe: e.recipe || null,
     exPrio: e.exPrio ? Object.assign({}, e.exPrio) : null,
     exFilt: e.exFilt ? Object.assign({}, e.exFilt) : null,
+    exBlock: e.exBlock ? Object.assign({}, e.exBlock) : null,
+    exRatio: e.exRatio ? Object.assign({}, e.exRatio) : null,
     mode: e.mode || null, portItem: e.portItem || null }));
+  for (const p of plats)
+    parts.push({ key: 'platform', dx: p.x - b.x0, dy: p.y - b.y0, dir: 0,
+      recipe: null, exPrio: null, exFilt: null, exBlock: null, exRatio: null,
+      mode: null, portItem: null });
   UI.blueprint = { w: b.x1 - b.x0 + 1, h: b.y1 - b.y0 + 1, parts };
   UI.bpDir = 0;
   setMode('stamp');
   A.sfx.buy();
-  toast(`Blueprint captured — ${parts.length} buildings. Click to stamp, R to rotate.`, 'tip', 5000);
+  toast(`Blueprint captured — ${parts.length} part${parts.length > 1 ? 's' : ''}. Click to stamp, R to rotate.`, 'tip', 5000);
 }
 
 /* rotate an offset within a w×h box by UI.bpDir quarter-turns (CW) */
@@ -658,6 +675,7 @@ function bpParts(anchorX, anchorY){
     const [ox, oy] = bpTransform(p.dx, p.dy, bp.w, bp.h, rot);
     return { key: p.key, x: anchorX + ox, y: anchorY + oy, dir: (p.dir + rot) & 3,
              recipe: p.recipe, exPrio: p.exPrio, exFilt: p.exFilt,
+             exBlock: p.exBlock, exRatio: p.exRatio,
              mode: p.mode, portItem: p.portItem };
   });
 }
@@ -666,6 +684,7 @@ function stampBlueprint(t){
   const S = UI.S, bp = UI.blueprint;
   if (!bp || !t) return;
   const parts = bpParts(t[0], t[1]);
+  parts.sort((a, b) => (a.key === 'platform' ? 0 : 1) - (b.key === 'platform' ? 0 : 1));
   let placed = 0, skip = 0, poor = 0;
   for (const p of parts){
     if (!S.unlocked[p.key]){ skip++; continue; }
@@ -677,6 +696,8 @@ function stampBlueprint(t){
       if (p.recipe && F.recipeUnlocked(S, p.recipe)) e.recipe = p.recipe;
       if (p.exPrio && e.exPrio) Object.assign(e.exPrio, p.exPrio);
       if (p.exFilt && e.exFilt) Object.assign(e.exFilt, p.exFilt);
+      if (p.exBlock && e.exBlock) Object.assign(e.exBlock, p.exBlock);
+      if (p.exRatio && e.exRatio) Object.assign(e.exRatio, p.exRatio);
       if (p.mode && e.kind === 'port'){ e.mode = p.mode; e.portItem = p.portItem; }
     }
     else poor++;
@@ -699,14 +720,7 @@ function bindKeys(){
   root.addEventListener('keydown', (e) => {
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     UI.keys[e.code] = true;
-    if (!UI.started){
-      // title screen: T = test world sandbox
-      if (e.code === 'KeyT' && !$('title').classList.contains('hidden')){
-        A.init(); A.resume();
-        startTestWorld();
-      }
-      return;
-    }
+    if (!UI.started) return;
     switch (e.code){
       case 'KeyR': {
         if (UI.mode === 'stamp'){ UI.bpDir = (UI.bpDir + 1) & 3; A.sfx.rotate(); break; }
@@ -799,9 +813,9 @@ function bindHud(){
   $('mResume').addEventListener('click', closeMenu);
   $('mHowto').addEventListener('click', () => { closeMenu(); openBig('howto'); });
   $('mSave').addEventListener('click', () => {
-    UI.save();
+    const wrote = UI.save();
     closeMenu();
-    toast('Progress saved.', '', 1800);
+    if (wrote) toast('Progress saved.', '', 1800);
   });
   $('mQuit').addEventListener('click', quitToTitle);
   $('bigClose').addEventListener('click', closeBig);
@@ -809,10 +823,12 @@ function bindHud(){
     if (e.target === $('bigPanelWrap')) closeBig();
   });
   $('btnFreeplay').addEventListener('click', () => {
+    winGen++;
     UI.S.freeplay = true;
     R.cine = null;
     $('winOverlay').classList.add('hidden');
     $('winOverlay').classList.remove('solid');
+    $('btnFreeplay').classList.add('hidden');
     UI.save();
   });
   // draw the little power bolt
@@ -910,7 +926,7 @@ function showBuildTip(ev, key){
   if (def.out) stats.push(`+${def.out} P`);
   if (def.power) stats.push(`${def.power} P draw`);
   if (def.fuel) stats.push('burns coal');
-  if (def.span) stats.push(`spans ${def.span} tiles`);
+  if (def.span) stats.push(`crosses ${def.span - 1} tiles`);
   if (def.kind === 'pole') stats.push(`links ${def.reach} tiles · powers ${def.cover * 2 + 1}×${def.cover * 2 + 1}`);
   if (def.cap && def.kind === 'chest') stats.push(`holds ${def.cap}`);
   if (def.kind === 'tank') stats.push(`buffers ${def.cap} crude`);
@@ -1043,9 +1059,11 @@ function dynVals(e){
     case 'ubelt':
       d.link = e.linkId ? (e.isExit ? 'exit ✓' : 'entrance ✓') : '<span style="color:var(--accent)">unlinked</span>';
       break;
-    case 'chest':
-      d.stored = `${e.total} / ${(def.cap || F.CHEST_CAP) + F.upRank(S, 'capacitors') * 20}`;
+    case 'chest': {
+      const bonus = def.tarOnly ? 0 : F.upRank(S, 'capacitors') * 20;
+      d.stored = `${e.total} / ${(def.cap || F.CHEST_CAP) + bonus}`;
       break;
+    }
     case 'pump':
       d.tank = `${e.tank.toFixed(1)} / 30`;
       break;
@@ -1094,6 +1112,7 @@ function modFxStr(S, e, def){
   if (Math.abs(fx.spd - 1) > .001) parts.push(`speed ×${fx.spd.toFixed(2)}`);
   if (def.power && Math.abs(fx.pow - 1) > .001) parts.push(`power ×${fx.pow.toFixed(2)}`);
   if (fx.prod > 0) parts.push(`+${Math.round(fx.prod * 100)}% bonus output`);
+  if (fx.dur > 0.001) parts.push(`service +${Math.round(fx.dur * 100)}%`);
   return parts.join(' · ') || '—';
 }
 
@@ -1118,7 +1137,7 @@ function moduleSection(S, e, def){
   }
   h += `</div>`;
   if (e.kind === 'beacon')
-    h += `<div class="ghostNote">Broadcasts at half strength to every machine in its ${def.range * 2 + def.w}×${def.range * 2 + def.w} area. Productivity doesn't transmit.</div>`;
+    h += `<div class="ghostNote">Broadcasts speed, efficiency, and hardened modules at half strength across its ${def.range * 2 + def.w}×${def.range * 2 + def.w} area. Productivity doesn't transmit.</div>`;
   else
     h += row('Module effect', modFxStr(S, e, def), 'modfx');
   return h;
@@ -1251,8 +1270,8 @@ function buildSelPanel(e){
   }
   if (e.kind === 'port'){
     html += `<div class="selSection">Mode</div><div class="recipeGrid">`;
-    for (const [val, lbl, tip] of [['provide', '▲ Provide', 'Belts feed this depot; drones come and take from it'],
-                                   ['request', '▼ Request', 'This depot sends drones to fetch the item, then feeds it out the front']])
+    for (const [val, lbl, tip] of [['provide', '▲ Provide', 'Belts feed this depot; drones come and take from it. It does not need power to be looted.'],
+                                   ['request', '▼ Request', 'Sends drones for the item, then splits the cargo across every belt facing away from it. Only this depot needs power to launch.']])
       html += `<button class="recipeBtn prioBtn${e.mode === val ? ' on' : ''}" data-pmode="${val}" title="${tip}" style="width:auto;padding:0 10px">${lbl}</button>`;
     html += `</div>`;
     const seenP = F.ITEM_ORDER.filter(k => F.oreTypeByItem[k] || S.inv[k] || S.delivered[k] || S.stats.made[k]);
@@ -1265,12 +1284,12 @@ function buildSelPanel(e){
     html += row('Drones', dv.drones, 'drones');
     html += `<div data-bufs>${bufsFor(e)}</div>`;
     if (!e.mode || !e.portItem)
-      html += `<div class="ghostNote">Pick a mode and an item. A ▲ provider is fed by belts; a ▼ requester flies its two drones to the nearest stocked provider and dispenses out its front.</div>`;
+      html += `<div class="ghostNote">Pick a mode and an item. A ▲ provider is a stockpile drones lift from. A ▼ requester flies its two drones to the nearest stocked provider and splits the cargo across every belt facing away from it. Only the requester needs power to launch.</div>`;
     if (def.power) html += row('Power draw', def.power + ' P');
   }
   if (e.kind === 'ubelt'){
     html += row('Linked', dv.link, 'link');
-    if (!e.linkId) html += `<div class="ghostNote">Place a matching tunnel within ${def.span} tiles, in the same direction, to link.</div>`;
+    if (!e.linkId) html += `<div class="ghostNote">Place the exit up to ${def.span - 1} tiles ahead, in the same direction.</div>`;
   }
   if (e.kind === 'chest'){
     html += row('Stored', dv.stored, 'stored');
@@ -1316,7 +1335,9 @@ function buildSelPanel(e){
       <div class="ghostNote">click: pick up all · right-click: half · with a stack in hand, scroll over a box to move one at a time</div>`;
   }
 
-  html += `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
+  html += e.broken
+    ? `<button class="dangerBtn" data-del="1" title="No refund. Each slotted module survives the salvage on a coin flip.">Scrap wreck (no refund)</button>`
+    : `<button class="dangerBtn" data-del="1">Remove (full refund)</button>`;
   p.innerHTML = html;
   UI._bufsCache = bufsFor(e);
 
@@ -1328,8 +1349,10 @@ function buildSelPanel(e){
   }
   p.querySelectorAll('[data-recipe]').forEach(b => {
     b.addEventListener('click', () => {
-      e.recipe = b.dataset.recipe === '_' ? null : b.dataset.recipe;
-      e.crafting = false; e.prog = 0;
+      const next = b.dataset.recipe === '_' ? null : b.dataset.recipe;
+      if (next === e.recipe){ A.sfx.click(); return; }
+      F.refundOpenCraft(S, e, false);
+      e.recipe = next;
       A.sfx.click();
       refreshSelPanel(true);
     });
@@ -1405,25 +1428,26 @@ function buildSelPanel(e){
   p.querySelectorAll('[data-ratio]').forEach(inp => {
     let dragStart = null;
 
-    const applyRatio = () => {
+    const commitRatio = () => {
       const exit = inp.dataset.ratio;
       if (!e.exRatio) e.exRatio = { left: 1, front: 1, right: 1 };
-      let val = parseInt(inp.value) || 1;
+      let val = parseInt(inp.value, 10);
+      if (isNaN(val)) val = 1;
       val = Math.max(0, Math.min(100, val)) || 1;
       e.exRatio[exit] = val;
       inp.value = val;
-      A.sfx.click();
-      refreshSelPanel(true);
     };
 
     inp.addEventListener('pointerdown', (ev) => {
-      dragStart = { y: ev.clientY, val: parseInt(inp.value) || 1 };
-      inp.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+      dragStart = { y: ev.clientY, val: parseInt(inp.value, 10) || 1, dragged: false };
     });
 
     inp.addEventListener('pointermove', (ev) => {
       if (!dragStart) return;
       const delta = dragStart.y - ev.clientY;
+      if (!dragStart.dragged && Math.abs(delta) < 4) return;
+      dragStart.dragged = true;
       let newVal = dragStart.val + Math.round(delta / 2);
       newVal = Math.max(0, Math.min(100, newVal)) || 1;
       inp.value = newVal;
@@ -1431,11 +1455,16 @@ function buildSelPanel(e){
 
     inp.addEventListener('pointerup', () => {
       if (!dragStart) return;
+      const dragged = dragStart.dragged;
       dragStart = null;
-      applyRatio();
+      if (dragged) commitRatio();
     });
 
-    inp.addEventListener('change', applyRatio);
+    inp.addEventListener('change', commitRatio);
+    inp.addEventListener('keydown', (ev) => {
+      ev.stopPropagation();
+      if (ev.key === 'Enter'){ commitRatio(); inp.blur(); }
+    });
   });
   /* belt line select + one-click line replacement */
   const lineBtn = p.querySelector('[data-line]');
@@ -1492,7 +1521,9 @@ function buildSelPanel(e){
   });
   p.querySelectorAll('[data-pitem]').forEach(b => {
     b.addEventListener('click', () => {
-      e.portItem = b.dataset.pitem === '_' ? null : b.dataset.pitem;
+      const next = b.dataset.pitem === '_' ? null : b.dataset.pitem;
+      if (next !== e.portItem) F.dumpPortStore(S, e);
+      e.portItem = next;
       A.sfx.click();
       refreshSelPanel(true);
     });
@@ -1743,7 +1774,7 @@ function refreshObjective(){
     if (UI._objCache !== h){ UI._objCache = h; $('objBody').innerHTML = h; }
     return;
   }
-  $('objTier').textContent = 'T' + S.msIndex;
+  $('objTier').textContent = 'Tier ' + (S.msIndex + 1) + '/' + F.MILESTONES.length;
   $('objName').textContent = ms.name;
   const req = ms.req || ms.handMine;
   let html = `<div class="objFlavor">${ms.flavor}</div>`;
@@ -2054,7 +2085,7 @@ const TREE_COLW = 158, TREE_ROWH = 58, TREE_NW = 140, TREE_NH = 46, TREE_PAD = 1
 const TREE_ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 const TREE_UP_ICON = { logistics:'gear', extraction:'ironOre', metallurgy:'ironIngot',
   fabrication:'circuit', gridOutput:'wire', efficiency:'glass', prospecting:'stone', capacitors:'copperIngot',
-  durability:'steel' };
+  durability:'steel', pumping:'motor' };
 
 /* hand-authored lanes: [groupLabel, [startCol, spec…]…]. A spec is a
    tech id, 'up:track' (expands to five chained rank nodes) or null
@@ -2106,6 +2137,7 @@ function treeLayout(){
   const nodes = {}, edges = [], groups = [];
   nodes.root = { key:'root', root:true, x: TREE_PAD, y: TREE_PAD, h: 52 };
   let y = TREE_PAD + 52 + 16;
+  let maxCol = 0;
   for (const lane of TREE_LANES){
     groups.push({ name: lane[0], y });
     y += 24;
@@ -2121,12 +2153,14 @@ function treeLayout(){
             const key = spec + ':' + r;
             nodes[key] = { key, up: track, rank: r, x: TREE_PAD + col * TREE_COLW, y };
             edges.push([r ? spec + ':' + (r - 1) : 'root', key]);
+            if (col > maxCol) maxCol = col;
             col++;
           }
         } else {
           const tk = F.TECHS[spec];
           if (!tk) { col++; continue; } // skip undefined techs
           nodes[spec] = { key: spec, tech: spec, x: TREE_PAD + col * TREE_COLW, y };
+          if (col > maxCol) maxCol = col;
           const req = tk.req, rr = tk.reqRank;
           let any = false;
           if (req && req.length){ for (const r of req) edges.push([r, spec]); any = true; }
@@ -2140,7 +2174,7 @@ function treeLayout(){
     y += 14;
   }
   TREE_CACHE = { nodes, edges, groups,
-    W: TREE_PAD * 2 + 5 * TREE_COLW + TREE_NW, H: y + TREE_PAD };
+    W: TREE_PAD * 2 + maxCol * TREE_COLW + TREE_NW, H: y + TREE_PAD };
   return TREE_CACHE;
 }
 
@@ -2491,7 +2525,7 @@ function renderRecipeBook(S){
       if (d.power) stats.push(`${d.power} P`);
       if (d.fuel) stats.push('coal-fired');
       if (d.kind === 'pole') stats.push(`links ${d.reach} · powers ${d.cover * 2 + 1}×${d.cover * 2 + 1}`);
-      if (d.span) stats.push(`spans ${d.span}`);
+      if (d.span) stats.push(`crosses ${d.span - 1} tiles`);
       if (d.kind === 'lab') stats.push(`reads a pack every ${d.packTime}s`);
       if (d.kind === 'chest' && d.cap) stats.push(`holds ${d.cap}`);
       if (d.kind === 'beacon') stats.push(`boosts a ${d.range * 2 + d.w}×${d.range * 2 + d.w} area`);
@@ -2522,9 +2556,9 @@ function renderHowTo(){
   <div class="selSection">The loop</div>
   <p class="howP">The dormant <b>Core</b> sits at the centre of the world. Everything you belt into it
   becomes <b>construction material</b> in your inventory — deliveries literally fund every building,
-  upgrade and expansion. Each <b>milestone tier</b> asks for specific goods and <b>only counts items
-  that arrive by conveyor</b>; hand-mining fills your pockets but never advances a tier.
-  Complete all eighteen tiers to reignite the World Engine — and watch the land: <b>every finished tier
+  upgrade and expansion. The first tier is counted from what you dig by hand: iron and stone.
+  Every tier after that counts only what a conveyor delivers to the Core.
+  There are <b>twenty-two tiers</b>. Complete them to reignite the World Engine — and watch the land: <b>every finished tier
   heals a ring of the ash-waste around the Core back to green</b>. Even after Ignition the game
   goes on: the woken Engine asks for endless <b>tributes</b> — escalating baskets of goods, each
   one granting <b>+3% machine speed</b> (up to +30%).</p>
@@ -2571,11 +2605,11 @@ function renderHowTo(){
   <b>wears out</b> as it works — past each stretch of service its survival is a <b>roll of the dice</b>,
   and one day it <b>breaks down for good</b>: a crumbled, smoking wreck you must scrap (nothing comes
   back; slotted modules survive on a coin flip) and replace. Higher-mark machines endure longer,
-  <b>Durability</b> ranks in the tech tree add +16% per rank to each service stretch, and the
-  ${ic('durModule')} <b>hardened module</b> adds +120% to whatever it's slotted in <i>and</i> makes it
-  likelier to survive each wear check. Max the Durability line and you can research
-  <b>Invincibility</b> — the brutally expensive endgame tech that <b>ends breakdowns entirely</b>,
-  so nothing you build ever wears out again. How long exactly? The machines don't say.</p>
+  <b>Durability</b> ranks in the tech tree add +16% per rank to each service stretch.
+  At rank V, machines stop breaking entirely. The
+  ${ic('durModule')} <b>hardened module</b> adds +120% service life to the machine it's slotted in
+  and makes it likelier to survive each wear check. A <b>beacon</b> broadcasts that protection
+  at half strength to every machine in range. How long exactly? The machines don't say.</p>
 
   <div class="selSection">Power</div>
   <p class="howP">Coal serves the burner age: Mk1 drills, kilns, fabricators and crushers eat it
@@ -2597,8 +2631,9 @@ function renderHowTo(){
   <p class="howP">The <b>Cargo drones</b> tech unlocks the <b>drone depot</b>. Set one to
   <b>▲ Provide</b> an item and feed it by belt; set another anywhere — the far titanium fields,
   the oil wastes — to <b>▼ Request</b> the same item. Its two drones fly to the nearest stocked
-  provider, carry back ${F.DRONE_CAP} at a time, and the depot dispenses out its front like a
-  depot chest. Both ends need grid power to dispatch; airborne drones always finish their run.</p>
+  provider, carry back ${F.DRONE_CAP} at a time, and the requester splits that cargo across
+  <b>every belt facing away from it</b>. Only the requester needs grid power to launch;
+  a provider is a stockpile. Airborne drones always finish their run.</p>
 
   <div class="selSection">Day & night</div>
   <p class="howP">The world turns: every eleven minutes a full <b>day/night cycle</b> passes (the
@@ -2624,7 +2659,8 @@ function renderHowTo(){
   ${ic('pack4')} quantum). More labs read packs in parallel, and switching projects never loses progress.
   Deep in the tree wait ${ic('speedModule')} <b>modules</b> — inserts that trade power for speed
   (or the reverse), plus ${ic('prodModule')} productivity skim — and the <b>beacon</b>, which
-  broadcasts its own modules at half strength to every machine in a 10×10 area. Modules take real
+  broadcasts speed, efficiency, and hardened modules at half strength to every machine in a 10×10 area.
+  Productivity does not transmit. Modules take real
   investment: <b>Machine modules</b> only opens the door, then you research each <b>type</b> (Speed,
   Efficiency, Hardened) and each <b>Module slot</b> (I → II → III) on its own — a machine has
   <b>no slots at all</b> until you do. Beacons come with their own two slots. Click any drill or
@@ -2650,7 +2686,7 @@ function renderHowTo(){
   research <b>Pontoon platforms</b>, then drag a line of decking across and belt right over it —
   platforms carry machines and power poles too (tunnels dive underneath, and drones fly straight over).
   Chromite alloys into ${ic('chrome')} chrome and ${ic('chromsteel')} chromsteel, the metal of the
-  researchable <b>Mk4 machines</b> and the 400 P <b>chrome turbine</b>. One price rule to know:
+  researchable <b>Mk4 machines</b> and the 1250 P <b>chrome turbine</b>. One price rule to know:
   once you own one of an electric building, every further copy of it costs <b>nearly double</b>
   (×1.9). Ratios matter: one
   fabricator eats the output of two or three kilns, so belt more smelting into your assemblers than
@@ -3083,7 +3119,15 @@ function drainEvents(){
 /* ==================================================================== */
 /* WIN CINEMATIC                                                        */
 /* ==================================================================== */
-function startWin(){
+let winGen = 0;
+function startWin(opts){
+  const resumed = !!(opts && opts.resumed);
+  winGen++;
+  const gen = winGen;
+  // persist the win before the cutscene starts blocking saves. The live path
+  // already saved from the milestone event, and has set the cinematic.
+  if (!R.cine) UI.save();
+  R.cine = R.cine || { t: 0 };
   A.sfx.win();
   select(null);
   setTool(null);
@@ -3099,13 +3143,20 @@ function startWin(){
     <div>Every belt still turns. Every furnace still burns. It remembers you now.</div>
     <div style="color:var(--ink-dim);font-size:.85em;margin-top:10px">
       ${F.fmtTime(S.time)} · ${F.fmt(delivered)} items delivered · ${S.ents.length - 1} machines</div>`;
-  // staged reveal
-  setTimeout(() => ov.classList.add('solid'), 6200);
   const ls = lines.children;
-  setTimeout(() => ls[0] && ls[0].classList.add('show'), 8000);
-  setTimeout(() => ls[1] && ls[1].classList.add('show'), 10200);
-  setTimeout(() => ls[2] && ls[2].classList.add('show'), 12200);
-  setTimeout(() => $('btnFreeplay').classList.remove('hidden'), 12800);
+  const later = (ms, fn) => setTimeout(() => { if (gen === winGen) fn(); }, ms);
+  if (resumed){
+    ov.classList.add('solid');
+    for (let i = 0; i < ls.length; i++) ls[i].classList.add('show');
+    $('btnFreeplay').classList.remove('hidden');
+    return;
+  }
+  $('btnFreeplay').classList.add('hidden');
+  later(6200, () => ov.classList.add('solid'));
+  later(8000, () => ls[0] && ls[0].classList.add('show'));
+  later(10200, () => ls[1] && ls[1].classList.add('show'));
+  later(12200, () => ls[2] && ls[2].classList.add('show'));
+  later(12800, () => $('btnFreeplay').classList.remove('hidden'));
 }
 
 /* ==================================================================== */
@@ -3246,6 +3297,8 @@ UI.update = function(dt){
   }
 
   drainEvents();
+  // the win is stored on the save itself, so a full craft-event queue cannot swallow the ending
+  if (S.won && !S.freeplay && !R.cine) startWin();
 
   /* throttled HUD refresh */
   UI.uiT += dt;

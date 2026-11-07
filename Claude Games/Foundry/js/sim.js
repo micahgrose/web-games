@@ -372,6 +372,49 @@ function linkTunnel(S, e, def){
 
 F.entById = (S, id) => S.ents.find(e => e.id === id) || null;
 
+/* Put an in-progress craft back where it came from. Solids return to the
+   input buffer (so a later delete refunds them). Fluid returns to the tank.
+   Pass spill when the machine itself is about to disappear: the craft's crude
+   is pushed into a neighboring pipe or reservoir. */
+F.refundOpenCraft = function(S, e, spill){
+  if (!e || !e.crafting || !e.activeRecipe) return;
+  const rc = F.RECIPES[e.activeRecipe];
+  e.crafting = false;
+  e.prog = 0;
+  e.activeRecipe = null;
+  if (!rc) return;
+  if (!e.inBuf) e.inBuf = {};
+  for (const k in rc.in) e.inBuf[k] = (e.inBuf[k] || 0) + rc.in[k];
+  if (!rc.fluid) return;
+  const back = rc.fluid;
+  const cap = (F.BUILDINGS[e.key] && F.BUILDINGS[e.key].tank) || 60;
+  e.tank = (e.tank || 0) + back;
+  // on delete, move the restored batch into a pipe. On cancel, only the overflow.
+  let left = spill ? Math.min(back, e.tank) : Math.max(0, e.tank - cap);
+  if (left > 0){
+    forAdjacent(S, e, (n) => {
+      if (left <= 0) return;
+      if (n.kind !== 'pipe' && n.kind !== 'tank') return;
+      const room = F.BUILDINGS[n.key].cap - n.fluid;
+      const amt = Math.min(left, Math.max(0, room));
+      if (amt > 0){ n.fluid += amt; e.tank -= amt; left -= amt; }
+    });
+  }
+  if (e.tank > cap) e.tank = cap;
+};
+
+/* A depot's stored stack, and any cargo still in the air, back to the pocket. */
+F.dumpPortStore = function(S, e){
+  if (!e) return;
+  if (e.store) for (const k in e.store) if (e.store[k] > 0) F.invAdd(S, k, Math.floor(e.store[k]));
+  e.store = {};
+  e.total = 0;
+  if (e.drones){
+    for (const d of e.drones) if (d.cargo > 0 && d.item) F.invAdd(S, d.item, d.cargo);
+    e.drones = [];
+  }
+};
+
 /* lift a platform deck back out of the water — only once the tile is clear */
 F.removePlatform = function(S, x, y){
   if (!F.inMap(S, x, y)) return false;
@@ -394,6 +437,7 @@ F.remove = function(S, x, y){
     if (e.mods) for (const m of e.mods)
       if (Math.random() < .5){ F.invAdd(S, m, 1); e._salvaged++; }
   } else {
+    F.refundOpenCraft(S, e, true);
     F.refund(S, e.paid || def.cost);
     // return contained items
     const give = (o) => { for (const k in o) if (o[k] > 0) F.invAdd(S, k, Math.floor(o[k])); };
@@ -413,7 +457,16 @@ F.remove = function(S, x, y){
   }
   if (e.kind === 'ubelt' && e.linkId){
     const other = F.entById(S, e.linkId);
-    if (other){ other.linkId = 0; other.isExit = false; }
+    if (other){
+      // items already inside the tunnel live on the exit. Deleting either
+      // mouth returns them; a wreck still takes them with it.
+      if (!e.broken && other.transit && other.transit.length){
+        for (const tr of other.transit) F.invAdd(S, tr.item, 1);
+        other.transit = [];
+      }
+      other.linkId = 0;
+      other.isExit = false;
+    }
   }
   unstamp(S, e);
   S.ents.splice(S.ents.indexOf(e), 1);
@@ -659,17 +712,16 @@ function outPort(e){
 F.outPort = outPort;
 
 /* Every perimeter tile of a depot that has a conveyor leading DIRECTLY out of
-   it (a belt/tunnel oriented away, or any other acceptor). Returns
-   [px, py, outDir] per tile; request-mode depots split their goods evenly
-   across all of these. A belt pointing back into the depot is fed-in, not
-   led-out, so it's excluded (head-on) — as is a tunnel whose mouth doesn't
-   align with the outward push. */
+   it (a belt or splitter facing away, a tunnel mouth aimed the same way, or
+   any other acceptor). Returns [px, py, outDir] per tile; request-mode depots
+   split their goods evenly across all of these. A belt running along the wall,
+   or pointing back in, is not an exit. */
 function portOutTiles(S, e){
   const out = [];
   const add = (px, py, od) => {
     const t = F.entAt(S, px, py);
     if (!t || t.broken) return;
-    if ((t.kind === 'belt' || t.kind === 'splitter') && od === OPP(t.dir)) return; // pointing in
+    if ((t.kind === 'belt' || t.kind === 'splitter') && t.dir !== od) return; // must face away
     if (t.kind === 'ubelt' && (t.isExit || od !== t.dir)) return;                   // misaligned mouth
     out.push([px, py, od]);
   };
@@ -765,7 +817,9 @@ F.tick = function(S, dt){
       e._want = wants;
       if (wants){
         // module power multiplier (beacon field uses last tick's ratio — converges)
-        const pm = (e.mods || e._bcn) ? F.modEffects(S, e).pow : 1;
+        // a beacon pays its base draw. Speed and efficiency change the
+        // machines in range, not the beacon's own bill.
+        const pm = (e.kind !== 'beacon' && (e.mods || e._bcn)) ? F.modEffects(S, e).pow : 1;
         const draw = def.power * useMul * pm;
         if (e.netId) dem[e.netId] = (dem[e.netId] || 0) + draw;
         else { unpowered++; unpoweredDem += draw; }
@@ -1132,7 +1186,7 @@ F.setResearch = function(S, id){
   const tk = F.TECHS[id];
   if (!tk || RS.done[id]) return false;
   for (const rq of (tk.req || [])) if (!RS.done[rq]) return false;
-  if (!F.rankMet(S, tk)) return false;   // e.g. Invincibility needs Durability V
+  if (!F.rankMet(S, tk)) return false;   // an upgrade-rank prerequisite is not met yet
   if (RS.cur === id) return true;
   dropLabWork(S);
   RS.cur = id;
@@ -1313,12 +1367,14 @@ function tickSplitter(S, e, dt){
     return false;
   };
   const names = ['left', 'front', 'right'];
-  // filtered lanes: a matching item must use one of its lanes (best rank first)
-  const matches = names.filter(n => e.exFilt[n] === e.item && !(e.exBlock && e.exBlock[n]));
-  if (matches.length){
+  // a reserved item may only leave through its lanes. A blocked reservation
+  // holds the item — it does not send it out an open side.
+  const reserved = names.filter(n => e.exFilt[n] === e.item);
+  if (reserved.length){
+    const matches = reserved.filter(n => !(e.exBlock && e.exBlock[n]));
     matches.sort((a, b) => (e.exPrio[a] || 9) - (e.exPrio[b] || 9));
     for (const n of matches) if (tryOut(n)) return;
-    e.t = .5;   // wait at the center for the lane to clear
+    e.t = .5;   // wait at the center for a reserved lane to clear
     return;
   }
   // open lanes: ranked ones first (1 → 3), then unranked by ratio weight

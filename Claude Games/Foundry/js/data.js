@@ -152,7 +152,7 @@ const B = F.BUILDINGS = {
   ubelt1:  { name:'Tunnel',          cat:'log', kind:'ubelt', w:1, h:1, span:5, speed:1.25, cost:{ironIngot:6, gear:2}, tech:'tunnels',
              desc:'Sends items under 4 tiles. Place entrance, then exit. Lets lines cross.' },
   ubelt2:  { name:'Deep tunnel',     cat:'log', kind:'ubelt', w:1, h:1, span:9, speed:4.2, cost:{steel:10, plastic:5}, tech:'deepTunnels',
-             desc:'A longer, faster tunnel.' },
+             desc:'Sends items under 8 tiles, and faster than the short tunnel.' },
   splitter:{ name:'Splitter',        cat:'log', kind:'splitter', w:1, h:1, speed:2.5, cost:{ironIngot:6},     unlock:2,
              desc:'Takes items in from behind and deals them evenly to every open exit.' },
   chest:   { name:'Depot',           cat:'log', kind:'chest', w:1, h:1, cap:60, cost:{plate:6},               tech:'depots',
@@ -225,7 +225,7 @@ const B = F.BUILDINGS = {
   gen1:    { name:'Burner generator',cat:'pow', kind:'gen', w:2, h:2, out:30, burn:6, cost:{brick:14, plate:10}, tech:'electrification',
              desc:'Burns coal to feed the grid. 30 P at full load. Needs a power pole in range to deliver it.' },
   solar:   { name:'Solar array',     cat:'pow', kind:'solar', w:2, h:2, out:12, cost:{glass:6, circuit:2, plate:4}, unlock:6,
-             desc:'Silent, fuel-free power. 12 P, always on.' },
+             desc:'Silent, fuel-free power. 12 P at noon, nothing at night.' },
   solar2:  { name:'Solar tower',     cat:'pow', kind:'solar', w:2, h:2, out:45, cost:{glass:40, circuit:20, steel:20}, tech:'solarTowers',
              desc:'Concentrated mirrors around a molten-salt core. 45 P of silent, fuel-free power.' },
   solar3:  { name:'Helios array',    cat:'pow', kind:'solar', w:3, h:3, out:1000, cost:{glass:80, advCircuit:24, frame:16}, tech:'helios',
@@ -693,7 +693,7 @@ F.TECHS = {
     desc:'Craft efficiency modules: a huge cut to a machine\'s power draw, and the counterweight that makes speed modules affordable.',
     cost:{ pack2:6 }, req:['modules'], unlocks:['r:effModule'] },
   durModuleTech:{ name:'Hardened modules', icon:'durModule',
-    desc:'Craft hardened modules: +120% service life each, and each one widens a machine\'s breakdown odds (1/4 → 1/6 → 1/8).',
+    desc:'Craft hardened modules: +120% service life each, and each one widens a machine\'s breakdown odds (1/4 → 1/6 → 1/8). A beacon broadcasts that protection at half strength.',
     cost:{ pack2:6 }, req:['modules'], unlocks:['r:durModule'] },
   moduleSlot1: { name:'Module slot I', icon:'gear',
     desc:'Cut a single module socket into every drill and machine. Without it, modules have nowhere to go.',
@@ -721,7 +721,7 @@ F.TECHS = {
     cost:{ pack2:14 }, req:['pumpjacks'], unlocks:['tank'] },
   /* --- the oil age & beyond --- */
   fuelTurbines:{ name:'Fuel turbines', icon:'fuelCell',
-    desc:'Burns refinery fuel cells for 150 P a machine — five burner generators in one footprint.',
+    desc:'Burns refinery fuel cells for 400 P a machine — a dozen burner generators in one footprint.',
     cost:{ pack3:12 }, req:['electrification'], unlocks:['turbine'] },
   tarSynthesis:{ name:'Tar synthesis', icon:'tar',
     desc:'Re-polymerise refinery tar: 2 tar + coal → plastic in any assembler. Turns your dirtiest byproduct into your most-wanted material.',
@@ -754,13 +754,13 @@ F.TECHS = {
     desc:'Drone depots: one PROVIDES an item, another REQUESTS it, and drones ferry 10 at a time across any distance — titanium from the world\'s edge without a single belt.',
     cost:{ pack3:18, pack4:12 }, req:['electrification'], unlocks:['port'] },
   chromeTurbines:{ name:'Chrome turbines', icon:'chrome',
-    desc:'A turbine whose chromsteel blades spin near the speed of sound — 400 P from a single machine.',
+    desc:'A turbine whose chromsteel blades spin near the speed of sound — 1250 P from a single machine.',
     cost:{ pack3:14, pack4:12 }, req:['chromeworks','fuelTurbines'], unlocks:['turbine2'] },
   quantumDrills:{ name:'Quantum drills', icon:'processor',
     desc:'A drill that folds the deposit through itself. 7× base mining speed.',
     cost:{ pack3:16, pack4:10 }, req:['plasmaBores'], unlocks:['miner4'] },
   helios:      { name:'Helios arrays', icon:'frame',
-    desc:'A 3×3 field of sun-tracking mirrors — 130 P without a whisper of smoke.',
+    desc:'A 3×3 field of sun-tracking mirrors — 1000 P at noon, nothing at night.',
     cost:{ pack3:10, pack4:16 }, req:['solarTowers'], unlocks:['solar3'] },
   sunforge:    { name:'The Sunforge', icon:'chromsteel',
     desc:'Mk4 production: the Sunforge smelter and Chrome fabricator — 7× base speed, built from chromsteel.',
@@ -808,28 +808,31 @@ F.draftBurn = S => (S.research && S.research.done.forcedDraft) ? 1.6 : 1;
 
 /* ================= MODULES =================
    Slotted into drills/machines (F.modSlots, earned by research) or beacons
-   (def.slots). Beacons rebroadcast speed/efficiency at half strength to
-   machines in range; productivity is machine-only. */
+   (def.slots). Beacons rebroadcast speed, efficiency, and durability at half
+   strength to machines in range; productivity is machine-only. */
 F.MODULES = {
   /* speed is a devil's bargain: one module alone drives draw to ×11.2.
      Efficiency pulls it back down — a speed+efficiency pair lands at ×2.3
-     (the ×0.2 floor in modEffects catches an efficiency module running solo). */
+     (the ×0.2 floor in modEffects catches an efficiency module running solo).
+     That multiplier applies to the machine the module is speeding. A beacon
+     pays its base draw either way. */
   speedModule: { spd:.35, pow:10.2 },
   effModule:   { pow:-8.9 },
   prodModule:  { prod:.12 },
-  durModule:   { dur:1.20 },  // +120% service life; slotted only, never broadcast
+  durModule:   { dur:1.20 },  // +120% service life; beacons broadcast half of this
 };
 F.MOD_SLOTS = 3;   // the most any machine can earn (Module slot III)
 F.BEACON_FACTOR = .5;
 F.MODDABLE = e => e.kind === 'miner' || e.kind === 'machine';
 
 /* combined module effects for an entity: own slots + beacon field.
-   Returns { spd, pow } as multipliers and prod as a bonus fraction. */
+   spd/pow are multipliers. prod is a bonus fraction. dur is added to the
+   service-life multiplier (1.20 = one full hardened module). */
 F.modEffects = function(S, e){
-  let spd = 0, pow = 0, prod = 0;
+  let spd = 0, pow = 0, prod = 0, dur = 0;
   if (e.mods) for (const m of e.mods){
     const d = F.MODULES[m];
-    if (d){ spd += d.spd || 0; pow += d.pow || 0; prod += d.prod || 0; }
+    if (d){ spd += d.spd || 0; pow += d.pow || 0; prod += d.prod || 0; dur += d.dur || 0; }
   }
   if (e._bcn) for (const b of e._bcn){
     if (!b.mods || !b.mods.length) continue;
@@ -837,10 +840,14 @@ F.modEffects = function(S, e){
     if (r <= 0) continue;
     for (const m of b.mods){
       const d = F.MODULES[m];
-      if (d){ spd += (d.spd || 0) * F.BEACON_FACTOR * r; pow += (d.pow || 0) * F.BEACON_FACTOR * r; }
+      if (d){
+        spd += (d.spd || 0) * F.BEACON_FACTOR * r;
+        pow += (d.pow || 0) * F.BEACON_FACTOR * r;
+        dur += (d.dur || 0) * F.BEACON_FACTOR * r;
+      }
     }
   }
-  return { spd: Math.max(.1, 1 + spd), pow: Math.max(.2, 1 + pow), prod };
+  return { spd: Math.max(.1, 1 + spd), pow: Math.max(.2, 1 + pow), prod, dur };
 };
 
 /* ================= UPGRADES ================= */
@@ -896,9 +903,8 @@ F.lifeMul   = S => 1 + F.upRank(S,'durability') * F.UPGRADES.durability.per;
 F.lifeOf = function(S, e){
   const def = F.BUILDINGS[e.key];
   if (!def || !def.life) return Infinity;
-  let mul = F.lifeMul(S);
-  if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) mul += F.MODULES[m].dur;
-  return def.life * mul;
+  // own hardened modules, plus half-strength copies from powered beacons
+  return def.life * (F.lifeMul(S) + F.modEffects(S, e).dur);
 };
 /* Odds a machine dies at the end of each service stretch: 1 in 4 — and every
    hardened module widens that denominator by two (1/6 with one module,
@@ -909,11 +915,15 @@ F.BREAK_CHANCE = 1 / F.BREAK_DENOM;
 F.breakChance = function(S, e){
   if ((S.upgrades.durability || 0) >= 5) return 0;
   let den = F.BREAK_DENOM;
-  if (e.mods) for (const m of e.mods) if (F.MODULES[m] && F.MODULES[m].dur) den += 2;
+  // one full hardened module widens the denominator by 2; a beacon's
+  // half-strength copy widens it by 1
+  const unit = F.MODULES.durModule.dur || 1.2;
+  const dur = F.modEffects(S, e).dur;
+  if (dur > 0) den += 2 * (dur / unit);
   return 1 / den;
 };
 
-/* upgrade-rank prerequisites for a tech (e.g. Invincibility needs Durability V) */
+/* upgrade-rank prerequisites for a tech. Durability V itself ends breakdowns. */
 F.rankMet = function(S, tk){
   if (!tk || !tk.reqRank) return true;
   for (const k in tk.reqRank) if ((S.upgrades[k] || 0) < tk.reqRank[k]) return false;
@@ -989,7 +999,11 @@ F.ENGINE_LINES = [
   '…even the waste has a use. waste nothing…',
   '…you tame what burns. careful hands…',
   '…you build faster than the ash falls…',
+  '…plastic thought. the machines teach the machines…',
   '…star-metal bones. almost. almost…',
+  '…a thousand small minds, thinking as one…',
+  '…a fire, caged. i remember a heart…',
+  '…a body, to hold the dark back…',
   '…I WAKE.',
 ];
 
