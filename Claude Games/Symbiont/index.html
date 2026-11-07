@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SYMBIONT</title>
+<style>
+  :root { --accent: #b06bff; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #07040d;
+    color: #e8def7;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #wrap {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px;
+  }
+  #stage {
+    position: relative;
+    width: min(96vw, 1100px);
+    max-height: 88vh;
+    aspect-ratio: 960 / 600;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px #2a1840, 0 24px 80px rgba(120,60,200,0.35);
+  }
+  canvas { display: block; width: 100%; height: 100%; background: #0a0712; }
+  #title {
+    letter-spacing: 0.5em; font-weight: 800; font-size: 14px;
+    color: #8a7aa8; text-indent: 0.5em;
+  }
+  #hint { font-size: 12px; color: #5e5076; }
+  #hint b { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="title">S Y M B I O N T</div>
+    <div id="stage">
+      <canvas id="game" width="960" height="600"></canvas>
+    </div>
+    <div id="hint"><b>A / D</b> move &nbsp;·&nbsp; <b>Space</b> jump (hold to fly as a Floater) &nbsp;·&nbsp; <b>J</b> body power (dash / pound / swipe) &nbsp;·&nbsp; <b>Shift</b> eject &amp; leap out &nbsp;·&nbsp; touch a creature as a spirit to possess</div>
+  </div>
+  <script src="game.js"></script>
+  <script>
+    window.addEventListener("load", function () {
+      SYM.boot(document.getElementById("game"));
+    });
+  </script>
+</body>
+</html>
