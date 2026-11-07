@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LAMPBLACK — animation gallery (feel-review harness)</title>
+<style>
+  body { background: #10131f; color: #c8ccd8; font-family: Georgia, serif; margin: 0; padding: 20px; }
+  h1 { color: #ffdca8; letter-spacing: 4px; font-weight: normal; }
+  h2 { color: #b8925a; font-weight: normal; border-bottom: 1px solid #2a3146; margin: 24px 0 8px; }
+  .hint { color: #6a7288; font-style: italic; }
+  canvas { image-rendering: pixelated; background: #070a14; border: 1px solid #2a3146; }
+  .cell { display: inline-block; margin: 6px; text-align: center; vertical-align: top; }
+  .cell small { display: block; color: #8a92a8; margin-top: 3px; max-width: 132px; }
+  .controls button { background: #1c2233; color: #e6d5ae; border: 1px solid #3a4258; padding: 6px 12px;
+    font-family: inherit; cursor: pointer; margin-right: 4px; }
+  .controls button.active { border-color: #ffdca8; background: #3a3222; }
+</style>
+</head>
+<body>
+<h1>LAMPBLACK ANIMATION GALLERY</h1>
+<p class="hint">Every character cycling its poses (DESIGN §4.3–§4.4). Report by name: “the creep legs read wrong”,
+“Old Copper’s limp is too subtle”, “satchel swell invisible at 3 slots”.</p>
+
+<h2>THE THIEF — 8 facings × movement dial (baked body + procedural legs + scarf + satchel swell)</h2>
+<div class="controls" id="modeCtl"></div>
+<div class="controls" id="bagCtl" style="margin-top:6px"></div>
+<div id="thiefRow"></div>
+
+<h2>THIEF — poses</h2>
+<div id="poseRow"></div>
+
+<h2>GUARDS — all ten, gait + signature animation</h2>
+<div id="guardRow"></div>
+
+<h2>MAGPIE — 96×96 bust × 3 expressions (jackdaw reacts on “delighted”)</h2>
+<div id="magpieRow"></div>
+
+<h2>FX — the snuff (iris + soot motes), lamp breathing, cone tint ramp</h2>
+<div id="fxRow"></div>
+
+<script src="js/core.js"></script>
+<script src="js/content.js"></script>
+<script src="js/art.js"></script>
+<script>
+  LB.Art.init();
+  var mode = 'walk', bagFrac = 0;
+  var cadence = { creep: LB.C.CREEP_CAD, walk: LB.C.WALK_CAD, sprint: LB.C.SPRINT_CAD };
+  function cell(parent, w, h, label) {
+    var d = document.createElement('div'); d.className = 'cell';
+    var c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.style.width = (w * 3) + 'px'; c.style.height = (h * 3) + 'px';
+    var s = document.createElement('small'); s.textContent = label;
+    d.appendChild(c); d.appendChild(s);
+    document.getElementById(parent).appendChild(d);
+    return c.getContext('2d');
+  }
+  // controls
+  ['creep', 'walk', 'sprint'].forEach(function (m) {
+    var b = document.createElement('button'); b.textContent = m + ' (cad ' + cadence[m] + ')';
+    if (m === mode) b.className = 'active';
+    b.onclick = function () { mode = m; Array.prototype.forEach.call(document.getElementById('modeCtl').children, function (x) { x.className = ''; }); b.className = 'active'; };
+    document.getElementById('modeCtl').appendChild(b);
+  });
+  [0, 0.33, 0.66, 1].forEach(function (f) {
+    var b = document.createElement('button'); b.textContent = 'bag ' + Math.round(f * 6) + '/6';
+    if (f === 0) b.className = 'active';
+    b.onclick = function () { bagFrac = f; Array.prototype.forEach.call(document.getElementById('bagCtl').children, function (x) { x.className = ''; }); b.className = 'active'; };
+    document.getElementById('bagCtl').appendChild(b);
+  });
+  var octNames = ['E', 'SE', 'S', 'SW', 'W', 'NW', 'N', 'NE'];
+  var thiefCells = octNames.map(function (n, i) { return { g: cell('thiefRow', 44, 44, n), oct: i }; });
+  var poses = ['idle', 'creep', 'kneel', 'snuff', 'swing', 'carry', 'drag', 'hide', 'grabbed'];
+  var poseCells = poses.map(function (p2) { return { g: cell('poseRow', 44, 44, p2), pose: p2 }; });
+  var guardTypes = [['watchman', 'whistles the theme; lantern arm swings'], ['sentry', 'dozes: chest-rise snore bob'],
+    ['warden', 'key ring bobs on contact frames'], ['pair', 'rear man walks backward'],
+    ['hound', '4-frame lope'], ['handler', 'leash man'], ['sergeant', 'arm-extend point'],
+    ['marksman', 'perched; rifle tracks'], ['tough', 'rolling wander'], ['civilian', 'skirt sway'],
+    ['oldcopper', 'asymmetric LIMP + shutter snaps']];
+  var guardCells = guardTypes.map(function (t) { return { g: cell('guardRow', 52, 52, t[0] + ' — ' + t[1]), type: t[0] }; });
+  ['appraising', 'delighted', 'needling'].forEach(function (e) {
+    var g = cell('magpieRow', 96, 96, e);
+    g.drawImage(LB.Art.magpie[e], 0, 0);
+  });
+  var fxSnuff = cell('fxRow', 80, 60, 'snuff: pool irises shut 220ms + 6 soot motes');
+  var fxBreathe = cell('fxRow', 80, 60, 'lamp breathing ±4% @0.5Hz');
+  var fxCone = cell('fxRow', 120, 60, 'cone tint: calm → suspicious → alarmed');
+
+  var t0 = performance.now(), phase = 0, guardPhase = 0, snuffT = 0;
+  function loop(t) {
+    var dt = Math.min(0.05, (t - t0) / 1000); t0 = t;
+    var speed = { creep: 1.6, walk: 3.0, sprint: 5.2 }[mode];
+    phase += speed * dt * (mode === 'sprint' ? 2.6 : mode === 'creep' ? 1.4 : 2.2);
+    guardPhase += 2.2 * dt * 1.6;
+    snuffT = (snuffT + dt) % 2;
+    thiefCells.forEach(function (c) {
+      c.g.fillStyle = '#070a14'; c.g.fillRect(0, 0, 60, 60);
+      LB.Art.drawThief(c.g, 22, 26, { facingOct: c.oct, phase: phase, mode: mode, bagFrac: bagFrac, light: 0.8, walkAmt: 1 });
+    });
+    poseCells.forEach(function (c) {
+      c.g.fillStyle = '#070a14'; c.g.fillRect(0, 0, 60, 60);
+      LB.Art.drawThief(c.g, 22, 26, { facingOct: 2, phase: 0, pose: c.pose, mode: c.pose === 'creep' ? 'creep' : 'still', light: 0.8, walkAmt: 0 });
+    });
+    guardCells.forEach(function (c) {
+      c.g.fillStyle = '#070a14'; c.g.fillRect(0, 0, 60, 60);
+      var pose = c.type === 'sentry' ? 'doze' : 'walk';
+      var ph = c.type === 'oldcopper' ? guardPhase * 0.7 + Math.sin(guardPhase) * 0.5 : guardPhase; // the limp: warped phase
+      LB.Art.drawGuard(c.g, c.type, 26, 30, 0.2, { phase: ph, pose: pose, walkAmt: pose === 'walk' ? 1 : 0,
+        shutterOpen: Math.floor(t / 1500) % 2 === 0, snoreT: t / 1000 });
+    });
+    // fx cells
+    var g1 = fxSnuff; g1.fillStyle = '#070a14'; g1.fillRect(0, 0, 80, 60);
+    var ir = snuffT < 0.22 ? (1 - snuffT / 0.22) : (snuffT > 1 ? Math.min(1, (snuffT - 1) / 0.3) : 0);
+    var grad = g1.createRadialGradient(40, 30, 1, 40, 30, 22 * Math.max(0.05, ir));
+    grad.addColorStop(0, '#ffdca8'); grad.addColorStop(1, 'rgba(255,180,90,0)');
+    g1.fillStyle = grad; g1.fillRect(0, 0, 80, 60);
+    if (ir < 0.4) { g1.fillStyle = '#4a4f5e'; for (var i2 = 0; i2 < 6; i2++) g1.fillRect(38 + Math.sin(snuffT * 6 + i2) * 6, 26 - snuffT * 18 - i2 * 2, 2, 2); }
+    var g2 = fxBreathe; g2.fillStyle = '#070a14'; g2.fillRect(0, 0, 80, 60);
+    var br = 22 * (1 + 0.04 * Math.sin(t / 1000 * Math.PI));
+    var grad2 = g2.createRadialGradient(40, 30, 1, 40, 30, br);
+    grad2.addColorStop(0, '#ffdca8'); grad2.addColorStop(1, 'rgba(255,180,90,0)');
+    g2.fillStyle = grad2; g2.fillRect(0, 0, 80, 60);
+    var g3 = fxCone; g3.fillStyle = '#070a14'; g3.fillRect(0, 0, 120, 60);
+    [['rgba(255,205,120,0.35)', 10], ['rgba(255,150,80,0.4)', 50], ['rgba(255,90,60,0.45)', 90]].forEach(function (cc) {
+      g3.fillStyle = cc[0];
+      g3.beginPath(); g3.moveTo(cc[1] + 10, 45);
+      g3.arc(cc[1] + 10, 45, 34, -Math.PI / 2 - 0.6, -Math.PI / 2 + 0.6);
+      g3.closePath(); g3.fill();
+    });
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+</script>
+</body>
+</html>
