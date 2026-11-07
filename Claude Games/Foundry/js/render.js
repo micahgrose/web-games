@@ -602,7 +602,7 @@ function drawEntBody(x, e, s, time, S){
     case 'belt': drawBelt(x, e, s, time, S); break;
     case 'ubelt': drawTunnel(x, e, s, time, S); break;
     case 'splitter': drawSplitter(x, e, s, time, S); break;
-    case 'chest': drawChest(x, e, s); break;
+    case 'chest': drawChest(x, e, s, S); break;
     case 'pipe': drawPipe(x, e, s, S); break;
     case 'miner': drawMiner(x, e, s, time, def); break;
     case 'machine': drawMachine(x, e, s, time, def); break;
@@ -751,10 +751,33 @@ function drawBolt(x, bx, by, sz, color){
 }
 
 /* ---- belts ---- */
-function beltLane(x, e, s){
-  // draws the recessed track; handles curves via srcDir
-  const cx = s / 2, cy = s / 2;
-  const inD = e.srcDir != null ? e.srcDir : e.dir;
+/* Direction an item would enter this belt from. A loaded belt remembers the
+   item's real entrance. An empty belt follows whichever belt, splitter, or
+   tunnel exit is feeding it, and draws straight when nothing is. */
+function beltFeedDir(S, e){
+  if (e.item && e.srcDir != null) return e.srcDir;
+  if (!S) return e.dir;
+  let side = null;
+  for (let d = 0; d < 4; d++){
+    if (d === F.OPP(e.dir)) continue;
+    const n = F.entAt(S, e.x - F.DX[d], e.y - F.DY[d]);
+    if (!n) continue;
+    let feeds = false;
+    if ((n.kind === 'belt' || (n.kind === 'ubelt' && n.isExit)) && n.dir === d) feeds = true;
+    else if (n.kind === 'splitter'){
+      const outs = [n.dir, (n.dir + 1) & 3, (n.dir + 3) & 3];
+      feeds = outs.indexOf(d) >= 0;
+    }
+    if (!feeds) continue;
+    if (d === e.dir) return e.dir;
+    if (side == null) side = d;
+  }
+  return side != null ? side : e.dir;
+}
+
+function beltLane(x, e, s, S){
+  // draws the recessed track; curves only while something is feeding the side
+  const inD = beltFeedDir(S, e);
   x.strokeStyle = '#11151d';
   x.lineWidth = s * .62;
   x.lineCap = 'butt';
@@ -806,7 +829,7 @@ function trackPathOffset(x, e, s, inD, off){
 }
 
 function drawBelt(x, e, s, time, S){
-  beltLane(x, e, s);
+  beltLane(x, e, s, S);
   // animated chevrons
   const speed = F.BUILDINGS[e.key].speed * (S ? F.beltMul(S) : 1);
   const phase = (time * speed) % .5;
@@ -943,7 +966,7 @@ function drawSplitter(x, e, s, time, S){
 }
 
 /* ---- chest ---- */
-function drawChest(x, e, s){
+function drawChest(x, e, s, S){
   const pad = s * .1;
   const vault = e.key === 'chest2', tarp = !!F.BUILDINGS[e.key].tarOnly;
   x.fillStyle = tarp ? '#33302a' : vault ? '#3a4250' : '#4a4136';
@@ -972,8 +995,9 @@ function drawChest(x, e, s){
     x.fillStyle = vault ? '#9fc2e8' : '#c9a86a';
     x.fillRect(s / 2 - s * .06, s * .32, s * .12, s * .14);
   }
-  // fill gauge
-  const cap = F.BUILDINGS[e.key].cap || F.CHEST_CAP;
+  // fill gauge — tar pits ignore the capacitor bonus; depots and vaults use it
+  const cdef = F.BUILDINGS[e.key];
+  const cap = (cdef.cap || F.CHEST_CAP) + ((S && !cdef.tarOnly) ? F.upRank(S, 'capacitors') * 20 : 0);
   const fr = clamp((e.total || 0) / cap, 0, 1);
   x.fillStyle = 'rgba(0,0,0,.4)';
   x.fillRect(pad * 1.6, s - pad * 2.2, s - pad * 3.2, s * .07);
@@ -1122,15 +1146,15 @@ function statusDot(x, e, s, color, time){
 
 /* ---- miner ---- */
 function drawMiner(x, e, s, time, def){
-  const tier = def.power ? (e.key === 'miner3' ? 2 : 1) : 0;
-  chassis(x, e, s, '#ffb454', tier);
+  const tier = !def.power ? 0 : e.key === 'miner4' ? 3 : e.key === 'miner3' ? 2 : 1;
+  chassis(x, e, s, tier === 3 ? '#7ee8dc' : '#ffb454', tier);
   const c = s / 2;
-  // rotating auger
+  // rotating auger — the quantum drill spins faster and reads brighter than the plasma bore
   x.save();
   x.translate(c, c);
   const spin = e.active ? time * (3 + tier * 2.4) : 0;
   x.rotate(spin);
-  x.fillStyle = tier === 2 ? '#b9a7e8' : '#8b96a6';
+  x.fillStyle = tier === 3 ? '#e8fffb' : tier === 2 ? '#b9a7e8' : '#8b96a6';
   x.strokeStyle = 'rgba(0,0,0,.5)';
   for (let i = 0; i < 3; i++){
     x.save();
@@ -2267,8 +2291,9 @@ function drawGhost(x, S, ghost, time){
   x.lineWidth = 2;
   rrect(x, 0, 0, def.w * s, def.h * s, s * .1);
   x.stroke();
-  // direction arrow
-  if (def.kind !== 'chest' || true){
+  // direction arrow — only where facing changes what the building does
+  if (def.kind === 'belt' || def.kind === 'ubelt' || def.kind === 'splitter' ||
+      def.kind === 'miner' || def.kind === 'machine' || def.kind === 'chest'){
     x.save();
     x.translate(def.w * s / 2, def.h * s / 2);
     x.rotate(angOf(ghost.dir));
@@ -2301,8 +2326,9 @@ function drawGhost(x, S, ghost, time){
 /* ==================================================================== */
 R.draw = function(S, dt, U){
   const x = R.ctx;
-  R.time += dt;
-  const time = R.time;
+  // Sim time, so pause freezes chevrons, drills, glow, pumpjacks and blades,
+  // and fast-forward carries them with the factory.
+  const time = S.time || 0;
 
   x.save();
   x.scale(R.dpr, R.dpr);

@@ -27,8 +27,16 @@ function frame(now){
       }
       if (steps >= cap) acc = 0;
     } else {
-      // cinematic: keep the world breathing slowly, no progress
-      F.tick(S, SIM_DT);
+      // ending cutscene: one fixed slow pace on every monitor. Keep Building
+      // sets freeplay and hands the speed controls back.
+      acc += dt * 0.35;
+      let steps = 0;
+      while (acc >= SIM_DT && steps < 30){
+        F.tick(S, SIM_DT);
+        acc -= SIM_DT;
+        steps++;
+      }
+      if (steps >= 30) acc = 0;
     }
     F.ui.update(dt);
     F.render.draw(S, dt, F.ui.viewState());
