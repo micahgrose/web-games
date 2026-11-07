@@ -1,0 +1,439 @@
+# CREAK — findings log
+
+Running record of what worked, what didn't, and why. Verdicts are the user's
+ear; measurements are `test/measure.js`.
+
+---
+
+## Working theory going in
+
+A creak is a **relaxation oscillator**. Two dry surfaces under load stick,
+elastic energy builds, the joint releases in a snap, repeat. Three consequences
+I built round 1 around:
+
+1. **The release rate is the pitch you hear.** Not an oscillator frequency — the
+   rate at which the joint lets go.
+2. **The body is a fixed resonance the source is heard through.** The wood or
+   metal colours every release identically regardless of the rate. A moving
+   source through a stationary body is the whole trick; move both together and
+   you get a synth sweep.
+3. **A creak is something being moved.** It needs weight arriving, effort in the
+   middle (it surges — it is not steady), and a release at the end.
+
+---
+
+## Round 1 — three mechanisms, three registers
+
+| id | name | mechanism |
+|----|------|-----------|
+| r1a | FLOORBOARD | stick-slip pulse train, 175→340 slips/sec, dry wood formants (380/1250/2700Hz) |
+| r1b | DOOR GROAN | same relaxation oscillator at 54→98/sec, heavy low body (118/255/690Hz), 1.0s |
+| r1c | RUSTY HINGE | no pulse train: noise through a swept high-Q resonator with a random-walk waver, 1300→2060Hz, 0.42s |
+
+Measured (median of 7 renders):
+
+```
+id    peak    dur    centroid  cent s>e   flat  onsets ioiCV  f0 early>late>tail
+r1a   -8.5dB  0.55s  3781Hz    4152>2425  0.28    2    0.71   218 > 337 > 72
+r1b   -8.6dB  1.02s  456Hz     485>409    0.02   17    0.49    64 >  96 >  -
+r1c   -8.9dB  0.42s  3272Hz    3053>3288  0.19    3    0.56  1575 > 2005 > 1378
+```
+
+**Verdict: B closest.** A had "a whoosh in the background" and "didn't sound like
+a natural material". C "was actually close to a scream".
+
+### What round 1 taught
+
+1. **A creak lives LOW.** The 54-98 slips/sec groan beat both the 175-340/sec
+   mid pulse train and the 1300-2000Hz squeal. The identity is the material
+   complaining, not the joint squeaking. My instinct — that a creak is a
+   mid/high squeak — was wrong.
+2. **An independent noise layer detaches and becomes its own object.** A's
+   3100Hz friction bed surged on the same envelope as the slips and still read
+   as a separate *whoosh* rather than as friction on the wood. Sharing an
+   envelope is not enough to bind two layers into one object; they have to share
+   the same *events*. → round 2 removes free-running noise entirely and gets
+   brightness from resonances excited by the slips themselves.
+3. **A mid-register pulse train reads as synthetic.** "Didn't sound like a
+   natural material" — 175-340 releases/sec through evenly spaced formants sits
+   in buzzer territory.
+4. **A sustained high tone with a waver is a VOICE, not a mechanism.** No matter
+   that C's waver was a random walk and its source was noise in a resonator —
+   pitched + high + sustained + unstable = scream. There may be no way to make
+   something in that register read as a hinge.
+
+---
+
+## Harvest — accidents worth keeping
+
+Failed creaks that are the right starting point for a different sound. Both are
+in `js/creaks.js` and still playable from the page.
+
+- **`r1c` → SCREAM.** Noise through a high-Q resonator swept 1300→2060Hz with a
+  random-walk waver, plus a thin triangle core. Read as a scream unprompted.
+  Start here for scream/shriek work; the random walk is what makes it sound
+  distressed instead of musical.
+- **`r1a`'s noise bed → DRAG.** The very thing that ruined it as a creak — a
+  wide 3100Hz bandpass noise layer surging 3 times across ~0.5s, floating free
+  of the tonal content — is close to a body-drag / sack-drag. The detachment is
+  the feature there: a drag *is* broadband surface noise with no pitched source.
+
+### Things the lab caught before the user heard anything
+
+- **The f0 estimator was lying.** Global-max normalized autocorrelation returns
+  the *minimum lag* for anything low-pitched, because correlation is ≈1 for tiny
+  lags on any smooth signal. Every candidate read as 2756Hz (= SR/minLag). Fix:
+  skip past the first zero crossing before peak-picking. This same flaw is
+  latent in `Lampblack/test/audio-lab.js` — it only escaped notice there because
+  those recipes sit at 600-1200Hz.
+- **One render is not a measurement.** These recipes are stochastic by design;
+  peaks swing up to 3dB between renders. The first level-match pass was chasing
+  dice. Now: median of N renders.
+- **A drop crammed into the last 6% of a sound doesn't exist.** r1c's ending
+  smear measured as *no* pitch fall at all: the envelope had already decayed, so
+  the drop happened under the noise floor while the resonator rang on at the old
+  pitch. Fix: give the fall a fifth of the duration and hold level through it.
+  (Same failure mode as the original Lampblack `stickSlip` end-drop.)
+- **A "wooden groan" with zero noise measures like a synth bass.** r1b came out
+  at spectral flatness 0.00 — a pure tone. Wood grinding on wood always has
+  broadband content; added a quiet 480Hz friction bed (flatness → 0.02,
+  centroid 456Hz, still unmistakably low).
+
+---
+
+## Round 2 — built on B. Low register, and NO free-running noise anywhere
+
+Every candidate uses the winning 54→98 slips/sec contour and the same five-mode
+wooden body, so the round varies exactly one thing each.
+
+| id | name | the question it asks |
+|----|------|----------------------|
+| r2a | BOUND BRIGHTNESS | does "material" come from resonance rather than hiss? Round 1's winner with its 1.9kHz lid removed and five inharmonic modes to 2.4kHz, all rung by the slips themselves |
+| r2b | UNSTABLE REGIME | is a creak's identity in *instability*? The joint jumps between release regimes (rate halving/doubling) instead of gliding up |
+| r2c | MULTI-CONTACT | does thickness come from *several* contacts? Three generators at inharmonic rates, each surging on its own schedule, through one shared body |
+
+```
+id    peak    dur    centroid  cent s>e   flat  onsets ioiCV  f0 early>late>tail
+r2a   -8.2dB  1.02s  416Hz     418>376    0.01   16    0.58    65 >  91 >  -
+r2b   -8.1dB  1.02s  424Hz     420>368    0.01   19    0.55    65 >  92 >  -
+r2c   -8.1dB  1.02s  424Hz     453>359    0.01   17    0.48    83 > 113 > 61
+```
+
+**Verdict: B best, A close, C too unnatural.** Plus two notes that drove round 3:
+it needs a **higher pitch**, and the rise reads as a **"compound raise"** when it
+should be linear with a drop at the end.
+
+### RELEASE TIME IS THE BRIGHTNESS CONTROL — the round's real discovery
+
+R2-A was supposed to be a brighter version of the round-1 winner. The lab
+measured it **darker**: centroid 233Hz against 453Hz, despite added modes up to
+2.4kHz and the lowpass removed.
+
+Cause: a 1.6ms release rolls the excitation off above ≈1/(2·1.6ms) ≈ 300Hz, so
+the high wooden modes were being handed nothing to ring with. Shortening the
+release to 0.4ms — physically, a drier and stiffer joint — brought the centroid
+to 416Hz *with spectral flatness 0.01*, i.e. brightness coming from resonance
+rather than from noise. Round 1's B measured 469Hz at flatness 0.03, and that
+extra was all noise bed.
+
+So the honest knobs for a stick-slip sound turn out to be:
+
+- **slip rate** → pitch
+- **release sharpness** → brightness / how dry and hard the material is
+- **per-cycle jitter** → grit
+- **body modes** → what the thing is made of
+- **envelope surges** → effort
+
+None of which is "add noise until it sounds rough".
+
+### Also caught
+
+- Autocorrelation f0 is meaningless on a multi-source candidate — it locks onto
+  whichever generator dominates a window. r2c is flagged `poly` and skips those
+  checks rather than reporting a number that doesn't mean anything.
+
+---
+
+## Round 3 — higher, and a straight climb with a real drop
+
+Two round-level changes, then three variants of the climb.
+
+### Round-level fix 1: the "compound raise" is the REGIME JUMPS
+
+r2b's ±octave regime jumps didn't merely colour the climb — they **cancelled**
+it. Carried into round 3, the lab measured the rate going 108 → 93 across a
+contour built to rise 92 → 172, because half-rate and double-rate stretches
+average the trend away. Sudden octave leaps in the slip rate are exactly what
+"a compound raise" describes.
+
+Kept, because r2b (with jumps) beat the smooth r2a — but rarer and much milder:
+4.5% → 1.2% chance per cycle, ±2× → ±~40%. The climb now survives them.
+
+### Round-level fix 2: rounds 1 and 2 had NO AUDIBLE END DROP
+
+Measured end-of-sound slip rate:
+
+```
+r1b  94 > 91 Hz      r2a  92 > 93     r2b  93 > 90      <- no drop at all
+r3a 141 > 59 Hz      r3b 139 > 56     r3c 141 > 58      <- a drop
+```
+
+The contour always fell; the *envelope* was already in its release ramp when it
+did, so the whole drop happened below the noise floor. Round 3 holds level to
+97% of the duration. **"Hold level through the drop" has now bitten three times
+in this repo** — round 1's hinge smear, the original Lampblack `stickSlip`, and
+this. A pitch move that isn't loud enough to hear did not happen.
+
+### Round-level fix 3: pitch is on a slider now
+
+Guessing the height one round at a time wastes rounds. The page exposes
+`L.pitch` (×0.6–×2.3) over a new 92→172 slips/sec band, so the right height can
+be dialled in and reported as a number.
+
+| id | name | the question it asks |
+|----|------|----------------------|
+| r3a | STRAIGHT CLIMB | linear in Hz, wander removed — the plainest reading of the note |
+| r3b | LINEAR TO THE EAR | geometric, constant semitones/sec. Pitch perception is logarithmic, so a straight line in Hz *decelerates* to the ear; this sounds even instead of measuring even |
+| r3c | STEADY EFFORT | linear in Hz like A, but one long swell instead of four surges — is the compound feel the envelope re-attacking at ever-higher pitch, rather than the curve? |
+
+```
+id    peak    dur    centroid  cent s>e   flat  onsets ioiCV  slip rate e>l>t
+r3a   -8.1dB  1.04s  472Hz     384>540    0.01   14    0.69   111 > 141 > 59
+r3b   -8.1dB  1.03s  452Hz     393>516    0.01   17    0.52   108 > 139 > 56
+r3c   -8.1dB  1.04s  466Hz     376>544    0.01   19    0.54   115 > 141 > 58
+```
+
+**Verdict: pending user listen.**
+
+### On the measuring instrument
+
+Three slip-rate estimators were tried this round; two were discarded, and the
+discarded ones are worth recording because each failed for a *structural*
+reason, not a tuning one:
+
+- **Counting waveform zero crossings** reads the body resonance instead of the
+  slip rate whenever the wood rings above it — a 54→98/sec groan measured as a
+  flat 98, which is just its own 118Hz mode.
+- **Autocorrelating the amplitude envelope** octave-locks on the load ramp.
+- **Waveform autocorrelation** (kept) works because the slip waveform *is*
+  periodic at the slip rate; the body modes are only its harmonics being
+  filtered. Its one weakness — octave-locking on the fast end glide, which once
+  reported a collapse to 68 as a rise to 281 — is handled by taking the lowest
+  of three overlapping windows.
+
+Two hours of this went into the ruler rather than the sound, and it was worth it:
+every real finding above (the cancelled climb, the inaudible drop, release time
+as the brightness control) came from a number that contradicted what the code
+was supposed to be doing.
+
+### Round 3 may contain a null experiment
+
+The curve fitter, run on r3a (known to be linear in Hz), reports **linear
+R²=0.97, geometric R²=0.95** — statistically indistinguishable. Over a range of
+less than an octave the two shapes barely differ; the distinction only becomes
+audible across a wide sweep. So if A and B sound the same to the ear, that is
+the correct answer rather than a failure to hear, and the real variable in
+round 3 is C's envelope.
+
+---
+
+## The reference rig (added after round 3)
+
+`test/reference.js` profiles real recordings dropped into `reference/` with the
+same DSP the candidates go through (`test/dsp.js`, shared deliberately — if the
+two used different code every comparison between them would be worthless).
+
+It reports the slip-rate contour, fits the climb (linear vs geometric), counts
+swells, and — the valuable part — **extracts the body resonances as a `WOOD`
+table ready to paste into `js/creaks.js`**. That works for a physical reason: in
+a stick-slip sound the source rate sweeps while the resonances stay put, so a
+long-term average spectrum smears the harmonics into a floor and leaves the
+material standing.
+
+Validated by round-tripping a candidate through it: fed r3a, whose body is
+`[118, 255, 685, 1430, 2395]`, it read back `118, 258, 668` — the top three
+modes recovered to within 2.5%.
+
+This removes the guesswork from everything below the ear. Slip rate, resonances,
+swell count, duration, brightness — all of it is measurable off a phone
+recording of a real door, instead of being set by my taste and then tested one
+round at a time.
+
+---
+
+## THE BIG ONE — three real creaks, and what they say I got wrong
+
+`creak1.mp3`, `creak2.mp3`, `creak3.mp3`, profiled against my candidates with
+the same code:
+
+```
+                    <500Hz    0.5-2k     2-8k      >8k     slip rate    periodic
+real creak1           17%       30%       34%      19%     36-143Hz       76%
+real creak2           29%       33%       33%       5%     30- 88Hz       86%
+real creak3           20%       24%       44%      12%     31-149Hz       43%
+
+mine (r2/r3)       74-78%    19-23%     2-3%       0%     32-160Hz    91-100%
+```
+
+### 1. The slip rate was never the problem
+
+Real creaks slip at **30-150Hz**. Mine slip at 32-160Hz. That has been right
+since round 2.
+
+### 2. "It needs a higher pitch" was a MISSING TOP END
+
+Real creaks put **a third to a half of their energy above 2kHz**. Mine put 3%.
+The ear was reporting brightness and I heard "pitch" — and every round since has
+been chasing the wrong variable. This is the single largest error in the log.
+
+### 3. Round 1 confounded the two, and I read the result wrong
+
+r1a was bright (38% above 2kHz) but slipped far too fast (98-356Hz). r1b had the
+right rate and no top end. So "B won" got read as *go low*, when only the RATE
+needed to be low. **The winning combination — r1b's rate with r1a's brightness —
+was never built until round 4.** A comparison that varies two things at once
+can't tell you which one won, and I varied register and brightness together for
+three rounds without noticing.
+
+### 4. The 2-8k energy cannot come from the body
+
+The strongest resonances in all three recordings are at or below 1.5kHz, yet a
+third of the energy sits above 2kHz. So that band is **broadband, not resonant**
+— it comes from the excitation and reaches the ear without being filtered
+through the wood. My architecture put everything through `body()`, which
+discards anything not near a mode. That is precisely why I measured 3%.
+
+Round 4 adds a direct path alongside the modes: the contact radiating straight
+out, not through the material.
+
+### 5. Real creaks are EPISODIC
+
+43-86% of a reference has a stable slip period; the rest is chatter with none at
+all. Every candidate I have built runs 91-100% periodic — structurally a
+different object: mine slips cleanly for its entire duration.
+
+### 6. A resonance table does not carry balance
+
+Pasting creak3's modes in verbatim gave 59% of energy below 500Hz against the
+references' 17-29%. The mode *frequencies* transfer; their relative levels in a
+recording reflect the mic, the room and the distance, so they still have to be
+balanced by measurement. (Caveat in the other direction: phone recordings and
+mp3 both thin the bass, so the references probably understate the true low end.
+Round 4 aims between the two.)
+
+---
+
+## Round 4 — the first round aimed at measured targets
+
+| id | name | mechanism |
+|----|------|-----------|
+| r4a | SHARP RELEASE | top end from the release edge alone: 0.4ms → 0.08ms, moving the excitation rolloff from ~1.2kHz to ~6kHz |
+| r4b | PER-SLIP GRIT | moderate edge, but every release throws a burst of noise scaled to that slip's strength — the contact shattering as it lets go |
+| r4c | EPISODIC | B plus stretches where the joint stops slipping and just grinds, matching the references' intermittency |
+
+```
+              <500Hz   0.5-2k    2-8k    >8k     centroid
+target        17-29%   24-33%   33-44%   5-19%   1800-3800Hz
+r4a             43%      24%      30%      3%       1728Hz
+r4b             35%      18%      33%     14%       2943Hz
+r4c             26%      15%      41%     18%       3646Hz
+```
+
+All three now sit in or near the reference envelope where every previous
+candidate was off by a factor of ten.
+
+**Verdict: A and B best, A slightly better, C "not it at all". All three still
+"don't sound quite like creaks."** Also: the rate needs to work DOWN, not up.
+
+So the spectrum was necessary but nowhere near sufficient — round 4 matched the
+references on duration, slip rate, band energy and centroid and still wasn't a
+creak. Whatever was missing had to be structure nobody had measured yet.
+
+### Two things the lab caught building it
+
+- **White grit is digital fizz.** Raw white noise at each release put 20% of the
+  energy above 8kHz. Shaping it with a two-sample average (roughly -6dB/oct
+  above 5kHz) brought it into the references' range.
+- **Jittering the period does not make a sound aperiodic.** r4c's scrape
+  stretches still measured 100% periodic when only the timing was randomized —
+  autocorrelation still finds a mean period. The WAVEFORM has to stop being a
+  load-and-release for those stretches. Even after fixing that it measures 96%,
+  which is likely the 120ms contour window being too coarse to see 40-150ms
+  episodes rather than the synthesis failing.
+
+---
+
+## THE SECOND BIG ONE — a creak is a BURST PROCESS, not a pulse train
+
+Round 4 matched every gross statistic and still wasn't a creak, so `test/deep.js`
+was built to measure the things the first pass never looked at: the shape of a
+single averaged slip cycle, crest factor, modulation depth, the spectrum of the
+envelope, interval statistics, and periodicity strength over time.
+
+The answer was in the interval statistics, and it is not subtle:
+
+```
+                       real creaks      mine (r3/r4)
+  interval CV          0.53 – 0.96      0.13 – 0.22
+  interval skew        +1.6 – +6.4      +0.7 – +1.9
+  lag-1 correlation    0.06 – 0.39      0.30 – 0.87
+  crest factor         15.6 – 17.9 dB   12.7 – 15.7 dB
+```
+
+**A real creak is not a pulse train at frequency f.** It is a burst process:
+clusters of quick slips broken by irregular stalls, with each interval drawn
+essentially independently of the last (lag-1 ≈ 0.1). The high positive skew says
+the distribution is heavy-tailed — mostly short intervals with occasional long
+gaps, which is the joint catching and holding.
+
+Uniform ±10% jitter around a smoothly gliding rate produces the opposite: lag-1
+0.87, CV 0.15. A metronome that drifts. That is why every candidate through
+round 4 read as a buzzing tone with a pitch rather than as discrete crackling —
+and no amount of spectral work was ever going to fix it, because the problem was
+in the time domain.
+
+**The general lesson: match the STATISTICS of the excitation, not just its
+spectrum.** Two sounds can have identical spectra, identical durations and
+identical envelopes and still be different objects, because what the ear
+identifies is the pattern of events.
+
+### Other findings from the deep pass
+
+- **Surge rate.** All three references peak at **1.6–2.3Hz** — one or two big
+  swells per second, plus faster shudder at 7–15Hz. I had been using 4–8 humps
+  per second, set purely by taste.
+- **Modulation depth is 100% in every reference AND in every candidate of
+  mine.** A rare case of already being right; the envelope does fall to near
+  silence between slips in both.
+- **Direction.** creak1 falls 143→44Hz across its entire length; creak3 ends at
+  44Hz. Only creak2 rises. Every candidate through round 4 climbed, on an
+  assumption I never checked against the recordings — and the user's correction
+  ("it needs to work down") matches the data.
+- **Pitch-synchronous pulse averaging** was built and works, but is too noisy on
+  these recordings to read a definitive release shape off. Recorded here as a
+  tool that exists rather than a finding.
+
+---
+
+## Round 5 — falling rate, and the timing statistics of a real joint
+
+Every candidate keeps r4a's sharp release (the user's preferred brightness
+route) and a falling 156→44Hz contour. They differ in how the intervals are
+generated.
+
+| id | name | mechanism |
+|----|------|-----------|
+| r5a | HEAVY-TAILED | intervals from a lognormal at CV 0.7, each independent of the last |
+| r5b | BURSTS AND STALLS | tighter clusters (CV 0.35) plus a 7% chance per slip of stalling 3–9× — the +5 skew made explicit |
+| r5c | SPARSE AND HARD | fewer, harder, better separated releases, aimed at the references' 16–18dB crest factor |
+
+```
+        CV     skew    lag-1    crest      direction
+target  0.53-0.96  +1.6-+6.4  0.06-0.39  15.6-17.9dB   falls
+r5a     0.46       +1.45      0.28       14.7dB        falls
+r5b     0.75       +5.05      0.13       14.8dB        falls
+r5c     0.62       +1.87      -0.03      17.0dB        falls
+```
+
+r5b reproduces creak1/creak3's timing profile almost exactly; r5c hits the crest
+factor target. **Verdict: pending user listen.**
