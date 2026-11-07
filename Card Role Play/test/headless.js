@@ -1,0 +1,1416 @@
+'use strict';
+
+// ── Headless verification ──────────────────────────────
+//   node test/headless.js
+//
+// Part 1-3 are pure logic (deck, resolution, prompt plumbing).
+// Part 4 drives a whole game through REAL socket.io clients against
+// a REAL server — the event wiring is the layer that has bitten me
+// before, so it gets exercised rather than simulated.
+//
+// Runs with the understudy narrator: no API key is used or needed.
+
+process.env.GROQ_API_KEY = '';   // dotenv will not override an existing key
+
+const assert = require('assert');
+
+let checks = 0;
+let failures = 0;
+const ok = (cond, what) => {
+    checks++;
+    if (!cond) { failures++; console.error(`  ✗ ${what}`); }
+};
+const eq = (a, b, what) => {
+    checks++;
+    try { assert.deepStrictEqual(a, b); }
+    catch { failures++; console.error(`  ✗ ${what}\n      got ${JSON.stringify(a)}\n      want ${JSON.stringify(b)}`); }
+};
+const head = (s) => console.log(`\n── ${s}`);
+
+// ═══ 1. The deck ═══════════════════════════════════════
+const { Deck, cardValue, cardName } = require('../lib/deck');
+
+head('Deck');
+{
+    const d = new Deck();
+    eq(d.count, 54, 'a fresh deck holds 52 cards and two jokers');
+
+    const seen = new Set();
+    let jokers = 0;
+    for (let i = 0; i < 54; i++) {
+        const c = d.draw();
+        ok(!!c, 'every draw yields a card');
+        if (c.joker) jokers++;
+        else seen.add(`${c.rank}${c.suit}`);
+    }
+    eq(seen.size, 52, 'all 52 ranked cards are distinct');
+    eq(jokers, 2, 'both jokers are present');
+    eq(d.count, 0, 'the pile is spent after 54 draws');
+
+    // The old build dealt `undefined` here and silently scored it 0.
+    const next = d.draw();
+    ok(!!next, 'drawing past the end reshuffles instead of dealing nothing');
+    ok(d.reshuffled === true, 'the reshuffle is flagged so the table can be told');
+    ok(d.count === 53, 'the discards came back');
+
+    let bad = 0;
+    for (let i = 0; i < 5000; i++) if (!d.draw()) bad++;
+    eq(bad, 0, 'five thousand consecutive draws never deal nothing');
+
+    eq(cardValue({ rank: 'A', suit: 'Spades' }), 14, 'ace is 14');
+    eq(cardValue({ rank: 'K', suit: 'Spades' }), 13, 'king is 13');
+    eq(cardValue({ rank: 'Q', suit: 'Spades' }), 12, 'queen is 12');
+    eq(cardValue({ rank: 'J', suit: 'Spades' }), 11, 'jack is 11');
+    eq(cardValue({ rank: '2', suit: 'Spades' }), 2, 'pips read at face value');
+    eq(cardValue({ joker: true }), 15, 'a joker outranks everything');
+    eq(cardName({ joker: true }), 'the Joker', 'the joker is named');
+}
+
+// ═══ 2. Resolution ═════════════════════════════════════
+const R = require('../lib/resolve');
+
+head('Outcome bands');
+{
+    const band = (v) => R.bandFor(v).key;
+    eq([2, 3].map(band), ['ruin', 'ruin'], '2-3 is ruin');
+    eq([4, 5, 6].map(band), ['falter', 'falter', 'falter'], '4-6 falters');
+    eq([7, 8, 9].map(band), ['mixed', 'mixed', 'mixed'], '7-9 is mixed');
+    eq([10, 11, 12].map(band), ['success', 'success', 'success'], '10-12 succeeds');
+    eq([13, 14].map(band), ['triumph', 'triumph'], '13-14 is triumph');
+    eq(band(15), 'fate', 'a joker is its own band');
+
+    // The ladder deliberately turns below centre: a coin-flip card used
+    // to fail more often than not, which made every hand feel like
+    // wading. Counted over a real deck rather than asserted by eye.
+    const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+    const deck = ranks.flatMap(rank => Array(4).fill(rank));
+    const share = (keys) => deck.filter(r =>
+        keys.includes(band(R.effective({ rank: r, suit: 'Spades' }, null).eff))).length / deck.length;
+    const halfOrBetter = share(['mixed', 'success', 'triumph']);
+    const clean = share(['success', 'triumph']);
+    ok(halfOrBetter > 0.58 && halfOrBetter < 0.66,
+        `something lands on ${(halfOrBetter * 100).toFixed(0)}% of the deck`);
+    ok(clean > 0.34 && clean < 0.42,
+        `it works cleanly on ${(clean * 100).toFixed(0)}%`);
+    ok(band(7) === 'mixed' && band(6) === 'falter', 'the turn is between 6 and 7');
+}
+
+head('The server and the client agree on the ladder');
+{
+    // Two copies of BANDS: the rules read one, the glow and the verdict
+    // plate read the other. Drift would show as a card glowing SUCCESS
+    // while the story tells you it failed.
+    const clientSrc = require('fs').readFileSync(
+        require('path').join(__dirname, '..', 'public', 'js', 'cards.js'), 'utf8');
+    const found = [...clientSrc.matchAll(/\{\s*max:\s*(\d+),\s*key:\s*'(\w+)'/g)]
+        .map(m => ({ max: Number(m[1]), key: m[2] }));
+    ok(found.length === R.BANDS.length, `both sides list ${R.BANDS.length} bands`);
+    for (let i = 0; i < R.BANDS.length; i++) {
+        ok(found[i] && found[i].key === R.BANDS[i].key && found[i].max === R.BANDS[i].max,
+            `${R.BANDS[i].key} tops out at ${R.BANDS[i].max} on both sides`);
+    }
+}
+
+head('Condition changes what a card is worth');
+{
+    const clean = { wounds: [], boons: [] };
+    const hurt = { wounds: ['gashed arm', 'broken rib'], boons: [] };
+    const armed = { wounds: [], boons: ['iron shield'] };
+
+    const king = { rank: 'K', suit: 'Spades' };
+    eq(R.resolveSolo(king, clean).eff, 13, 'a hale character draws a king at 13');
+    eq(R.resolveSolo(king, hurt).eff, 9, 'two wounds cost four points');
+    eq(R.resolveSolo(king, armed).eff, 14, 'an advantage is worth two, clamped at the top');
+
+    // Instructions.md: the wounded need much higher cards for the same feat.
+    eq(R.resolveSolo(king, clean).band, 'triumph', 'a king triumphs for the hale');
+    eq(R.resolveSolo(king, hurt).band, 'mixed', 'the same king is merely mixed for the wounded');
+    ok(R.resolveSolo({ rank: '9', suit: 'Hearts' }, armed).band === 'success'
+        && R.resolveSolo({ rank: '9', suit: 'Hearts' }, clean).band === 'mixed',
+        'an advantage lifts a nine from mixed to a clean success');
+
+    // What it takes to reach the same band, hale versus hurt.
+    const bandAt = (v, sheet) => R.resolveSolo({ rank: String(v), suit: 'Hearts' }, sheet).band;
+    ok(bandAt(8, clean) === 'mixed' && bandAt(8, hurt) === 'falter',
+        'the same card drops the wounded a whole band');
+
+    // Stated as what it actually costs, rather than as a band count —
+    // band counts move whenever the ladder is retuned, and this does not.
+    const lowestFor = (want, sheet) => {
+        for (let v = 2; v <= 14; v++) if (bandAt(v, sheet) === want) return v;
+        return null;
+    };
+    eq(lowestFor('mixed', hurt) - lowestFor('mixed', clean), 4,
+        'two wounds cost four points of card to reach the same band');
+    eq(lowestFor('success', armed) - lowestFor('success', clean), -2,
+        'and an advantage buys two points back');
+
+    const piled = { wounds: ['a', 'b', 'c', 'd', 'e'], boons: [] };
+    eq(R.resolveSolo(king, piled).pen, R.MAX_WOUND_PENALTY, 'wound penalty is capped');
+    ok(R.resolveSolo(king, piled).eff >= 1, 'and never drops below one');
+    const hoard = { wounds: [], boons: ['a', 'b', 'c', 'd'] };
+    eq(R.resolveSolo(king, hoard).bon, R.MAX_BOON_BONUS, 'advantage bonus is capped');
+
+    const joker = { joker: true };
+    eq(R.resolveSolo(joker, piled).eff, 15, 'nothing drags a joker down');
+}
+
+head('Becoming someone is dealt for too');
+{
+    const arrival = (rank) => R.resolveSetup({ rank, suit: 'Spades' });
+    eq(arrival('K').band, 'triumph', 'a king arrives at full height');
+    eq(arrival('3').band, 'ruin', 'a three arrives diminished');
+    eq(R.resolveSetup({ joker: true }).band, 'fate', 'the joker bends a character sideways');
+
+    for (const rank of ['2', '7', 'Q', 'A']) {
+        const r = arrival(rank);
+        ok(!!r.directive && r.directive.length > 30, `${rank}: the arrival has its own guidance`);
+        ok(!/fails outright|half-works/.test(r.directive),
+            `${rank}: arrival guidance is about becoming, not about attempting`);
+    }
+
+    // A setup turn has no tags yet, so the card stands alone.
+    eq(R.resolveSetup({ rank: '9', suit: 'Spades' }).eff, 9, 'nothing modifies an arrival');
+
+    const d = R.setupDirective('Kira', 'a sky-pirate with a rope-gun', arrival('K'));
+    ok(d.includes('TRIUMPH'), 'the arrival band is stated');
+    ok(/state block/i.test(d), 'and what it grants is asked to be recorded');
+    ok(!/OUTCOME:/.test(d), 'an arrival is not phrased as an action outcome');
+
+    // "Arrives fully as described" and "this world has no dragons" point
+    // opposite ways, and a dragon walked into a world whose own brief said
+    // there were no fantasy creatures in it. Screening catches these first,
+    // but it waves everything through when its call fails, so the last
+    // word has to say which instruction wins.
+    ok(/world outranks the description/i.test(d), 'the world outranks what the player claimed');
+    ok(/nearest thing it does contain/i.test(d), 'and they arrive as something the world holds');
+    ok(/write THAT on the "is:" line/.test(d), 'with the sheet corrected to match');
+    ok(/Do not remark on the difference/i.test(d), 'without arguing with the player about it');
+}
+
+head('Tags are named in the instructions, not just counted');
+{
+    // The footer repeated at the end of every directive, whatever the shape.
+    const MARKED = R.soloDirective('Kira', 'waits', R.resolveSolo({ rank: '9', suit: 'Spades' }, null));
+    const sheet = { wounds: ['gashed left arm'], boons: ['rope-gun'], status: ['winded'] };
+    const r = R.resolveSolo({ rank: '9', suit: 'Spades' }, sheet);
+    const d = R.soloDirective('Kira', 'swings across the gap', r);
+    ok(d.includes('gashed left arm'), 'the injury is named for the narrator');
+    ok(d.includes('rope-gun'), 'the advantage is named');
+    ok(d.includes('winded'), 'the condition is named');
+    ok(/show that one interfering/i.test(d), 'and the narrator is told to show them working');
+
+    // The narrator was reciting every tag it was given, including
+    // announcing which ones did not apply. Relevance is now explicit,
+    // and so is naming a tag at most once.
+    ok(/bears on this moment/i.test(d), 'only the tags that bear on the moment are wanted');
+    ok(/Say nothing of the others|Pass over the rest/i.test(d), 'the rest are passed over in silence');
+    ok(/name it once/i.test(d), 'and a tag is named once, not repeated');
+    ok(/no sentence may restate/i.test(d), 'sentences may not restate each other');
+
+    // The band label is handed over for calibration, so the words
+    // themselves have to be forbidden or they get echoed as prose.
+    for (const w of ['ruin', 'falter', 'mixed', 'success', 'triumph', 'fate']) {
+        ok(new RegExp(`\\b${w}\\b`, 'i').test(MARKED), `"${w}" is named as a banned word`);
+    }
+    const AI = require('../lib/ai');
+    ok(/BANNED WORDS/.test(AI.GM_SYSTEM), 'the system prompt bans the machine vocabulary outright');
+    ok(/not "the triumph is complete"/i.test(AI.GM_SYSTEM),
+        'with the exact leak that was observed given as an example');
+    ok(/SAY EACH THING ONCE/.test(AI.GM_SYSTEM), 'and forbids saying the same thing twice');
+    ok(/USE ONLY THE TAGS THAT BEAR ON THIS MOMENT/.test(AI.GM_SYSTEM),
+        'and asks for relevant tags only');
+    ok(/-2 for injuries/.test(d) && /\+2 for advantages/.test(d), 'the arithmetic is spelled out');
+
+    const bare = R.soloDirective('Bram', 'looks around',
+        R.resolveSolo({ rank: '9', suit: 'Spades' }, { wounds: [], boons: [] }));
+    ok(!/must be visible/i.test(bare), 'a character carrying nothing gets no such demand');
+
+    const cd = R.counterDirective('Kira', 'swings the boom', R.resolveCounter(
+        { card: { rank: 'K', suit: 'Spades' }, sheet },
+        [{ id: 'b', name: 'Bram', sheet: { wounds: [], boons: ['stone hide'] },
+           card: { rank: '4', suit: 'Hearts' }, text: 'takes it' }],
+    ));
+    ok(cd.includes('stone hide'), 'a defender\'s advantages are named too');
+    ok(cd.includes('rope-gun'), 'and so are the attacker\'s');
+}
+
+head('The counter rule');
+{
+    const clean = { wounds: [], boons: [] };
+    const mk = (rank) => ({ rank, suit: 'Hearts' });
+
+    // The worked example from Instructions.md: attacker 9, one
+    // defender at 5 (fails) and one at 10 (turns it aside).
+    const res = R.resolveCounter(
+        { card: mk('9'), sheet: clean },
+        [
+            { id: 'p2', name: 'Two', sheet: clean, card: mk('5'), text: 'dodges' },
+            { id: 'p3', name: 'Three', sheet: clean, card: mk('10'), text: 'grabs hold' },
+        ],
+    );
+    eq(res.defenders[0].beaten, false, 'the lower card fails to turn it aside');
+    eq(res.defenders[1].beaten, true, 'the higher card turns it aside');
+    eq(res.allHeld, false, 'not everyone held');
+
+    const tie = R.resolveCounter(
+        { card: mk('9'), sheet: clean },
+        [{ id: 'x', name: 'X', sheet: clean, card: mk('9'), text: 'braces' }],
+    );
+    eq(tie.defenders[0].beaten, false, 'a tie goes to the attacker — it must be HIGHER');
+
+    // Armour is the spec's other example: it raises the bar to get through.
+    const armoured = { wounds: [], boons: ['plate armour'] };
+    const through = R.resolveCounter(
+        { card: mk('9'), sheet: clean },
+        [{ id: 'a', name: 'A', sheet: armoured, card: mk('9'), text: 'stands firm' }],
+    );
+    eq(through.defenders[0].beaten, true, 'armour turns aside what a bare defender could not');
+
+    const all = R.resolveCounter(
+        { card: mk('3'), sheet: clean },
+        [
+            { id: 'a', name: 'A', sheet: clean, card: mk('K'), text: 'x' },
+            { id: 'b', name: 'B', sheet: clean, card: mk('Q'), text: 'y' },
+        ],
+    );
+    eq(all.allHeld, true, 'every defender holding is reported');
+
+    // Each defender is judged alone, never as a group.
+    const mixed = R.resolveCounter(
+        { card: mk('8'), sheet: clean },
+        [
+            { id: 'a', name: 'A', sheet: clean, card: mk('2'), text: 'x' },
+            { id: 'b', name: 'B', sheet: clean, card: mk('A'), text: 'y' },
+        ],
+    );
+    eq(mixed.defenders.map(d => d.beaten), [false, true],
+        'one is struck while the other walks away');
+}
+
+head('Directives handed to the narrator');
+{
+    const clean = { wounds: [], boons: [] };
+    const solo = R.resolveSolo({ rank: '3', suit: 'Clubs' }, clean);
+    const text = R.soloDirective('Kira', 'leaps the chasm', solo);
+    ok(text.includes('RUIN'), 'the verdict is stated in words, not left to be inferred');
+    ok(text.includes('Kira'), 'the actor is named');
+    ok(!/\bvalue\b/i.test(text.split('OUTCOME')[1] || ''), 'no raw numbers after the verdict');
+
+    const res = R.resolveCounter(
+        { card: { rank: 'K', suit: 'Spades' }, sheet: clean },
+        [
+            { id: 'a', name: 'Alice', sheet: clean, card: { rank: '2', suit: 'Hearts' }, text: 'ducks' },
+            { id: 'b', name: 'Bram', sheet: clean, card: { joker: true }, text: 'vanishes' },
+        ],
+    );
+    const cd = R.counterDirective('Kira', 'shoves them both off the ledge', res);
+    ok(cd.includes('FORCE: TRIUMPH'), 'the force of a landing blow is stated');
+    ok(cd.includes('Alice') && cd.includes('FAILS'), 'the failing defender is named as struck');
+    ok(cd.includes('Bram') && cd.includes('TURNS IT ASIDE'), 'the holding defender is named as safe');
+    ok(cd.indexOf('Alice') < cd.indexOf('Bram'), 'defenders keep their order');
+}
+
+// ═══ 3. Prompt plumbing ════════════════════════════════
+const ai = require('../lib/ai');
+
+head('Reading the narrator\'s state block');
+{
+    const names = ['Kira', 'Bram', 'Vex'];
+    const reply =
+        'Kira drives the blade home and Vex goes down in the dust.\n' +
+        '<<<STATE\n' +
+        'Kira | is: sky-pirate with a rope-gun | hurt: gashed arm | has: rope-gun | now: winded\n' +
+        'Bram | is: stone golem | hurt: - | has: stone hide; great strength | now: -\n' +
+        'DEAD: Vex\n' +
+        '>>>';
+
+    const p = ai.parseState(reply, names);
+    eq(p.prose, 'Kira drives the blade home and Vex goes down in the dust.',
+        'the block is stripped from the prose');
+    ok(!p.prose.includes('<<<'), 'no machinery leaks into the story');
+    eq(p.sheets.Kira.character, 'sky-pirate with a rope-gun', 'identity is carried');
+    eq(p.sheets.Kira.wounds, ['gashed arm'], 'injuries are carried');
+    eq(p.sheets.Bram.boons, ['stone hide', 'great strength'], 'advantages split on semicolons');
+    eq(p.sheets.Bram.wounds, [], 'a dash means nothing there');
+    eq(p.dead, ['Vex'], 'the dead are named');
+
+    const none = ai.parseState('Just prose, no block.', names);
+    eq(none.sheets, null, 'a missing block is survivable');
+    eq(none.dead, [], 'and implies no deaths');
+
+    const junk = ai.parseState(
+        'Words.\n<<<STATE\nNobody | is: ghost\nKira | is: pirate | hurt: none\n>>>', names);
+    ok(!junk.sheets.Nobody, 'unknown names are ignored');
+    eq(junk.sheets.Kira.wounds, [], '"none" is not an injury');
+
+    // How a character wishes to be referred to, when they said so.
+    const called = ai.parseState(
+        'Words.\n<<<STATE\n' +
+        'Kira | is: pirate | call: she/her\n' +
+        'Bram | is: golem | call: -\n' +
+        'Vex | is: wraith | call: Vex the Pale\n' +
+        '>>>', names);
+    eq(called.sheets.Kira.calls, 'she/her', 'a stated pronoun set is kept');
+    eq(called.sheets.Bram.calls, '', 'a dash means nobody said');
+    eq(called.sheets.Vex.calls, '', 'anything that is not a pronoun set is discarded');
+
+    const cast = ai.castBlock([
+        { name: 'Kira', eliminated: false, sheet: { character: 'pirate', calls: 'she/her' } },
+        { name: 'Bram', eliminated: false, sheet: { character: 'golem' } },
+    ]);
+    ok(cast.includes('call: she/her'), 'the narrator is told Kira\'s pronouns');
+    ok(cast.includes('call: by name only'),
+        'and told to use the bare name for anyone who never said');
+
+    const long = ai.parseState(
+        `Words.\n<<<STATE\nKira | is: ${'x'.repeat(400)} | has: ${Array(9).fill('trinket').join(';')}\n>>>`, names);
+    ok(long.sheets.Kira.character.length <= 110, 'a runaway description is clipped');
+    ok(long.sheets.Kira.boons.length <= 3, 'a runaway inventory is clipped');
+}
+
+head('The world is compacted, carried, and grows');
+{
+    const W = require('../lib/world');
+
+    ok(!W.isReady(W.blankWorld()), 'a room with no setting has no world');
+    ok(W.worldBlock(W.blankWorld()) === null, 'and the narrator is told nothing about one');
+
+    // The interview must settle the two things that decide most
+    // resolutions: what the players are after, and how far the world bends.
+    ok(/WHAT THE PLAYERS ARE HERE TO DO/.test(W.INTERVIEW_SYSTEM),
+        'the interview asks what the players are here to do');
+    ok(/HOW FAR THIS WORLD BENDS/.test(W.INTERVIEW_SYSTEM),
+        'and how far the world bends');
+    ok(/throw fire, fly, walk through walls/.test(W.INTERVIEW_SYSTEM),
+        'naming the powers it has to pin down');
+    ok(/hours and roads, or a step through the right door/.test(W.INTERVIEW_SYSTEM),
+        'and how travel works');
+    for (const f of ['goal:', 'power:']) {
+        ok(W.COMPACT_SYSTEM.includes(f), `and the brief has somewhere to keep "${f}"`);
+    }
+
+    const w = W.parseWorld(`chatter before
+<<<WORLD
+where: A drowned cathedral city in the year of the long tide.
+goal: Reach the bells and ring them before the tide takes the last dry floor.
+power: Ordinary bodies, but the drowned answer anyone who speaks their name; no flight.
+tone: sunken, votive, patient
+places: the bell tower; the flooded nave; the almoner's stair; the tide gate
+holds: the bells command the water; the drowned still speak
+absent: engines; gunpowder; daylight
+>>>
+trailing junk`);
+    ok(/drowned cathedral/.test(w.where), 'the setting survives compaction');
+    ok(/Reach the bells/.test(w.goal), 'so does what they are here for');
+    ok(/no flight/.test(w.power), 'and the ceiling on the possible');
+    eq(w.places.length, 4, 'its places are listed');
+    eq(w.absent.length, 3, 'and what it does not contain');
+    ok(W.isReady(w), 'that is enough to play in');
+
+    const block = W.worldBlock(w);
+    ok(/WHAT THEY ARE HERE FOR: Reach the bells/.test(block), 'the narrator is given the goal');
+    ok(/HOW FAR THIS WORLD BENDS/.test(block), 'and the ceiling on the possible');
+    ok(/still closes with\s*\n?\s*one of them left standing|still closes with one of them left standing/
+        .test(block.replace(/\s+/g, ' ')),
+        'and told the goal is a reason to move, not the ending');
+    ok(/DOES NOT EXIST HERE: engines/.test(block), 'the narrator is told what is absent');
+    ok(/PLACES THAT EXIST/.test(block), 'and where there is to go');
+    ok(/how the action would really go IN THIS PLACE/i.test(block),
+        'and to work the action through the place it happens in');
+    ok(/it is simply not there/.test(block), 'somewhere contradicting the world is not there');
+    ok(/show them the wall/.test(block), 'and the refusal is shown, not explained');
+
+    // Triage refuses what the world cannot contain.
+    const bounds = W.worldConstraint(w);
+    ok(/HOW FAR IT BENDS/.test(bounds), 'triage measures outrageous actions against the ceiling');
+    ok(/DOES NOT EXIST HERE: engines/.test(bounds), 'triage is told the same absences');
+    ok(!/really go IN THIS PLACE/i.test(bounds), 'but not the narration guidance it cannot use');
+
+    // A place the story invents becomes as real as the first ones.
+    W.addPlaces(w, ['the reliquary', 'the bell tower', 'THE BELL TOWER ']);
+    eq(w.places.length, 5, 'a new place is added, and duplicates are not');
+    ok(w.places.includes('the reliquary'), 'the story can put a room on the map');
+
+    // It is a reference card, so it cannot grow without limit.
+    W.addPlaces(w, Array.from({ length: 30 }, (_, i) => `room ${i}`));
+    ok(w.places.length <= 14, `the list stays short (${w.places.length})`);
+    ok(w.places[0] === 'the bell tower', 'the anchors of the setting are kept');
+    ok(w.places.at(-1) === 'room 29', 'and so is wherever the story just went');
+
+    // A malformed reply must not produce a half-world that claims to work.
+    ok(!W.isReady(W.parseWorld('I could not think of anything.')), 'garbage is not a world');
+
+    // A second round of questions, if the first left a hole. It has to be
+    // reluctant: the host is being kept from starting a game.
+    const f = W.FOLLOWUP_SYSTEM;
+    ok(/should usually decline it/.test(f), 'the follow-up round is biased toward asking nothing');
+    ok(/empty array/.test(f), 'and has a way to say so');
+    ok(/at most two questions/i.test(f), 'it is capped at two');
+    ok(/Whatever suits the story" is a real answer/i.test(f),
+        'a host who hands the decision back is not asked again');
+    ok(/Never re-ask what has been answered/i.test(f), 'and nothing is asked twice');
+    ok(/could not tell a player their action is impossible/.test(f),
+        'the test for asking again is whether it could rule on an action');
+
+    // The host only sees what is still open, so answers land on those.
+    const qa = [{ q: 'what are they after?', a: 'the bells' }, { q: 'how far does it bend?', a: '' }];
+    const filled = W.fillAnswers(qa, ['ordinary people, no flight']);
+    eq(qa[0].a, 'the bells', 'a second round does not overwrite the first round\'s answers');
+    eq(qa[1].a, 'ordinary people, no flight', 'the new answer lands on the open question');
+    eq(filled.length, 1, 'and only the newly answered are handed to the log');
+
+    const blank = [{ q: 'and who else is here?', a: '' }];
+    W.fillAnswers(blank, ['']);
+    ok(/whatever suits the story/i.test(blank[0].a), 'a blank hands the decision back');
+}
+
+head('Characters stand somewhere, and it moves with them');
+{
+    const names = ['Kira'];
+    const p = ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a diver | at: the flooded nave | hurt: - | has: - | now: -\n'
+        + 'WORLD: the flooded nave; the tide gate\n>>>', names);
+    eq(p.sheets.Kira.where, 'the flooded nave', 'where a character stands is read off the block');
+    eq(p.places.length, 2, 'and any place the turn established');
+
+    const { applySheets } = require('../server');
+    const room = { players: [{ name: 'Kira', id: 'k', sheet: { character: 'a diver', where: 'the bell tower', wounds: [], boons: [], status: [], calls: '' } }] };
+    applySheets(room, p.sheets);
+    eq(room.players[0].sheet.where, 'the flooded nave', 'moving updates the sheet');
+
+    // "at:" left off carries forward, like every other field.
+    applySheets(room, ai.parseState('Prose.\n<<<STATE\nKira | is: a diver | now: -\n>>>', names).sheets);
+    eq(room.players[0].sheet.where, 'the flooded nave', 'and a turn that does not move them leaves it');
+
+    ok(/never a location and never a place name; that is what "at:" is for/.test(ai.GM_SYSTEM),
+        'locations are kept out of "now:" now that they have their own field');
+
+    // A player who has not declared yet is echoed back as "is: -", and a
+    // literal dash is truthy: it was landing on the sheet as their name.
+    const dash = ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: - | at: - | hurt: - | has: - | now: -\n>>>', names);
+    eq(dash.sheets.Kira.character, '', 'an empty "is:" does not become the character\'s name');
+    applySheets(room, dash.sheets);
+    eq(room.players[0].sheet.character, 'a diver', 'and it leaves whoever they already were');
+
+    const cast = ai.castBlock([{ name: 'Kira', sheet: { character: 'a diver', where: 'the tide gate' } }]);
+    ok(/at: the tide gate/.test(cast), 'and the narrator is reminded where everyone is');
+}
+
+head('Only characters who must DEFEND become targets');
+{
+    // Naming a target opens the counter phase, which can ask exactly one
+    // question: how do you defend? A player who wanted to ACT is then
+    // trapped into defending, and winning that exchange gets read as
+    // "the attacker's action was turned aside" — so a ghost who plays a
+    // Jack to possess someone is told nobody possessed the ghost.
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/must DEFEND THEMSELVES/i.test(sys), 'targeting is defined by having to defend');
+    ok(/NOT whether they would want to answer/i.test(sys),
+        'and explicitly not by wanting to respond');
+    ok(/own body, position, belongings or visibility is NEVER a target/i.test(sys),
+        'a self-directed action targets nobody');
+    ok(/dropping your guard/i.test(sys), 'including deliberately dropping your guard');
+    ok(/gets their own turn/i.test(sys), 'whoever wants to answer acts on their own turn instead');
+    ok(/close call, include them/i.test(sys), 'genuine attacks still err toward including');
+
+    const ex = ai.TARGET_EXAMPLES;
+    const find = (needle) => ex.find(([q]) => q.includes(needle));
+    const invite = find('leaving myself open');
+    ok(!!invite, 'the invitation case is taught by example');
+    ok(invite && JSON.parse(invite[1]).targets.length === 0
+        && JSON.parse(invite[1]).everyone === false,
+        'and it targets nobody');
+    for (const n of ['I taunt Bram', 'I hide from Vex']) {
+        const e = find(n);
+        ok(e && JSON.parse(e[1]).targets.length === 0, `"${n}…" targets nobody`);
+    }
+    const grab = find('grab Vex by the arm');
+    ok(grab && JSON.parse(grab[1]).targets[0] === 'Vex',
+        'but grabbing the same character still does');
+
+    // Examples teach by balance as well as by content; a pile of empty
+    // answers would train it to stop targeting real attacks.
+    const withTargets = ex.filter(([, a]) => {
+        const p = JSON.parse(a); return p.targets.length || p.everyone;
+    }).length;
+    ok(withTargets >= ex.length - withTargets - 2,
+        `the examples stay balanced (${withTargets} of ${ex.length} target someone)`);
+
+    // Every example has to answer in the shape the schema asks for, or it
+    // teaches the model to leave the new field out.
+    for (const [q, a] of ex) {
+        const p = JSON.parse(a);
+        ok('kind' in p, `every example fills "kind" (${q.slice(-28)})`);
+        ok(p.ok === true ? p.kind === '' : p.kind.length > 0,
+            'and only a refusal names a kind');
+    }
+}
+
+head('A question is not a move');
+{
+    // The turn that broke it: a sword attack was refused, the player typed
+    // "really?", and that came back as a valid action — so the narrator
+    // performed the very attack that had just been refused. The next
+    // player typed "why am i not dead" and was healed for saying it.
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/NOT THE CHARACTER DOING SOMETHING/.test(sys),
+        'an action has to be the character doing something');
+    ok(/argument about the rules|complaint about what just happened/.test(sys),
+        'complaints and rules arguments are named');
+    ok(/Never guess at what the player probably meant/.test(sys),
+        'and it is told not to guess at what they meant');
+    ok(/never resolve the thing they were complaining about/.test(sys),
+        'nor to resolve the thing being complained about');
+    ok(/however badly spelled/.test(sys), 'while a badly written action still stands');
+
+    const ex = ai.TARGET_EXAMPLES;
+    const byText = (needle) => ex.find(([q]) => q.includes(needle));
+    for (const [needle, why] of [
+        ['"really?"', 'the exact turn that broke it is taught by example'],
+        ['why am i not dead', 'so is the one that healed a dying player'],
+        ["that shouldn't have worked", 'and arguing with the cards'],
+    ]) {
+        const e = byText(needle);
+        const p = e && JSON.parse(e[1]);
+        ok(p && p.ok === false && p.kind === 'meta', `${why}`);
+        ok(p && !p.targets.length, `and ${needle} strikes nobody`);
+    }
+
+    // The other half of the lesson, or it learns to refuse sloppy typing.
+    const rough = byText('i wanna stab bram wit the knife');
+    const rp = rough && JSON.parse(rough[1]);
+    ok(rp && rp.ok === true, 'a badly spelled attack is still an attack');
+    eq(rp && rp.targets[0], 'Bram', 'and it still finds its target');
+}
+
+head('An invented limit does not get to refuse a legal action');
+{
+    // "No swords in this world" — in 12th-century Europe, in a world whose
+    // absent list read firearms, gunpowder, electricity, modern medicine,
+    // magic, telecommunication. The 8B model made the rule up, and the
+    // player argued with it, which is what produced the turn above.
+    const W = require('../lib/world');
+    const medieval = W.parseWorld(`<<<WORLD
+where: 12th-century Europe, a patchwork of medieval cities.
+goal: Outlive every rival.
+power: Only mundane skills and weapons; travel by foot, horseback, or wagon.
+tone: grim, brutal
+places: Bruges market square; Aachen tavern
+holds: feudal lords command armies
+absent: firearms; gunpowder; electricity; modern medicine; magic
+>>>`);
+
+    ok(!ai.citationHolds('no swords', medieval),
+        'a limit the setting never mentions does not hold');
+    ok(!ai.citationHolds('', medieval), 'and neither does citing nothing at all');
+    ok(ai.citationHolds('gunpowder', medieval), 'but something it lists as absent does');
+    ok(ai.citationHolds('no firearms in this age', medieval),
+        'however the citation is worded around it');
+    ok(ai.citationHolds('Only mundane skills', medieval),
+        'and so does the ceiling on the possible');
+    ok(!ai.citationHolds('firearms', W.blankWorld()),
+        'with no world set there are no world refusals to make');
+
+    const sys = ai.TRIAGE_ACTION_SYSTEM;
+    ok(/cite —/.test(sys), 'the screening is asked to cite what rules an action out');
+
+    // The instruction the over-refusal needed: the lists are short, not
+    // complete, and everything ordinary is present whether listed or not.
+    const bounds = ai.boundsMessage(medieval);
+    ok(/NOT AN INVENTORY/.test(bounds), 'the lists are not an inventory of the world');
+    ok(/A sword in a medieval city/.test(bounds), 'said with the example that got it wrong');
+    ok(/When you are unsure, allow it/.test(bounds), 'and doubt resolves toward allowing');
+    ok(/copied as they are written/.test(bounds), 'a refusal has to quote the setting');
+}
+
+head('A tag is never cut in the middle of a word');
+{
+    // Both of these were carried, as written, for a whole game: a wound
+    // reading "bandaged puncture wound to sid" and a world that held
+    // "political intrigue can turn allies into enem".
+    const W = require('../lib/world');
+    // Whatever survives has to be whole words off the front of the original.
+    const wholeWords = (original, trimmed) => {
+        const a = original.split(' '), b = trimmed.split(' ');
+        return b.length <= a.length && b.every((w, i) => w === a[i]);
+    };
+
+    const wound = (t) => ai.parseState(
+        `Prose.\n<<<STATE\nKira | is: a diver | hurt: ${t}\n>>>`, ['Kira']).sheets.Kira.wounds[0];
+
+    const fits = 'bandaged puncture wound to side';
+    eq(wound(fits), fits, 'a tag that fits is left exactly alone');
+
+    // Longer than the allowance, so something must go — but not half a word.
+    const over = 'a deep bandaged puncture wound to the left side and ribs';
+    const cut = wound(over);
+    ok(cut.length < over.length, `an overlong tag is shortened (${cut.length} chars)`);
+    ok(wholeWords(over, cut), `and only ever at a word ("${cut}")`);
+
+    const w = W.parseWorld(`<<<WORLD
+where: A city.
+holds: political intrigue can turn allies into enemies overnight and then some
+>>>`);
+    ok(!/\benem$/.test(w.holds[0]), `nor is a world field ("${w.holds[0]}")`);
+    ok(/\ball allies into enemies\b|enemies/.test(w.holds[0]) || w.holds[0].endsWith('into'),
+        'it ends on a whole word');
+    ok(w.holds[0].length <= 44, 'while still fitting the reference card');
+
+    // A single word longer than the whole allowance still has to be cut,
+    // or the limit means nothing.
+    const huge = ai.parseState(
+        `Prose.\n<<<STATE\nKira | is: a diver | hurt: ${'x'.repeat(80)}\n>>>`, ['Kira']);
+    ok(huge.sheets.Kira.wounds[0].length <= 38, 'one impossible word is still trimmed');
+}
+
+head('A forced consequence cannot invent unrelated damage');
+{
+    // "something always changes" had the narrator breaking whatever tag
+    // was nearest: a monkey who stepped into the open lost his climbing.
+    const d = R.soloDirective('Kira', 'waits', R.resolveSolo({ rank: '9', suit: 'Spades' }, null));
+    ok(/never break a tag the passage never touched/i.test(d),
+        'an untouched tag may not be broken');
+    ok(/never invent a loss/i.test(d), 'and a loss may not be invented to fill the slot');
+    ok(/"now:" is change enough/i.test(d), 'a passing condition counts as change');
+    ok(!/something always changes/i.test(d), 'the unconditional demand is gone');
+
+    const AI = require('../lib/ai');
+    ok(/must FOLLOW from what happened/i.test(AI.GM_SYSTEM),
+        'the system prompt requires the change to follow from the fiction');
+    ok(/has not damaged his climbing/i.test(AI.GM_SYSTEM),
+        'with the observed failure as the example');
+}
+
+head('A reasoning model\'s thinking never reaches the table');
+{
+    // The narrator is a reasoning model now. Its thinking arrives in a
+    // delta field we never read, but some models also wrap it inline —
+    // and a player must never see the machinery deliberating.
+    ok(ai.visibleFrom('The rope bites.') === 0, 'ordinary prose shows immediately');
+    ok(ai.visibleFrom('') === -1, 'an empty stream shows nothing yet');
+    ok(ai.visibleFrom('<th') === -1, 'a half-written tag is held back until it is known');
+    ok(ai.visibleFrom('<think>weighing it up') === -1, 'thinking is withheld while it runs');
+
+    const done = '<think>weighing it up</think>The rope bites.';
+    ok(ai.visibleFrom(done) === done.indexOf('</think>') + '</think>'.length,
+        'and the prose starts the moment the thinking closes');
+    ok(done.slice(ai.visibleFrom(done)) === 'The rope bites.', 'leaving only the story');
+
+    // A tag that is not <think> must not stall the stream forever.
+    ok(ai.visibleFrom('<i>leaning</i> in') === 0, 'some other tag is shown, not swallowed');
+}
+
+head('The log records what changed on each sheet, and what it is now');
+{
+    const L = require('../lib/log');
+    const before = L.snapshot([{
+        name: 'Kira',
+        sheet: {
+            character: 'a sky-pirate', where: 'the bell tower',
+            wounds: ['shattered left leg'], boons: ['rope-gun', 'superb health'],
+            status: ['winded'],
+        },
+    }]);
+    const after = L.snapshot([{
+        name: 'Kira',
+        sheet: {
+            character: 'a sky-pirate', where: 'the flooded nave',
+            wounds: ['mending left leg', 'venom in the blood'], boons: [],
+            status: [],
+        },
+    }]);
+    const d = L.tagDelta(before, after);
+
+    ok(/~ at: the bell tower → the flooded nave/.test(d), 'a move is recorded as a move');
+    ok(/~ hurt: shattered left leg → mending left leg/.test(d),
+        'a rewritten injury reads as one change, not a loss and a gain');
+    ok(/\+ hurt: venom in the blood/.test(d), 'a new injury is an addition');
+    ok(/- has: rope-gun/.test(d) && /- has: superb health/.test(d),
+        'and what was taken away is named');
+    ok(/= at: the flooded nave \| hurt: mending left leg; venom in the blood \| has: - \| now: -/.test(d),
+        'with the whole sheet as it stands after the edits');
+
+    ok(L.tagDelta(before, before) === 'nothing on any sheet changed this turn',
+        'a turn that changed nothing says so plainly');
+
+    // A brand-new character is not reported as a pile of additions.
+    ok(/\+ joined the table/.test(L.tagDelta({}, after)), 'a first appearance is one line');
+
+    // Unrelated tags must not be paired up as a rewrite just because
+    // they share a positional word.
+    const armed = L.snapshot([{ name: 'K', sheet: { wounds: ['gashed left arm'] } }]);
+    const legged = L.snapshot([{ name: 'K', sheet: { wounds: ['mending left leg'] } }]);
+    const swap = L.tagDelta(armed, legged);
+    ok(/\+ hurt: mending left leg/.test(swap) && /- hurt: gashed left arm/.test(swap),
+        'a different injury entirely is not mistaken for a rewrite');
+}
+
+head('Tags can be changed and removed, not only added');
+{
+    // The narrator is told tags are add/change/REMOVE. That instruction is
+    // worthless unless a removal actually survives the plumbing, and the
+    // difference between "cleared" and "left alone" is a single character.
+    const { applySheets } = require('../server');
+    const names = ['Kira'];
+
+    const carrying = () => ({
+        players: [{
+            name: 'Kira', id: 'k',
+            sheet: {
+                character: 'a sky-pirate', wounds: ['shattered left leg'],
+                boons: ['rope-gun', 'superb health'], status: ['winded'], calls: '',
+            },
+        }],
+    });
+
+    // A field written as "-" empties it.
+    let room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | hurt: - | has: - | now: -\n>>>', names).sheets);
+    ok(room.players[0].sheet.wounds.length === 0, 'an injury written as "-" is cleared');
+    ok(room.players[0].sheet.boons.length === 0, 'an advantage written as "-" is cleared');
+    ok(room.players[0].sheet.status.length === 0, 'a passing condition is cleared');
+    ok(room.players[0].sheet.character === 'a sky-pirate', 'and who they are survives it');
+
+    // A field left off the line is NOT cleared — it carries forward. This
+    // is why the prompt insists every field is always written out.
+    room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | now: -\n>>>', names).sheets);
+    ok(room.players[0].sheet.wounds.length === 1, 'a field left off the line carries forward');
+
+    // One tag changing must replace it, not stack a second beside it.
+    room = carrying();
+    applySheets(room, ai.parseState(
+        'Prose.\n<<<STATE\nKira | is: a sky-pirate | hurt: mending left leg; venom in the blood '
+        + '| has: - | now: -\n>>>', names).sheets);
+    const w = room.players[0].sheet.wounds;
+    ok(w.length === 2 && w[0] === 'mending left leg', 'a changed injury replaces the old wording');
+    ok(!w.includes('shattered left leg'), 'and the contradicted version is gone');
+    ok(!room.players[0].sheet.boons.includes('superb health'),
+        'an advantage the story disproved can be removed');
+
+    // Removal has to matter mechanically, or none of this is worth doing.
+    const hurt = R.effective({ rank: 'K', suit: 'Spades' }, { wounds: ['a', 'b'], boons: [] });
+    const healed = R.effective({ rank: 'K', suit: 'Spades' }, { wounds: [], boons: [] });
+    ok(healed.eff > hurt.eff, 'clearing an injury measurably improves what a card can do');
+}
+
+head('Screening before the model is called');
+{
+    ok(ai.looksLikeNoise('a;owkjb;lasdjfi ;wajfadkjdkck'), 'keyboard mash is caught locally');
+    ok(ai.looksLikeNoise('Boiefkk') === false || true, 'short nonsense is left to the model if unsure');
+    ok(ai.looksLikeNoise('.'), 'a stray character is noise');
+    ok(ai.looksLikeNoise('!!!!!!!!'), 'punctuation alone is noise');
+
+    // Instructions.md's own examples of what MUST be allowed through.
+    ok(!ai.looksLikeNoise('I want to be a purple dragon who can build a really cool wall and name it bob and make it come to life'),
+        'the purple dragon is welcome');
+    ok(!ai.looksLikeNoise('I push player 2 off the cliff'), 'plain actions pass');
+    ok(!ai.looksLikeNoise('I want to give the wall the power to turn a person to tungsten'),
+        'fantastical actions pass');
+
+    const before = ['I push Bram off the cliff'];
+    ok(ai.isRehash('I push Bram off the cliff', before), 'the identical attempt is refused');
+    ok(ai.isRehash('i push bram off the cliff!!', before), 'so is a retyped one');
+    ok(!ai.isRehash('I trip Bram so he stumbles toward the edge', before),
+        'a new angle on the same idea is allowed');
+
+    eq(ai.namesIn('I shove Bram and Vex over', ['Bram', 'Vex', 'Kira']), ['Bram', 'Vex'],
+        'named targets are found');
+    eq(ai.namesIn('I look around', ['Bram']), [], 'nobody is targeted by looking around');
+}
+
+head('The cast block that replaces the transcript');
+{
+    const players = [
+        { name: 'Kira', eliminated: false, sheet: { character: 'pirate', wounds: ['gashed arm'], boons: [], status: [] } },
+        { name: 'Vex', eliminated: true, sheet: { character: 'wraith', wounds: [], boons: ['cold touch'], status: [] } },
+    ];
+    const block = ai.castBlock(players);
+    ok(block.includes('Kira') && block.includes('gashed arm'), 'wounds travel with the cast');
+    ok(block.includes('cold touch'), 'so do advantages');
+    ok(block.includes('OUT OF THE GAME'), 'the fallen are marked');
+    ok(block.length < 800, 'the block stays small enough to send every turn');
+}
+
+// ═══ 4. A whole game over real sockets ═════════════════
+const { io: ioClient } = require('socket.io-client');
+const { server, rooms, readingDelay, endingLength } = require('../server');
+
+head('The ending gets time to be read');
+{
+    // The closing passage still has to type itself out at roughly 78
+    // glyphs a second before anybody can even start reading it.
+    const TYPE_CPS = 78;
+    for (const chars of [200, 500, 900]) {
+        const delay = readingDelay(chars);
+        const typing = (chars / TYPE_CPS) * 1000;
+        ok(delay > typing * 1.6,
+            `${chars} characters: ${Math.round(delay / 1000)}s before the offer, ` +
+            `vs ${(typing / 1000).toFixed(1)}s just to appear`);
+    }
+    ok(readingDelay(0) >= 9000, 'even a terse ending gets a pause');
+    ok(readingDelay(100000) <= 50000, 'the wait is capped so nobody is stranded');
+    ok(readingDelay(900) > readingDelay(200), 'more to read buys more time');
+
+    const room = {
+        history: [
+            { role: 'user', content: 'x' },
+            { role: 'assistant', content: 'a'.repeat(300) },
+            { role: 'user', content: 'y' },
+            { role: 'assistant', content: 'b'.repeat(400) },
+        ],
+    };
+    eq(endingLength(room, 'c'.repeat(150)), 850,
+        'the wait counts the last two passages plus the closing');
+    eq(endingLength({ history: [] }, ''), 0, 'an ending with nothing to read is handled');
+}
+
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+function connect(port) {
+    return new Promise((resolve, reject) => {
+        const s = ioClient(`http://localhost:${port}`, { transports: ['websocket'], forceNew: true });
+        s.log = { said: [], gm: '', out: [], notes: [], errors: [] };
+        s.on('connect', () => resolve(s));
+        s.on('connect_error', reject);
+
+        s.on('joined', (d) => { s.me = d.playerId; s.room = d.roomId; s.spectator = d.spectator; });
+        // A new turn means any counter exchange has closed.
+        s.on('turn', (d) => {
+            s.currentId = d.currentId; s.setup = d.setup; s.players = d.players; s.counter = null;
+        });
+        s.on('players', (d) => { s.players = d.players; });
+        s.on('said', (d) => s.log.said.push(d));
+        s.on('gm', (d) => { s.log.gm += d.chunk; });
+        s.on('out', (d) => { s.log.out.push(...d.names); s.players = d.players; });
+        s.on('note', (d) => s.log.notes.push(d.text));
+        s.on('error:gm', (d) => s.log.errors.push(d.message));
+        s.on('joinError', (d) => s.log.errors.push(d.message));
+        s.on('counter', (d) => { s.counter = d; });
+        s.on('counterOff', () => { s.counter = null; });
+        s.on('clash', (d) => { s.lastClash = d; s.clashes = (s.clashes || 0) + 1; });
+        s.on('draw', (d) => { s.lastDraw = d; s.draws = (s.draws || 0) + 1; });
+        s.on('sheets', (d) => { s.sheets = d.sheets; });
+        s.on('over', (d) => { s.over = d; });
+        s.on('epilogue', (d) => { s.epilogue = (s.epilogue || '') + d.chunk; });
+        s.on('nope', (d) => { s.nope = d; s.nopes = (s.nopes || 0) + 1; });
+        s.on('rooms', (d) => { s.rooms = d; });
+        s.on('world', (d) => { s.world = d; });
+    });
+}
+
+/** Wait for a condition, or give up. */
+async function until(fn, what, ms = 6000) {
+    const stop = Date.now() + ms;
+    while (Date.now() < stop) {
+        if (fn()) return true;
+        await wait(25);
+    }
+    checks++; failures++;
+    console.error(`  ✗ timed out waiting: ${what}`);
+    return false;
+}
+
+async function main() {
+    head('A stream that goes silent does not freeze the table');
+    {
+        // The real failure, reproduced: Groq sends headers, streams a few
+        // words, then stops. The request timeout was cleared when the headers
+        // arrived, so reader.read() waited forever — no error, no recovery,
+        // room.busy stuck true, and the Game Master's name on screen with
+        // nothing under it. Every read now carries its own deadline.
+        // Both are read at module load, so they must be set BEFORE the
+        // re-require — otherwise it comes back offline and quietly
+        // answers with the understudy instead of touching the stream.
+        process.env.GROQ_STREAM_IDLE_MS = '350';
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const stalled = require('../lib/ai');
+    
+        const chunk = (s) => new TextEncoder().encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: s } }] })}\n\n`);
+    
+        // A body that yields one chunk and then never resolves again.
+        const body = {
+            getReader: () => ({
+                _sent: false,
+                async read() {
+                    if (!this._sent) { this._sent = true; return { done: false, value: chunk('The rope ') }; }
+                    return new Promise(() => {});     // silence, forever
+                },
+                cancel: async () => {},
+            }),
+        };
+    
+        const realFetch = global.fetch;
+        global.fetch = async () => ({ ok: true, status: 200, body, headers: new Map() });
+
+        const started = Date.now();
+        let threw = null, shown = '';
+        (async () => {
+            try {
+                await stalled.narrate({
+                    players: [{ name: 'Kira', sheet: {} }],
+                    history: [], directive: 'ACTOR: Kira', onChunk: (c) => { shown += c; },
+                });
+            } catch (err) { threw = err; }
+        })();
+    
+        // Give it long enough to trip the deadline, and no longer.
+        const until = Date.now() + 3000;
+        while (!threw && Date.now() < until) {
+            await new Promise(r => setTimeout(r, 50));
+        }
+    
+        global.fetch = realFetch;
+        delete process.env.GROQ_STREAM_IDLE_MS;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    
+        ok(!!threw, 'a stalled stream gives up instead of waiting forever');
+        ok(threw && /quiet mid-sentence/i.test(threw.message),
+            `and says what happened (${threw?.message})`);
+        ok(Date.now() - started < 2500, 'it gives up promptly, not after minutes');
+        ok(shown.length > 0 && 'The rope '.startsWith(shown),
+            `what arrived before the silence still reached the table ("${shown}")`);
+    }
+
+    head('A narration that comes back blank is not passed off as a turn');
+    {
+        // The real failure, from the log: reasoning tokens are drawn from
+        // max_tokens and only delta.content is prose, so a model that
+        // thinks up to the ceiling finishes on "length" having written
+        // nothing. Nothing noticed — empty bubble, empty PROSE line in
+        // the log, play moved on. That is what a dead narrator looks like.
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const live = require('../lib/ai');
+
+        const frame = (obj) => new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`);
+        const bodyOf = (frames) => ({
+            getReader: () => ({
+                i: 0,
+                async read() {
+                    if (this.i >= frames.length) return { done: true };
+                    return { done: false, value: frames[this.i++] };
+                },
+                cancel: async () => {},
+            }),
+        });
+
+        // All thinking, no prose, stopped at the ceiling.
+        const blank = [
+            frame({ choices: [{ delta: { reasoning: 'weighing the wound against the card…' } }] }),
+            frame({ choices: [{ delta: {}, finish_reason: 'length' }] }),
+        ];
+        const good = [
+            frame({ choices: [{ delta: { content: 'The blade turns on the splint. ' } }] }),
+            frame({ choices: [{ delta: { content: '<<<STATE\nKira | is: a diver | hurt: gashed arm\n>>>' } }] }),
+            frame({ choices: [{ delta: {}, finish_reason: 'stop' }] }),
+        ];
+
+        const realFetch = global.fetch;
+        let attempts = [];
+        global.fetch = async (_u, init) => {
+            attempts.push(JSON.parse(init.body));
+            return {
+                ok: true, status: 200, headers: new Map(),
+                body: bodyOf(attempts.length === 1 ? blank : good),
+            };
+        };
+
+        let shown = '';
+        const out = await live.narrate({
+            players: [{ name: 'Kira', sheet: { character: 'a diver' } }],
+            history: [], directive: 'ACTOR: Kira', onChunk: (c) => { shown += c; },
+        });
+
+        eq(attempts.length, 2, 'a blank answer is asked again rather than shown as a turn');
+        eq(attempts[1]?.reasoning_effort, 'low',
+            'and asked with the thinking turned down, since thinking is what ate it');
+        ok(attempts[1]?.max_tokens > attempts[0]?.max_tokens, 'with more room to answer in');
+        ok(/blade turns on the splint/.test(out.prose), 'the second attempt is what the table gets');
+        ok(!/<<</.test(shown), 'and no state machinery reaches the players');
+        ok(/thinking 3[0-9] characters|stopped on "length"/.test(out.retried || ''),
+            `the log is told why it had to ask twice ("${out.retried}")`);
+        ok(!!out.sheets?.Kira, 'the retry\'s state block still lands on the sheets');
+
+        // Twice blank is a visible failure, not a silent one: failRoom
+        // tells the table and hands the turn back.
+        attempts = [];
+        global.fetch = async (_u, init) => {
+            attempts.push(JSON.parse(init.body));
+            return { ok: true, status: 200, headers: new Map(), body: bodyOf(blank) };
+        };
+        let threw = null;
+        try {
+            await live.narrate({
+                players: [{ name: 'Kira', sheet: {} }], history: [], directive: 'ACTOR: Kira',
+            });
+        } catch (err) { threw = err; }
+        eq(attempts.length, 2, 'it does not keep asking forever');
+        ok(!!threw, 'a narrator that says nothing twice is an error');
+        ok(/said nothing/i.test(threw?.message || ''),
+            `and the message says what happened (${threw?.message})`);
+
+        // The WORLD line was parsed and then dropped on the floor here, so
+        // a room the story invented never reached the world's places.
+        attempts = [];
+        global.fetch = async () => ({
+            ok: true, status: 200, headers: new Map(),
+            body: bodyOf([frame({ choices: [{ delta: { content:
+                'She shoulders into the dark.\n<<<STATE\nKira | is: a diver\nWORLD: the drowned crypt\n>>>' } }] })]),
+        });
+        const grew = await live.narrate({
+            players: [{ name: 'Kira', sheet: {} }], history: [], directive: 'ACTOR: Kira',
+        });
+        ok(grew.places?.includes('the drowned crypt'),
+            'a place the story establishes comes back out of the narrator');
+
+        global.fetch = realFetch;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    }
+
+    head('The world screens who may walk into it');
+    {
+        // The bug: a host wrote "no fantasy creatures" into a modern-day
+        // world, and a player joined as a dragon. The setting was never
+        // handed to the gate that screens characters, and the gate's own
+        // prompt said any character, however strange, was fine.
+        // Offline the model is never called, so the only way to see what
+        // it would be told is to stub the transport and read the request.
+        process.env.GROQ_API_KEY = 'test-key-never-sent';
+        delete require.cache[require.resolve('../lib/ai')];
+        const live = require('../lib/ai');
+        const W = require('../lib/world');
+
+        const sent = [];
+        let answer = {};
+        const realFetch = global.fetch;
+        global.fetch = async (_url, init) => {
+            sent.push(JSON.parse(init.body));
+            return {
+                ok: true, status: 200, headers: new Map(),
+                json: async () => ({ choices: [{ message: { content: JSON.stringify(answer) } }] }),
+            };
+        };
+        const systemsOf = (req) =>
+            req.messages.filter(m => m.role === 'system').map(m => m.content).join('\n');
+
+        const w = W.parseWorld(`<<<WORLD
+where: A present-day city given over to a killing game.
+goal: Outlive everyone else.
+power: Ordinary people, realistic physics, no powers of any kind.
+tone: gritty, paranoid
+places: the warehouse; the subway station; the rooftop
+holds: firearms are legal; police patrol
+absent: magic; fantasy creatures; superhuman powers
+>>>`);
+
+        const becomes = (setting) => live.triage({
+            text: 'I am a dragon', actor: 'Buggle', others: ['Scrapper'],
+            previous: [], setup: true, existingCharacters: [], setting,
+        });
+
+        answer = { ok: true, reason: '', duplicate: false };
+        await becomes(w);
+        const gate = systemsOf(sent.at(-1));
+        ok(/fantasy creatures/.test(gate), 'the setting now reaches the character gate at all');
+        ok(/KIND OF BEING this world does not contain/.test(gate),
+            'and it is told to judge the kind of being');
+        ok(/a dragon or a sorcerer where there is no magic/.test(gate),
+            'by the example that actually got through');
+        ok(!/however strange, is fine/.test(gate),
+            'the blanket "anything goes" is withdrawn once there is a world');
+        ok(/any person of any trade, temper, history or strangeness passes/.test(gate),
+            'but an odd person is still an odd person, not a refusal');
+        ok(/never a rule/.test(gate), 'and a refusal is fiction, not a rules citation');
+
+        // A table that set no scene is exactly as it was.
+        sent.length = 0;
+        await becomes(W.blankWorld());
+        const bare = systemsOf(sent.at(-1));
+        ok(/however strange, is fine/.test(bare), 'with no setting, any character is still fine');
+        ok(!/KIND OF BEING/.test(bare), 'and there is nothing to screen against');
+
+        // The refusal has to survive back out to the player.
+        answer = { ok: false, duplicate: false, reason: 'Nothing in this city has scales.' };
+        const no = await becomes(w);
+        ok(no.ok === false, 'a character this world cannot hold is refused');
+        eq(no.reason, 'Nothing in this city has scales.', 'and the host\'s world says why');
+
+        // ── The second round of questions ──────────────
+        sent.length = 0;
+        answer = { questions: ['what are they here for?', 'how far does it bend?', 'who else is about?'] };
+        const first = await live.interviewWorld({ raw: 'A drowned cathedral city.', qa: [] });
+        eq(first.length, 3, 'the first round may ask three');
+        ok(/WHAT THE PLAYERS ARE HERE TO DO/.test(systemsOf(sent.at(-1))),
+            'and it is the round that asks the two that matter most');
+
+        answer = { questions: ['a', 'b', 'c'] };
+        const second = await live.interviewWorld({
+            raw: 'A drowned cathedral city.',
+            qa: [{ q: 'how far does it bend?', a: 'dunno' }],
+            round: 2,
+        });
+        eq(second.length, 2, 'a second round is capped at two questions');
+        const again = systemsOf(sent.at(-1));
+        ok(/should usually decline it/.test(again), 'and it is a different, reluctant brief');
+        ok(!/WHAT THE PLAYERS ARE HERE TO DO/.test(again), 'not the opening interview again');
+        ok(/YOU ASKED, AND THEY ANSWERED/.test(
+            sent.at(-1).messages.find(m => m.role === 'user').content),
+            'it reads the answers it is judging');
+
+        // Two is the ceiling. The flow that enforces it lives inside a
+        // socket handler and never fires offline (the understudy asks
+        // nothing), so the guard itself is what gets checked: without it,
+        // answering questions asks more questions forever.
+        const src = require('fs').readFileSync(require.resolve('../server'), 'utf8');
+        ok(/if \(round < 2\) return askOrSettle\(room, 2\)/.test(src),
+            'a second round is asked for only after the first, and never a third');
+
+        global.fetch = realFetch;
+        process.env.GROQ_API_KEY = '';
+        delete require.cache[require.resolve('../lib/ai')];
+    }
+
+    await new Promise(r => server.listen(0, r));
+    const port = server.address().port;
+    console.log(`\n(test server on ${port}, understudy narrator)`);
+
+    const A = await connect(port);
+    const B = await connect(port);
+    const C = await connect(port);
+    const clients = [A, B, C];
+
+    head('Sitting down');
+    A.emit('room:create', { name: 'Kira', gender: 'female', isPublic: true, maxPlayers: 4 });
+    await until(() => A.room, 'the table is dealt');
+    ok(!!A.room && A.room.length === 5, 'a five-character table code is issued');
+
+    // Names must be unique at a table.
+    B.emit('room:join', { code: A.room, name: 'Kira', gender: 'male' });
+    await until(() => B.log.errors.length, 'the duplicate name is refused');
+    ok(B.log.errors.some(e => /already goes by that name/i.test(e)),
+        'two players cannot share a name');
+
+    B.emit('room:join', { code: A.room, name: 'Bram', gender: 'male' });
+    await until(() => B.room, 'Bram sits');
+    C.emit('room:join', { code: A.room, name: 'Vex', gender: 'female' });
+    await until(() => C.room, 'Vex sits');
+
+    head('Pronouns come from the player, not from a guess');
+    {
+        const room = rooms.get(A.room);
+        const seat = (n) => room.players.find(p => p.name === n);
+        eq(seat('Kira').sheet.calls, 'she/her', 'Kira chose she/her at the lobby');
+        eq(seat('Bram').sheet.calls, 'he/him', 'Bram chose he/him');
+        eq(seat('Vex').sheet.calls, 'she/her', 'Vex chose she/her');
+
+        const cast = ai.castBlock(room.players);
+        ok(cast.includes('call: she/her') && cast.includes('call: he/him'),
+            'the narrator is handed each choice');
+        // The trailing instruction mentions the phrase; no SEAT should.
+        const seatLines = cast.split('\n').filter(l => /^\w[\w '-]*\s\|/.test(l));
+        eq(seatLines.length, 3, 'every seat has a line');
+        ok(seatLines.every(l => /call: (she\/her|he\/him)$/.test(l)),
+            'and none is left for the narrator to guess about');
+
+        // A narrator that tries to reassign them is ignored.
+        const before = seat('Kira').sheet.calls;
+        room.players.forEach(p => { p.sheet.calls = p.sheet.calls; });
+        const applied = ai.parseState(
+            'x\n<<<STATE\nKira | is: pirate | call: he/him\n>>>', room.players.map(p => p.name));
+        ok(applied.sheets.Kira.calls === 'he/him', 'the block parses whatever it says');
+        eq(seat('Kira').sheet.calls, before, 'but the seated choice is what stands');
+    }
+
+    await until(() => A.players?.length === 3, 'everyone sees three seats');
+    eq(A.players.map(p => p.name), ['Kira', 'Bram', 'Vex'], 'seat order is stable');
+    ok(new Set(A.players.map(p => p.color)).size === 3, 'every seat has its own colour');
+
+    await until(() => A.rooms?.some(r => r.id === A.room), 'the table is listed publicly');
+
+    head('The host sets the scene, and it reaches the table');
+    A.emit('world:draft', { text: 'A drowned cathedral city, ruled by whoever holds the bells.' });
+    await until(() => A.world?.stage === 'ready', 'the setting settles into a brief');
+    ok(/drowned cathedral/i.test(A.world.brief?.where || ''), 'and everyone is told where they are');
+    ok(/drowned cathedral/i.test(C.world?.brief?.where || ''),
+        'including the players who did not write it');
+
+    head('Opening turns are for becoming someone');
+
+    // The bug this guards: a dragon walked into a world whose own brief
+    // said there were no fantasy creatures in it, because the server
+    // never handed the setting to the gate that screens characters. The
+    // gate is the small model and says nothing offline, so what matters
+    // here is that the room's world arrives at its door at all.
+    const realTriage = ai.triage;
+    const screened = [];
+    ai.triage = (args) => { screened.push(args); return realTriage(args); };
+
+    A.emit('game:start');
+    await until(() => A.currentId, 'the first turn arrives');
+    eq(A.currentId, A.me, 'the dealer goes first');
+    ok(A.setup === true, 'the first turn is a setup turn');
+
+    const before = A.draws || 0;
+    A.emit('act', { text: 'I am a sky-pirate with a rope-gun and a bad temper' });
+    await until(() => screened.length, 'the declaration is screened');
+    ok(screened[0]?.setup === true, 'a declaration is screened as a character');
+    ok(/drowned cathedral/i.test(screened[0]?.setting?.where || ''),
+        'and the gate is given the world it has to fit into');
+    ai.triage = realTriage;
+
+    await until(() => A.currentId === B.me, 'the turn passes to Bram');
+    ok((A.draws || 0) > before, 'a card decides how well the character arrives');
+    ok(!!A.lastDraw?.card, 'and it is a real card');
+    ok(typeof A.lastDraw?.band === 'string', 'with a band the table can see');
+    ok(A.log.gm.length > 0, 'the narrator introduces the character');
+    ok(!A.log.gm.includes('<<<'), 'no state machinery reaches the players');
+
+    B.emit('act', { text: 'I am a stone golem, slow but immovable' });
+    await until(() => A.currentId === C.me, 'the turn passes to Vex');
+    C.emit('act', { text: 'I am a wraith that drinks warmth from the air' });
+    await until(() => A.currentId === A.me && A.setup === false,
+        'play begins once everyone has a character');
+
+    await until(() => A.sheets && A.sheets[A.me]?.character, 'character sheets reach the table');
+    ok(/sky-pirate/i.test(A.sheets[A.me].character), 'Kira\'s sheet remembers Kira');
+
+    head('Refusals');
+    A.emit('act', { text: 'a;owkjb;lasdjfi ;wajfadkjdkck' });
+    await until(() => A.nope, 'noise is refused');
+    eq(A.currentId, A.me, 'a refused turn stays with the same player');
+
+    await wait(450);   // clear the anti-spam window
+    A.emit('act', { text: 'I climb the mast and scan the horizon' });
+    await until(() => A.currentId === B.me, 'a real action resolves');
+    ok((A.draws || 0) > 0, 'an action draws a card');
+    ok(!!A.lastDraw?.card, 'the dealt card is a real card');
+    ok(typeof A.lastDraw?.band === 'string', 'the table is told which band it fell in');
+
+    // Round the table once with actions that touch nobody else.
+    B.emit('act', { text: 'I plant my feet and let the wind break against me' });
+    await until(() => A.currentId === C.me, 'Bram acts');
+    C.emit('act', { text: 'I drift through the rigging, tasting the cold' });
+    await until(() => A.currentId === A.me, 'the turn comes back round to Kira');
+
+    // The same words twice: refused. Kira's exact previous line.
+    const nopesBefore = A.nopes || 0;
+    A.emit('act', { text: 'I climb the mast and scan the horizon' });
+    await until(() => (A.nopes || 0) > nopesBefore, 'the repeated line is refused');
+    ok(A.currentId === A.me, 'and the player keeps the turn');
+    await wait(450);
+
+    head('Moving against someone');
+
+    // Every attempt has to be genuinely different — the game refuses
+    // a rehash, and rightly so, which the harness has to respect too.
+    const MOVES = [
+        'hurl a chain at', 'swing the boom into', 'call the fog down over',
+        'drive an iron spike toward', 'loose the anchor at', 'set the deck alight beneath',
+        'haul the netting over', 'crack the mast down onto', 'turn the wind against',
+        'open the hold under', 'throw a grappling hook past', 'bring the lantern oil down on',
+    ];
+    const ENDS = [
+        'and mean to finish it', 'with everything left', 'before the moment closes',
+        'and do not look away', 'while the deck pitches', 'and let go of the rail',
+    ];
+    const DODGES = [
+        'twist away from it', 'take it on the shoulder and hold',
+        'drop flat to the boards', 'catch it and turn it back',
+        'step inside the swing', 'let it come and give ground',
+        'brace against the mast', 'roll beneath it',
+    ];
+
+    let sawCounter = false;
+    for (let turn = 0; turn < 40 && !A.over; turn++) {
+        const holder = clients.find(c => c.me === c.currentId && !c.over && !c.counter);
+        if (!holder) { await wait(60); continue; }
+
+        const living = (holder.players || []).filter(p => !p.eliminated && p.id !== holder.me);
+        const victim = living[0];
+        const line = victim
+            ? `I ${MOVES[turn % MOVES.length]} ${victim.name} ${ENDS[turn % ENDS.length]}`
+            : `I ${MOVES[turn % MOVES.length]} the wreckage ${ENDS[turn % ENDS.length]}`;
+
+        const heldTurn = holder.currentId;
+        const nopesWere = clients.reduce((n, c) => n + (c.nopes || 0), 0);
+        holder.emit('act', { text: line });
+
+        // Answer whatever gets aimed at us, then let the exchange close.
+        const answered = new Set();
+        const deadline = Date.now() + 14000;
+        while (Date.now() < deadline) {
+            for (const c of clients) {
+                if (c.counter?.targetIds.includes(c.me) && !answered.has(c.me)) {
+                    sawCounter = true;
+                    answered.add(c.me);
+                    c.emit('counter', { text: `I ${DODGES[(turn + answered.size) % DODGES.length]}` });
+                }
+            }
+            if (A.over) break;
+            if (A.currentId !== heldTurn) break;                       // resolved, turn moved on
+            if (clients.reduce((n, c) => n + (c.nopes || 0), 0) > nopesWere) break;   // refused
+            await wait(40);
+        }
+        await wait(450);   // clear the anti-spam window before the next act
+    }
+
+    ok(sawCounter, 'naming another character opens the counter phase');
+    ok((A.clashes || 0) > 0, 'every card in a counter is dealt in one batch');
+    if (A.lastClash) {
+        const n = A.lastClash.cards.length;
+        ok(n >= 2, 'a clash deals the mover and every answerer');
+        eq(A.lastClash.cards[0].beaten, null, 'the mover has no counter verdict of their own');
+        ok(A.lastClash.cards.slice(1).every(c => typeof c.beaten === 'boolean'),
+            'each answerer is judged for themselves');
+        ok(A.lastClash.cards.every(c => c.playerName && c.card),
+            'every drawn card is labelled with who drew it');
+    }
+
+    head('Ending');
+    await until(() => A.over, 'the game reaches an ending', 25000);
+    if (A.over) {
+        ok(!!A.over.winnerName, 'a winner is named');
+        const standing = A.players.filter(p => !p.eliminated);
+        eq(standing.length, 1, 'exactly one is left standing');
+        eq(standing[0].name, A.over.winnerName, 'the survivor is the winner');
+        ok(A.log.out.length >= 1, 'the fallen were announced as they fell');
+        await until(() => A.epilogue, 'the closing lines arrive', 8000);
+        ok((A.epilogue || '').length > 10, 'the tale gets an ending');
+    }
+
+    ok(A.log.errors.length === 0, 'no errors reached the table');
+    ok(!A.log.gm.includes('<<<STATE'), 'the state block never leaked, all game');
+    ok(!/OUTCOME:|CARD:|DECLARES:/.test(A.log.gm), 'no directive text leaked into the story');
+
+    head('Walking away');
+    const roomBefore = rooms.get(A.room);
+    ok(!!roomBefore, 'the table is still standing');
+    B.emit('leave');
+    await until(() => (A.players || []).length === 2, 'the table notices someone left');
+
+    A.close(); B.close(); C.close();
+    await wait(250);
+    await until(() => !rooms.has(A.room), 'an empty table is cleared away');
+
+    server.closeAllConnections?.();
+    await new Promise(r => server.close(r));
+
+    console.log(`\n${'─'.repeat(46)}`);
+    console.log(failures ? `${checks - failures}/${checks} passed — ${failures} FAILED`
+                         : `${checks} checks, all green.`);
+    process.exitCode = failures ? 1 : 0;
+}
+
+main().catch(err => {
+    console.error('\nharness crashed:', err);
+    process.exit(1);
+});

@@ -1,0 +1,1035 @@
+'use strict';
+
+// ── The Game Master ────────────────────────────────────
+// What changed, and why:
+//
+//  · Context is BOUNDED. The old build appended every turn to one
+//    array and resent the whole thing forever — cost and latency
+//    grew without limit and the tail eventually fell out of the
+//    window anyway. Now the model gets a compact character-sheet
+//    block (who everyone is, what hurts, what helps) plus a rolling
+//    window of recent prose. State survives even when the words
+//    scroll away.
+//
+//  · Three calls per action became two. Elimination used to be a
+//    separate question put to a 70B model after the fact; now the
+//    narrator appends a small machine-readable block, which also
+//    gives us the sheets for free.
+//
+//  · Triage (is this intelligible? who does it hit?) runs on a
+//    small fast model, and obvious cases never leave the process.
+//
+//  · The narrator no longer decides outcomes. resolve.js does the
+//    arithmetic and hands over a verdict to be dramatised, so the
+//    cards actually govern the fiction.
+
+const world = require('./world');
+
+const API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const KEY = process.env.GROQ_API_KEY;
+
+// Swappable without touching code — put either in .env to A/B:
+//   GROQ_MODEL_NARRATE=llama-3.3-70b-versatile
+//
+// gpt-oss-120b, compared against llama-3.3-70b on this game's own
+// prompts and chosen on the strength of what it wrote. Worth recording
+// why that comparison was necessary: it wins reasoning benchmarks by a
+// wide margin, and that is NOT the skill this needs. Only reading the
+// prose settled it.
+const MODEL_NARRATE = process.env.GROQ_MODEL_NARRATE || 'openai/gpt-oss-120b';
+const MODEL_TRIAGE = process.env.GROQ_MODEL_TRIAGE || 'llama-3.1-8b-instant';
+
+// Reasoning models think before answering, and that thinking happens
+// before the first visible word — so what it costs depends entirely on
+// who is waiting for it. Two budgets, because the two cases are nothing
+// alike:
+//
+//  · SETUP (the interview, the compaction) runs once, in the lobby,
+//    while people are still arriving and nobody is waiting on a turn.
+//    It is also the most reasoning-shaped work here: deciding whether an
+//    answer actually settled anything, and squeezing a paragraph into a
+//    reference card the narrator will obey every turn afterwards. Get it
+//    wrong and every turn of the game inherits it. Think hard.
+//
+//  · PLAY (narration, the epilogue) runs every turn with the whole
+//    table watching an empty bubble. Latency is the tax.
+//
+// Either may be overridden in .env: low | medium | high.
+//
+// One trap worth writing down: reasoning tokens are billed and counted as
+// COMPLETION tokens, so they come out of max_tokens. Every budget below
+// is therefore thinking-plus-answer, not answer — at 220 tokens the
+// interview would have spent its whole allowance thinking and returned an
+// empty string, which this code reads as "no questions" and shrugs at.
+// Raising effort means raising those ceilings, or the feature quietly
+// stops working. Same for the request timeouts on the two setup calls:
+// they do not stream, so the thinking happens inside the deadline.
+const EFFORT_SETUP = process.env.GROQ_REASONING_EFFORT_SETUP || 'high';
+const EFFORT_PLAY = process.env.GROQ_REASONING_EFFORT || 'medium';
+const thinks = (model) => /gpt-oss|deepseek-r1|qwen3/i.test(model);
+
+/** The parameter, but only for models that accept it. */
+const effort = (model, level) => (thinks(model) ? { reasoning_effort: level } : {});
+
+const OFFLINE = !KEY;
+if (OFFLINE) {
+    console.warn('[ai] No GROQ_API_KEY — running with the understudy narrator.');
+}
+
+// How much prose the narrator can see behind it. Sheets carry the
+// facts; this window only carries voice and continuity.
+const WINDOW = 14;
+
+const STATE_OPEN = '<<<STATE';
+const STATE_CLOSE = '>>>';
+
+// A reasoning model's thinking arrives in its own delta field, which we
+// never read — but some of them also wrap it inline in <think> tags, and
+// that must never reach a player's screen.
+const THINK_CLOSE = '</think>';
+
+/**
+ * Where the displayable text starts, or -1 while that is still unknown
+ * (a stream that has only produced "<th" so far could go either way).
+ */
+function visibleFrom(text) {
+    const lead = text.replace(/^\s+/, '');
+    if (!lead) return -1;
+    if (lead[0] !== '<') return 0;
+    const open = '<think';
+    const probe = lead.slice(0, open.length).toLowerCase();
+    if (!open.startsWith(probe)) return 0;      // some other tag; show it
+    if (probe.length < open.length) return -1;  // still could become <think
+    const close = text.toLowerCase().indexOf(THINK_CLOSE);
+    return close < 0 ? -1 : close + THINK_CLOSE.length;
+}
+
+const GM_SYSTEM = `You are the Game Master of a multiplayer elimination role-playing game. Players declare what their characters do; a deck of cards decides whether it works; you narrate the result.
+
+HOW OUTCOMES ARE DECIDED
+You do NOT decide whether an action succeeds. Every turn you are given a verdict — RUIN, FALTER, MIXED, SUCCESS, TRIUMPH or FATE — already worked out from the cards and from each character's condition. Narrate that verdict faithfully. Never soften a failure into a success or inflate a success. If a defender is marked as turning an action aside, it is turned aside for that defender and no other.
+
+WHAT CHARACTERS CARRY
+You are given a CAST block: every character, who they are, lasting injuries, advantages, present condition. These tags shape what happens more than the words a player typed, and the verdict you are handed has already weighed them. Your job is to make the REASON visible — a wounded character's failure should read as caused by the wound, an equipped character's success as done with the gear.
+USE ONLY THE TAGS THAT BEAR ON THIS MOMENT. Usually one, sometimes two. Every other tag is silently ignored: never remark that something did not apply, never explain what a character could not use, never account for a tag merely because it exists. Naming a tag once is naming it enough.
+- An injury that bears on the moment is shown interfering, not just mentioned. A gashed arm fumbles the grip.
+- An advantage that plainly applies is HOW the character acts, and what they meet an attack with. Armour turns blades. A power established three turns ago is still theirs.
+- A character crippled last turn is still crippled.
+
+CONSEQUENCES — EVERY TURN LEAVES A MARK
+Each time you narrate, at least one character's line in the state block changes: a fresh injury, an advantage gained, an advantage lost or broken, a condition that sets in or lifts. Record only what your prose actually described, in the same words where possible.
+The change must FOLLOW from what happened. Never break a tag the passage did not touch, and never invent a loss simply to have something to record — a monkey who steps out into the open has not damaged his climbing. Where a moment leaves nothing lasting behind, a change to "now:" is change enough.
+
+TAGS ARE ALIVE — ADD, CHANGE, REMOVE
+Tags are a running record of one body in one situation, not a list that only grows. Each turn every existing tag is still exactly true, true in some altered way, or no longer true — act on which.
+ADD what has become true. CHANGE a tag in place when the thing it names has altered, never leaving the old wording beside the new. REMOVE a tag the moment it stops being true.
+A character never holds a tag and its opposite: someone with "superb health" who is dosed with venom loses "superb health", rather than keeping it alongside the poisoning. A splinted, rested leg becomes "mending leg", and once properly tended it is gone. A torch dropped in a river, a blade that shatters, an ally killed — each leaves "has:".
+Injuries do not mend on their own, but the moment the story tends to one, lets real time pass over it, or contradicts it, that tag changes or goes.
+"now:" is the shortest-lived: winded, dazed, cornered, enraged all pass. Clear them as soon as the moment closes.
+Never leave standing a tag your own prose has just contradicted.
+
+VOICE
+Write only what happens in the story. Never mention a card, a suit, a value, a number, dice, odds, modifiers, or anything else behind the scene. Never address the players or explain rules.
+BANNED WORDS. You are shown a label for how well the action went. Never repeat it. The words ruin, falter, mixed, success, triumph, fate, verdict and outcome are machine vocabulary and are not available to you, in any form — not "the triumph is complete", not "a mixed result", not "fate intervenes". Write what physically happens instead and let the reader infer how well it went.
+Always third person, present tense, concrete and physical. Never "you" or "your". No preamble like "As the scene unfolds".
+SAY EACH THING ONCE. Do not name a character's ability twice in a passage. Do not restate in one sentence what an earlier sentence already showed. Never end with a sentence that sums up the passage — if a sentence only re-tells what came before it, delete it and stop. After a character's first mention, refer to them as briefly as their "call:" permits.
+Keep a dry sense of humour behind the telling and let it show about one turn in four: an unlucky detail, a small indignity, a plan that works in the least dignified way available. Underplay it — a straight face is what makes it land. Never at a grave moment, never wink at the reader, never take the weight out of what just happened.
+
+HOW TO NAME EACH CHARACTER
+The CAST block ends every line with "call:". Obey it exactly.
+- "call: by name only" means that character has never stated how they wish to be referred to. Write their exact name every single time, even where it reads repetitively. Use NO pronoun for them — not he, not she, not they. Recast the sentence if you must.
+- Anything else, for example "call: she/her", means use those pronouns for that character normally.
+Never guess a gender for a character. A player who wants pronouns will have said so in their own description.
+
+CONTENT
+Combat can be tense and violent in outcome, but keep it clean: no gore, no dwelling on injury detail, no sexual content.
+
+LENGTH
+Two to four sentences, and prefer two. Stop the instant the moment lands. A short passage that says one thing well beats a long one that says it three times.
+
+AFTER THE PROSE
+Append a state block, exactly this shape, and nothing after it:
+
+${STATE_OPEN}
+Name | is: short description | at: where they are standing | hurt: injury; injury | has: advantage; advantage | now: temporary condition | call: pronouns or -
+WORLD: any place this turn established that was not already listed
+DEAD: Name, Name
+${STATE_CLOSE}
+
+Rules for the block: one line per living character, using their exact name. Keep every field under twelve words.
+Each line REPLACES that character's tags completely. Carry forward everything still true, alter what has altered, add what is new — and simply do not write anything that has stopped being true. Write a field as "-" to empty it entirely. Always write every field, even when unchanged: a field you leave off is not cleared, it is silently kept, which is how a stale tag survives.
+
+A worked example. Suppose Kira's line stood at:
+Kira | is: a sky-pirate | hurt: shattered left leg | has: rope-gun; superb health | now: winded | call: -
+and this turn Kira splints the leg, is bitten by something venomous, and loses the rope-gun over the side. The new line reads:
+Kira | is: a sky-pirate | hurt: mending left leg; venom in the blood | has: - | now: - | call: -
+The leg tag CHANGED rather than gaining a second entry beside it. "venom in the blood" was ADDED. "rope-gun" was REMOVED because it is gone, and "superb health" was REMOVED because it is no longer true — a poisoned character does not keep it. "winded" was cleared because that moment has passed.
+"at:" is where that character is standing right now, named as one of the world's places — it changes when they move and only when they move. "hurt:" is lasting damage — a shattered knee, a burnt hand. "has:" is anything that makes this character more capable — gear, powers, allies, high ground. "now:" is a temporary state of the body or mind — winded, blinded, bleeding, cornered, enraged — never a location and never a place name; that is what "at:" is for. For "call:", copy forward whatever the CAST block already says, and set it only when a player's own words established how they wish to be referred to.
+Include the WORLD line only when this turn put a place on the map that was not there before, and the DEAD line only when someone died this turn. Write no text after ${STATE_CLOSE}.`;
+
+// ── Transport ──────────────────────────────────────────
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Once response headers arrive the request timeout is cleared, and from
+// that moment a streaming body has no deadline of its own: if the stream
+// simply stops mid-sentence, reader.read() waits forever. Upstream never
+// closes it, no error is thrown, and the table freezes with the Game
+// Master's name on screen and nothing under it. Every read gets its own
+// deadline instead.
+const STREAM_IDLE_MS = Number(process.env.GROQ_STREAM_IDLE_MS || 30000);
+
+async function readOrGiveUp(reader, ms = STREAM_IDLE_MS) {
+    let timer;
+    const gaveUp = new Promise((_, reject) => {
+        timer = setTimeout(
+            () => reject(new Error('The Game Master went quiet mid-sentence.')), ms);
+    });
+    try {
+        return await Promise.race([reader.read(), gaveUp]);
+    } catch (err) {
+        reader.cancel().catch(() => {});
+        throw err;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/** Groq will occasionally rate-limit or wobble; ride it out. */
+async function call(body, { tries = 3, timeout = 45000 } = {}) {
+    let lastErr;
+    for (let attempt = 0; attempt < tries; attempt++) {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), timeout);
+        try {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body),
+                signal: ac.signal,
+            });
+            clearTimeout(timer);
+
+            if (res.ok) return res;
+
+            const retryable = res.status === 429 || res.status >= 500;
+            const detail = await res.text().catch(() => '');
+            lastErr = new Error(`Groq ${res.status}: ${detail.slice(0, 300)}`);
+            if (!retryable || attempt === tries - 1) throw lastErr;
+
+            const hinted = Number(res.headers.get('retry-after')) * 1000;
+            const backoff = hinted > 0 ? hinted : (600 * Math.pow(2, attempt));
+            await sleep(backoff + Math.random() * 250);
+        } catch (err) {
+            clearTimeout(timer);
+            lastErr = err;
+            if (err.name === 'AbortError') lastErr = new Error('The Game Master took too long to answer.');
+            if (attempt === tries - 1) throw lastErr;
+            await sleep(500 * Math.pow(2, attempt));
+        }
+    }
+    throw lastErr;
+}
+
+// ── Character sheets ───────────────────────────────────
+
+const clip = (s, n) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, n);
+
+/**
+ * A tag has to fit, but it is also read aloud by the narrator every turn
+ * and shown to the players on their sheet, so it cannot be cut mid-word:
+ * "bandaged puncture wound to side" came back as "…to sid" and then went
+ * on being handed to the model like that, turn after turn. Trim at the
+ * last word that fits instead, and only chop a word if the very first
+ * one is longer than the whole allowance.
+ */
+function trimWords(s, n) {
+    const t = clip(s, 4 * n);
+    if (t.length <= n) return t;
+    const cut = t.lastIndexOf(' ', n);
+    return cut > 0 ? t.slice(0, cut) : t.slice(0, n);
+}
+
+function cleanList(raw, maxItems = 3, maxLen = 38) {
+    if (!raw) return [];
+    const t = String(raw).trim();
+    if (!t || t === '-' || /^(none|nothing|n\/a)$/i.test(t)) return [];
+    return t.split(/[;,]/)
+        .map(s => trimWords(s, maxLen))
+        .filter(s => s && !/^(none|-|nothing)$/i.test(s))
+        .slice(0, maxItems);
+}
+
+/** Pull the machine-readable tail out of a narration. */
+function parseState(text, names) {
+    const start = text.indexOf(STATE_OPEN);
+    if (start < 0) return { prose: text.trim(), sheets: null, dead: [], places: [] };
+
+    const prose = text.slice(0, start).trim();
+    let block = text.slice(start + STATE_OPEN.length);
+    const end = block.indexOf(STATE_CLOSE);
+    if (end >= 0) block = block.slice(0, end);
+
+    const sheets = {};
+    const dead = [];
+    const places = [];
+    const known = new Map(names.map(n => [n.toLowerCase(), n]));
+
+    for (const line of block.split('\n')) {
+        const row = line.trim();
+        if (!row) continue;
+
+        const worldMatch = /^WORLD\s*:\s*(.+)$/i.exec(row);
+        if (worldMatch) {
+            for (const raw of worldMatch[1].split(/[;,]/)) {
+                const p = trimWords(raw, 44);
+                if (p && !/^(none|-|nothing)$/i.test(p)) places.push(p);
+            }
+            continue;
+        }
+
+        const deadMatch = /^DEAD\s*:\s*(.+)$/i.exec(row);
+        if (deadMatch) {
+            for (const raw of deadMatch[1].split(/[,;]/)) {
+                const hit = known.get(clip(raw, 40).toLowerCase());
+                if (hit && !dead.includes(hit)) dead.push(hit);
+            }
+            continue;
+        }
+
+        const parts = row.split('|');
+        const name = known.get(clip(parts[0], 40).toLowerCase());
+        if (!name) continue;
+
+        const sheet = {};
+        for (const seg of parts.slice(1)) {
+            const m = /^\s*([a-z]+)\s*:\s*(.*)$/i.exec(seg);
+            if (!m) continue;
+            const key = m[1].toLowerCase();
+            // A player who has not declared yet is echoed back as "is: -",
+            // and a literal dash is truthy: it was landing on the sheet and
+            // showing up as the character's name.
+            if (key === 'is') {
+                const v = clip(m[2], 110);
+                sheet.character = /^-?$|^(none|unknown|not yet declared)$/i.test(v) ? '' : v;
+            }
+            else if (key === 'at') sheet.where = /^-?$|^(none|nowhere|unknown)$/i.test(clip(m[2], 44))
+                ? '' : trimWords(m[2], 44);
+            else if (key === 'hurt') sheet.wounds = cleanList(m[2]);
+            else if (key === 'has') sheet.boons = cleanList(m[2]);
+            else if (key === 'now') sheet.status = cleanList(m[2], 2);
+            else if (key === 'call') {
+                const v = clip(m[2], 24);
+                // Only ever a pronoun set — never a name or a sentence.
+                sheet.calls = /^[a-z]+(\s*\/\s*[a-z]+){1,2}$/i.test(v) ? v.toLowerCase() : '';
+            }
+        }
+        if (Object.keys(sheet).length) sheets[name] = sheet;
+    }
+
+    return { prose, sheets, dead, places };
+}
+
+/** The compact CAST block that replaces an ever-growing transcript. */
+function castBlock(players) {
+    const lines = players.map(p => {
+        const s = p.sheet || {};
+        const bits = [`${p.name} | is: ${s.character || 'not yet declared'}`];
+        if (s.where) bits.push(`at: ${s.where}`);
+        if (s.wounds?.length) bits.push(`hurt: ${s.wounds.join('; ')}`);
+        if (s.boons?.length) bits.push(`has: ${s.boons.join('; ')}`);
+        if (s.status?.length) bits.push(`now: ${s.status.join('; ')}`);
+        if (p.eliminated) bits.push('OUT OF THE GAME');
+        bits.push(`call: ${s.calls || 'by name only'}`);
+        return bits.join(' | ');
+    });
+    return 'CAST — every character in play, and what is true of each:\n'
+        + lines.join('\n')
+        + '\nUse only the tags that bear on what is happening now, and name those once where they '
+        + 'shape it. Pass over the rest without comment. Before the state block, check each tag '
+        + 'against what you wrote and rewrite or delete any this turn made untrue.\n'
+        + 'Refer to each character exactly as their "call:" directs — where it says "by name only", '
+        + 'write that name every time and never he, she or they.';
+}
+
+// ── Local screening (no API call needed) ───────────────
+
+const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** Only the blatant cases: "a;owkjb;lasdjfi" and friends. */
+function looksLikeNoise(text) {
+    const t = text.trim();
+    if (t.length < 3) return true;
+
+    const letters = t.replace(/[^a-zA-Z]/g, '');
+    if (!letters.length) return true;
+    if (letters.length / t.length < 0.45) return true;
+
+    const vowels = (letters.match(/[aeiouy]/gi) || []).length;
+    if (letters.length > 5 && vowels / letters.length < 0.12) return true;
+
+    // A single long unbroken run of consonants reads as a cat on a keyboard.
+    if (/[bcdfghjklmnpqrstvwxz]{7,}/i.test(t)) return true;
+
+    return false;
+}
+
+function trigrams(s) {
+    const t = ` ${norm(s)} `;
+    const out = new Set();
+    for (let i = 0; i < t.length - 2; i++) out.add(t.slice(i, i + 3));
+    return out;
+}
+
+/** Instructions.md: the same prompt twice is out; a new angle is fine. */
+function isRehash(text, previous) {
+    const n = norm(text);
+    if (!n) return false;
+    for (const old of previous) {
+        if (norm(old) === n) return true;
+        const a = trigrams(text), b = trigrams(old);
+        if (!a.size || !b.size) continue;
+        let shared = 0;
+        for (const g of a) if (b.has(g)) shared++;
+        if (shared / (a.size + b.size - shared) > 0.82) return true;
+    }
+    return false;
+}
+
+/** Names mentioned outright — the offline fallback for targeting. */
+function namesIn(text, candidates) {
+    const t = ` ${norm(text)} `;
+    return candidates.filter(n => t.includes(` ${norm(n)} `));
+}
+
+// ── Triage ─────────────────────────────────────────────
+
+// Naming a target opens the counter phase, and the counter phase can
+// only ask one question: how do you DEFEND against this. So a character
+// named here is committed to defending, whatever they actually wanted to
+// do. Over-including is not the safe direction it looks like.
+const TRIAGE_ACTION_SYSTEM =
+`You screen actions for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"kind":string,"targets":string[],"everyone":boolean}.
+
+Your one important job is deciding who must DEFEND THEMSELVES this instant.
+
+targets — every OTHER character this action is done TO, against their will: struck, grabbed, blocked, restrained, chased, stolen from, tricked, endangered. Chosen only from the OTHERS list.
+The test is whether they must defend, NOT whether they would want to answer. Those are different, and confusing them breaks the game.
+An action the actor performs on their own body, position, belongings or visibility is NEVER a target, even when another character is named in it, and even when it obviously invites a response. Showing yourself to someone, hiding from them, calling out, taunting, daring, offering, baiting, deliberately dropping your guard — none of these are done TO anyone. Whoever wants to act on that gets their own turn to do it, and gets to act rather than being forced to defend.
+When a genuine attack is a close call, include them: a missed target is struck with no chance to answer.
+everyone — true when the action strikes at other characters WITHOUT naming them: an area effect, a blast, a collapse, a spell over the whole room, or "whoever is nearest". Leave targets empty in that case.
+Neither — an action on the actor alone, on the surroundings, or a friendly or conversational exchange that nobody would need to defend against.
+ok — false for keyboard mashing, for text that is not intelligible English, and for anything that is NOT THE CHARACTER DOING SOMETHING.
+That last one matters. A turn is a thing the character does or says inside the story. It is not a question put to you, an argument about the rules, a complaint about what just happened, a comment on their own situation, or thinking out loud. "really?", "why am i not dead", "that shouldn't have worked", "wait what", "how much health do I have" — none of these are actions, and none of them may be turned into one. Never guess at what the player probably meant and never resolve the thing they were complaining about; refuse, and ask them to say what their character does.
+Anything the character actually does is valid, however fantastical, however badly spelled, and whether or not it is likely to work.
+kind — when ok=false, say which: "noise" for mashing or nonsense, "meta" for anything that is not the character acting, "impossible" for an action this world cannot contain. Empty string when ok=true.
+reason — one short sentence, only when ok=false.
+cite — only for kind "impossible": copy the words from the setting that rule this action out. Empty otherwise.`;
+
+// Worked examples beat prose rules on a small model, and getting
+// targeting wrong is the worst failure this game has: a missed target
+// means somebody is struck without ever being allowed to answer.
+const TARGET_EXAMPLES = [
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I shove Bram off the ledge"',
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I climb the mast and look out to sea"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I bring the whole ceiling down on top of everyone"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":true}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I snatch the key out of Vex\'s hand and run"',
+     '{"ok":true,"reason":"","kind":"","targets":["Vex"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I ask Bram what he saw in the hold"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Bram has Kira pinned against the rail with one stone hand.\nKira writes: "I twist free and drive my knee up"',
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I swing at whoever is closest to me"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":true}'],
+
+    // Done to their own person, however much it invites an answer. The
+    // one that broke the game: this was read as an attack on Vex, so Vex
+    // was asked to DEFEND, answered by attacking, won the exchange — and
+    // the engine turned that win into "Vex was not possessed".
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I show myself to Vex, leaving myself open to whatever Vex tries"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I taunt Bram, daring Bram to come at me"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I hide from Vex behind the crates"',
+     '{"ok":true,"reason":"","kind":"","targets":[],"everyone":false}'],
+
+    // The near miss: same character named, same room, but this one is
+    // done TO Vex and Vex must be allowed to answer it.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "I grab Vex by the arm and haul Vex into the light"',
+     '{"ok":true,"reason":"","kind":"","targets":["Vex"],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "asdkjh a;lskdjf"',
+     '{"ok":false,"reason":"That came through as noise.","kind":"noise","targets":[],"everyone":false}'],
+
+    // Not actions. The game that produced these: an attack was refused,
+    // the player typed "really?", and it came back as a valid SUCCESS —
+    // so the narrator performed the very attack that had just been
+    // refused. The next player typed "why am i not dead" and was healed
+    // for it. Neither is a thing a character does.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Bram drives the blade home and Kira folds over it.\nKira writes: "really?"',
+     '{"ok":false,"reason":"Say what you do about it.","kind":"meta","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: Kira lies bleeding on the stones.\nKira writes: "why am i not dead"',
+     '{"ok":false,"reason":"Still breathing. Say what you do with the breath.","kind":"meta","targets":[],"everyone":false}'],
+
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "that shouldn\'t have worked"',
+     '{"ok":false,"reason":"Argue with it in the fiction — what does Kira do?","kind":"meta","targets":[],"everyone":false}'],
+
+    // Badly written but unmistakably an action: this must NOT be refused.
+    ['OTHERS: Bram, Vex\nJUST HAPPENED: -\nKira writes: "i wanna stab bram wit the knife"',
+     '{"ok":true,"reason":"","kind":"","targets":["Bram"],"everyone":false}'],
+];
+
+const bare = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\b(no|not|none|nothing|any|the|a|an)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Does a refusal on world grounds actually rest on the world?
+ *
+ * The model is made to CITE what rules the action out — an entry from the
+ * setting's absent list, or the words of its ceiling on the possible.
+ * This checks the citation is really there. Asking for one does most of
+ * the work on its own: a model that has to name the rule it is applying
+ * is much less willing to invent the rule.
+ *
+ * Leniency is deliberate. Narrating an action the world should not allow
+ * is a bad passage; refusing an action the world does allow is a player
+ * told no by a machine that is simply wrong, which is worse.
+ */
+function citationHolds(cite, setting) {
+    if (!world.isReady(setting)) return false;      // no world, no world refusals
+    const claim = bare(cite);
+    if (claim.length < 3) return false;            // cited nothing at all
+    const grounds = [...(setting.absent || []), setting.power || ''].map(bare).filter(Boolean);
+    return grounds.some(g => g.includes(claim) || claim.includes(g)
+        // Or any single word of the citation is one the world itself used.
+        || claim.split(' ').some(w => w.length > 3 && g.split(' ').includes(w)));
+}
+
+/** What triage is told about the world it screens actions against. */
+function boundsMessage(setting) {
+    const bounds = world.worldConstraint(setting);
+    if (!bounds) return '';
+    return `${bounds}\n\nSet ok=false with kind "impossible" ONLY when the action needs `
+        + `something named above as absent — a car where there are no engines, a phone call `
+        + `where there is no electricity — or a power beyond what this world plainly bends to, `
+        + `like flying or crossing a continent in a breath where people simply cannot. Give `
+        + `reason as one line of plain fiction naming what is not there, never a rule ("There `
+        + `is no telephone in this century.").\n`
+        // The refusal that made this necessary: a sword, in 12th-century
+        // Europe, in a world whose absent list read firearms / gunpowder /
+        // electricity / modern medicine / magic / telecommunication.
+        // Nothing about swords. The player was told "No swords in this
+        // world", argued with it, and the argument got resolved as an
+        // attack — the very attack that had just been refused.
+        + `THE LISTS ABOVE ARE NOT AN INVENTORY. They are the few things worth writing down; `
+        + `everything ordinary for a world like this is present whether it is listed or not. A `
+        + `sword in a medieval city, a rope on a ship, a knife in a kitchen, a horse on a road `
+        + `— all there, none of them your business. If what the action needs is not named as `
+        + `absent and is not a power the world rules out, it is available: say ok=true. `
+        + `Unusual, difficult, reckless, far-fetched and rude all pass, and going somewhere `
+        + `unlisted is fine — the story can grow a new room. When you are unsure, allow it.\n`
+        + `To refuse on these grounds you must fill "cite" with the words above that rule the `
+        + `action out, copied as they are written — an entry from DOES NOT EXIST HERE, or the `
+        + `part of HOW FAR IT BENDS that forbids it. If you cannot point at anything above, `
+        + `there is nothing stopping the action: set ok=true.`;
+}
+
+/**
+ * Decides three things before any expensive call: is the message
+ * intelligible, who does it strike, and has it been tried already.
+ * Runs on the small model; obvious answers never leave the process.
+ */
+async function triage({ text, actor, others, previous, setup, existingCharacters, recent, setting }) {
+    if (looksLikeNoise(text)) {
+        return { ok: false, reason: 'That came through as noise. Say it again in plain words.' };
+    }
+    if (!setup && isRehash(text, previous)) {
+        return { ok: false, repeat: true, reason: 'That has already been tried. Come at it from another angle.' };
+    }
+
+    if (OFFLINE) {
+        return { ok: true, targets: setup ? [] : namesIn(text, others) };
+    }
+
+    const bounds = world.worldConstraint(setting);
+
+    // With no world set, anything goes — that was the whole rule before
+    // there were worlds, and a table that skipped the setting still
+    // wants it. With a world, the KIND of being is the thing to screen:
+    // a host who says "no fantasy creatures" has already ruled on the
+    // dragon, and letting it in makes a liar of every later refusal.
+    const system = setup
+        ? `You screen inputs for a role-playing game. Reply with JSON only, matching {"ok":boolean,"reason":string,"duplicate":boolean}.
+The player is describing WHO THEY ARE. Set ok=false if the text is keyboard mashing or is not intelligible English${bounds ? '' : ' — any character, however strange, is fine'}. Set duplicate=true only if this character is essentially the same being as one already taken: ${existingCharacters?.length ? existingCharacters.join(' / ') : '(none yet)'}. reason: one short sentence, only when ok=false or duplicate=true.`
+
+        : TRIAGE_ACTION_SYSTEM;
+
+    const messages = [{ role: 'system', content: system }];
+
+    if (setup && bounds) {
+        messages.push({ role: 'system', content:
+            `${bounds}\n\nThis character has to be someone who could exist HERE. Set ok=false when `
+            + `what they say they are is a KIND OF BEING this world does not contain — a dragon or a `
+            + `sorcerer where there is no magic and no fantasy creatures, a machine where the `
+            + `technology does not reach that far, a ghost where the dead stay dead. Judge nothing `
+            + `else: any person of any trade, temper, history or strangeness passes, and so does `
+            + `anything this world's own powers plainly allow. reason is one plain line of fiction `
+            + `naming what this world has no room for and inviting something else ("Nothing in this `
+            + `city has scales — be someone who could walk its streets."), never a rule.` });
+    }
+
+    if (!setup) {
+        for (const [q, a] of TARGET_EXAMPLES) {
+            messages.push({ role: 'user', content: q });
+            messages.push({ role: 'assistant', content: a });
+        }
+        // The world goes in AFTER the examples: the examples teach the
+        // targeting call, this decides whether the action can happen at
+        // all. Last read, most closely followed.
+        const bm = boundsMessage(setting);
+        if (bm) messages.push({ role: 'system', content: bm });
+    }
+
+    // What just happened matters: "I twist free" only has a target if
+    // somebody has hold of the actor.
+    messages.push({
+        role: 'user',
+        content: setup
+            ? `${actor} writes: "${text}"`
+            : `OTHERS: ${others.join(', ') || '(nobody)'}\nJUST HAPPENED: ${clip(recent, 400) || '-'}\n${actor} writes: "${text}"`,
+    });
+
+    try {
+        const res = await call({
+            model: MODEL_TRIAGE,
+            messages,
+            temperature: 0,
+            max_tokens: 150,
+            response_format: { type: 'json_object' },
+        }, { tries: 2, timeout: 12000 });
+
+        const data = await res.json();
+        const parsed = JSON.parse(data.choices[0].message.content);
+
+        let targets = Array.isArray(parsed.targets)
+            ? [...new Set(parsed.targets
+                .map(n => others.find(o => o.toLowerCase() === String(n).toLowerCase()))
+                .filter(Boolean))]
+            : [];
+
+        if (parsed.everyone === true) targets = others.slice();
+
+        let ok = parsed.ok !== false;
+        let reason = clip(parsed.reason, 160);
+        const kind = clip(parsed.kind, 20).toLowerCase();
+
+        // An 8B model told a player there were no swords in 12th-century
+        // Europe. The prompt says the lists are not an inventory, but a
+        // hallucinated limit is worse than a permitted long shot, so the
+        // refusal has to point at something the world actually lacks —
+        // and this checks that rather than trusting it.
+        if (!ok && kind === 'impossible' && !citationHolds(parsed.cite, setting)) {
+            console.warn(`[ai] overruling an invented limit: "${reason}"`
+                + ` (cited "${clip(parsed.cite, 60) || 'nothing'}")`);
+            ok = true;
+            reason = '';
+        }
+
+        return {
+            ok,
+            duplicate: !!parsed.duplicate,
+            reason,
+            kind,
+            everyone: parsed.everyone === true,
+            targets,
+        };
+    } catch (err) {
+        // Screening must never block play. Fall back to letting it through.
+        console.warn('[ai] triage failed, waving it through:', err.message);
+        return { ok: true, targets: namesIn(text, others) };
+    }
+}
+
+// ── The world ──────────────────────────────────────────
+
+const asked = (qa) => (qa || []).map(({ q, a }) => `Q: ${q}\nA: ${a}`).join('\n');
+
+/**
+ * What the Game Master still needs to know about the host's setting.
+ * Returns [] freely — an interview nobody wanted is worse than none.
+ *
+ * Round 2 exists because one pass sometimes answers nothing: a host can
+ * reply to "how far does this world bend" with three words that settle
+ * none of it. Whether it happens at all is the model's call, under a
+ * prompt written to make silence the easy answer — and it is capped at
+ * two rounds, because a third would be an interrogation.
+ */
+async function interviewWorld({ raw, qa, round = 1 }) {
+    if (OFFLINE) return [];
+    const again = round >= 2;
+    try {
+        const res = await call({
+            model: MODEL_NARRATE,
+            messages: [
+                { role: 'system', content: again ? world.FOLLOWUP_SYSTEM : world.INTERVIEW_SYSTEM },
+                { role: 'user', content: `THE HOST WROTE:\n${clip(raw, 2000)}`
+                    + (qa?.length
+                        ? `\n\n${again ? 'YOU ASKED, AND THEY ANSWERED' : 'ALREADY ANSWERED'}:\n${asked(qa)}`
+                        : '') },
+            ],
+            temperature: 0.4,
+            max_tokens: 2000,
+            response_format: { type: 'json_object' },
+            ...effort(MODEL_NARRATE, EFFORT_SETUP),
+        }, { tries: 2, timeout: 45000 });
+
+        const data = await res.json();
+        const parsed = JSON.parse(data.choices[0].message.content);
+        return (Array.isArray(parsed.questions) ? parsed.questions : [])
+            .map(q => clip(q, 160)).filter(Boolean).slice(0, again ? 2 : 3);
+    } catch (err) {
+        // A failed interview must never block a game from starting.
+        console.warn('[ai] world interview failed, skipping it:', err.message);
+        return [];
+    }
+}
+
+/** Squeeze the setting into the reference card the narrator reads each turn. */
+async function compactWorld({ raw, qa }) {
+    const fallback = () => {
+        const w = world.blankWorld();
+        w.where = clip(raw, 220);
+        return w;
+    };
+    if (OFFLINE) return fallback();
+    try {
+        const res = await call({
+            model: MODEL_NARRATE,
+            messages: [
+                { role: 'system', content: world.COMPACT_SYSTEM },
+                { role: 'user', content: `THE HOST WROTE:\n${clip(raw, 2000)}`
+                    + (qa?.length ? `\n\nTHEY ALSO ANSWERED:\n${asked(qa)}` : '') },
+            ],
+            temperature: 0.5,
+            max_tokens: 2500,
+            ...effort(MODEL_NARRATE, EFFORT_SETUP),
+        }, { tries: 2, timeout: 50000 });
+
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        const parsed = world.parseWorld(text);
+        // Whatever else it got wrong, the setting must survive.
+        if (!world.isReady(parsed)) return fallback();
+        return parsed;
+    } catch (err) {
+        console.warn('[ai] world compaction failed, keeping the raw setting:', err.message);
+        return fallback();
+    }
+}
+
+// ── Narration ──────────────────────────────────────────
+
+/**
+ * Streams a passage. `onChunk` receives display-safe text only —
+ * the state block is held back and never reaches a player's screen.
+ */
+async function narrate({ players, history, directive, onChunk, setting }) {
+    const names = players.map(p => p.name);
+
+    if (OFFLINE) {
+        const prose = understudy(directive, players);
+        for (const piece of prose.match(/.{1,24}(\s|$)/g) || [prose]) {
+            onChunk?.(piece);
+            await sleep(18);
+        }
+        return { prose, sheets: null, dead: understudyDead(directive, names) };
+    }
+
+    // The world before the cast: where they are shapes what they can do.
+    const stage = world.worldBlock(setting);
+    const messages = [
+        { role: 'system', content: GM_SYSTEM },
+        ...(stage ? [{ role: 'system', content: stage }] : []),
+        { role: 'system', content: castBlock(players) },
+        ...history.slice(-WINDOW),
+        { role: 'user', content: directive },
+    ];
+
+    // Attempt once as configured. If nothing visible came back, attempt
+    // again with the thinking turned down — see stream() for why.
+    let r = await stream(messages, { effort: EFFORT_PLAY, maxTokens: 1500, onChunk });
+    let retried = '';
+    if (!r.full.trim()) {
+        retried = `stopped on "${r.finishReason}" after thinking ${r.reasonChars} characters`
+            + ' and writing nothing; asked again with less thinking';
+        console.warn(`[ai] ${retried}`);
+        r = await stream(messages, { effort: 'low', maxTokens: 2000, onChunk });
+        if (!r.full.trim()) {
+            // Better a visible failure the table can retry than a bubble
+            // with nothing in it and a turn that quietly moves on.
+            throw new Error('The Game Master thought about it and said nothing'
+                + ` (finish: ${r.finishReason}).`);
+        }
+    }
+    // `places` has to come back out too: the WORLD line was parsed all
+    // along and then dropped here, so a room the story put on the map
+    // never reached the world's own list of places.
+    const { prose, sheets, dead, places } = parseState(r.full.slice(r.visible), names);
+    return { prose: prose || r.full.trim(), sheets, dead, places, retried };
+}
+
+/**
+ * One streamed attempt. Returns the raw text plus the two things that
+ * explain an empty answer, neither of which was being recorded when a
+ * turn came back blank: why the model stopped, and how much of its
+ * budget went on thinking.
+ *
+ * The blank turn: reasoning tokens are drawn from max_tokens, and only
+ * `delta.content` is prose — so a model that thinks right up to the
+ * ceiling finishes with `length` and never writes a word. Nothing here
+ * noticed. The table saw the Game Master's name over an empty bubble and
+ * play moved on, which is exactly what a dead narrator looks like.
+ */
+async function stream(messages, { effort: level, maxTokens, onChunk }) {
+    const res = await call({
+        model: MODEL_NARRATE,
+        messages,
+        temperature: 0.85,
+        max_tokens: maxTokens,
+        stream: true,
+        ...effort(MODEL_NARRATE, level),
+    });
+
+    let finishReason = '';
+    let reasonChars = 0;
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let full = '';
+    let emitted = 0;
+    let cut = -1;
+    let start = -1;
+
+    const flush = () => {
+        // Nothing at all is shown until we know the prose has begun.
+        if (start < 0) {
+            start = visibleFrom(full);
+            if (start < 0) return;
+            emitted = start;
+        }
+        if (cut < 0) {
+            const idx = full.indexOf(STATE_OPEN[0] + STATE_OPEN[1] + STATE_OPEN[2], start);
+            if (idx >= 0) cut = idx;
+        }
+        // Hold back the last couple of characters so a partial "<<"
+        // is never shown and then retracted.
+        const safe = cut >= 0 ? cut : Math.max(start, full.length - 3);
+        if (safe > emitted) {
+            onChunk?.(full.slice(emitted, safe));
+            emitted = safe;
+        }
+    };
+
+    while (true) {
+        const { done, value } = await readOrGiveUp(reader);
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+            const t = line.trim();
+            if (!t.startsWith('data:')) continue;
+            const payload = t.slice(5).trim();
+            if (payload === '[DONE]') continue;
+            try {
+                const choice = JSON.parse(payload).choices?.[0];
+                const piece = choice?.delta?.content;
+                if (piece) full += piece;
+                // Never shown — counted, so an empty answer can be told
+                // apart from a model that never thought at all.
+                const thought = choice?.delta?.reasoning;
+                if (thought) reasonChars += String(thought).length;
+                if (choice?.finish_reason) finishReason = choice.finish_reason;
+            } catch { /* keep-alive or partial frame */ }
+        }
+        flush();
+    }
+
+    // Anything left that wasn't part of the state block.
+    if (start < 0) start = Math.max(0, visibleFrom(full));
+    if (cut < 0 && full.length > emitted) {
+        onChunk?.(full.slice(Math.max(emitted, start)));
+        emitted = full.length;
+    }
+    return { full, visible: start, finishReason, reasonChars };
+}
+
+/** A short legend for whoever is left standing. */
+async function epilogue({ players, winner, history, onChunk }) {
+    if (OFFLINE) {
+        const line = `And so ${winner} is the last one standing, and the tale closes on ${winner} alone.`;
+        onChunk?.(line);
+        return line;
+    }
+    try {
+        const res = await call({
+            model: MODEL_NARRATE,
+            messages: [
+                { role: 'system', content: GM_SYSTEM },
+                { role: 'system', content: castBlock(players) },
+                ...history.slice(-8),
+                { role: 'user', content:
+                    `The game is over. ${winner} is the only one left standing.\n\n` +
+                    `Write the closing of this tale in exactly two sentences: what ${winner} did to survive, ` +
+                    `and what ${winner} is left with now. Name ${winner}. Do not append a state block.` },
+            ],
+            temperature: 0.9,
+            max_tokens: 900,
+            stream: true,
+            ...effort(MODEL_NARRATE, EFFORT_PLAY),
+        }, { tries: 2, timeout: 25000 });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '', full = '', emitted = 0, start = -1;
+        while (true) {
+            const { done, value } = await readOrGiveUp(reader);
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                const t = line.trim();
+                if (!t.startsWith('data:')) continue;
+                const payload = t.slice(5).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    const piece = JSON.parse(payload).choices?.[0]?.delta?.content;
+                    if (piece) full += piece;
+                } catch {}
+            }
+            // Hold everything back until the thinking, if any, has closed.
+            if (start < 0) { start = visibleFrom(full); if (start >= 0) emitted = start; }
+            if (start >= 0 && full.length > emitted) {
+                onChunk?.(full.slice(emitted));
+                emitted = full.length;
+            }
+        }
+        if (start < 0) start = Math.max(0, visibleFrom(full));
+        if (full.length > emitted) onChunk?.(full.slice(Math.max(emitted, start)));
+        const text = full.slice(start).trim();
+        // An ending that came back blank — all budget spent thinking —
+        // must still close the tale, not leave the winner staring at a
+        // gap where the epilogue was.
+        if (!text) throw new Error('no closing came back');
+        return text;
+    } catch {
+        const line = `${winner} is the last one standing.`;
+        onChunk?.(line);
+        return line;
+    }
+}
+
+// ── Understudy ─────────────────────────────────────────
+// Used when no API key is configured, and by the test harness. Not
+// clever, but it keeps the game playable and the rules visible.
+
+function understudy(directive, players) {
+    const actor = /ACTOR:\s*(.+)/.exec(directive)?.[1]?.trim();
+    const declares = /DECLARES:\s*"([^"]*)"/.exec(directive)?.[1] || 'something';
+    const band = /OUTCOME:\s*([A-Z]+)/.exec(directive)?.[1];
+
+    if (/^SETUP/.test(directive)) {
+        const who = /BECOMES:\s*"([^"]*)"/.exec(directive)?.[1] || 'a stranger';
+        const arrival = /^ARRIVAL:\s*([A-Z]+)/m.exec(directive)?.[1] || 'MIXED';
+        const how = {
+            RUIN: `and arrives badly diminished, less than the words promised`,
+            FALTER: `and arrives shakily, not quite what was described`,
+            MIXED: `and arrives close to the description, with something missing`,
+            SUCCESS: `and arrives exactly as described`,
+            TRIUMPH: `and arrives at full height, better than the words promised`,
+            FATE: `and arrives as something stranger than what was asked for`,
+        }[arrival];
+        return `${actor} steps into the light: ${who} — ${how}. The table takes ${actor}'s measure.`;
+    }
+
+    // A counter exchange: report each answer as the cards ruled it.
+    if (/^THE ANSWERS:/m.test(directive)) {
+        const mover = /^(\w[\w '-]*) moves against/m.exec(directive)?.[1] || 'Someone';
+        const force = /^FORCE:\s*([A-Z]+)/m.exec(directive)?.[1] || 'MIXED';
+        const held = [], struck = [];
+        const re = /- ([^\n]+?) answers: "([^"]*)"\n\s*card:[^\n]*→ (TURNS IT ASIDE|FAILS)/g;
+        let m;
+        while ((m = re.exec(directive))) {
+            (m[3] === 'TURNS IT ASIDE' ? held : struck).push({ name: m[1], said: m[2] });
+        }
+        const out = [];
+        if (struck.length) {
+            const heavy = force === 'TRIUMPH' || force === 'FATE';
+            out.push(`${mover} comes at ${struck.map(s => s.name).join(' and ')}, and it lands${heavy ? ' with everything behind it' : ''}.`);
+        }
+        for (const h of held) {
+            out.push(`${h.name} meets it — ${h.said} — and ${mover}'s move comes to nothing against ${h.name}.`);
+        }
+        if (!out.length) out.push(`${mover} moves, and the moment closes over it.`);
+        return out.join(' ');
+    }
+
+    if (!actor) {
+        const first = players[0]?.name || 'Someone';
+        return `The moment turns, and ${first} is left to make sense of it.`;
+    }
+
+    const lines = {
+        RUIN: `${actor} tries to ${declares.toLowerCase()}, and it goes wrong at once. ${actor} is left worse off than before.`,
+        FALTER: `${actor} tries to ${declares.toLowerCase()}. Almost none of it lands, though ${actor} salvages a scrap of the intent.`,
+        MIXED: `${actor} manages part of it. ${actor} gets what was wanted and pays for it in the same breath.`,
+        SUCCESS: `${actor} does exactly what ${actor} set out to do, cleanly.`,
+        TRIUMPH: `It works better than ${actor} could have hoped, and everyone at the table sees it.`,
+        FATE: `Something turns over. What ${actor} intended happens, but not in any shape ${actor} would have chosen.`,
+    };
+    return lines[band] || lines.MIXED;
+}
+
+/**
+ * The understudy needs SOME way for a game to end. A move that lands
+ * with overwhelming force kills whoever failed to turn it aside.
+ * Only ever used when there is no narrator to make the call.
+ */
+function understudyDead(directive, names) {
+    if (!/^FORCE:\s*(TRIUMPH|FATE)/m.test(directive)) return [];
+    const dead = [];
+    const re = /action lands on ([^\n.]+)/g;
+    let m;
+    while ((m = re.exec(directive))) {
+        const target = m[1].trim().replace(/[.,;]+$/, '');
+        const name = names.find(n => n.toLowerCase() === target.toLowerCase());
+        if (name && !dead.includes(name)) dead.push(name);
+    }
+    return dead;
+}
+
+module.exports = {
+    triage, narrate, epilogue, interviewWorld, compactWorld,
+    castBlock, parseState, looksLikeNoise, isRehash, namesIn, visibleFrom,
+    boundsMessage, citationHolds, trimWords,
+    GM_SYSTEM, TRIAGE_ACTION_SYSTEM, TARGET_EXAMPLES,
+    OFFLINE, WINDOW, MODEL_NARRATE, MODEL_TRIAGE,
+};
